@@ -1,0 +1,398 @@
+# Módulo Catalog
+
+Categorias e produtos (com imagens e variações). É o módulo que substitui o `Product` cru atual por uma entidade robusta o suficiente para alimentar vitrine, PDP e busca no front-end. Base: [Shared kernel](01-shared-kernel.md) (`AggregateRoot<Guid>`, `Slug`).
+
+```mermaid
+
+classDiagram
+    direction LR
+
+    class AggregateRoot~TId~ {
+        <<external>>
+    }
+
+    class Slug {
+        <<external>>
+    }
+
+    %% OrderCore.Api.Modules.Catalog.Domain.Entities
+    class Category {
+        +string Name
+        +Slug Slug
+        +Guid? ParentCategoryId
+        +string? Description
+        +int DisplayOrder
+        +bool Active
+        +Create(string name, Slug slug, Guid? parentCategoryId)$ Category
+        +Rename(string name, Slug slug) void
+        +ChangeDisplayOrder(int order) void
+        +Activate() void
+        +Deactivate() void
+    }
+
+    class Product {
+        +string Sku
+        +string Name
+        +Slug Slug
+        +string? ShortDescription
+        +string? Description
+        +Guid CategoryId
+        +string? Brand
+        +decimal CurrentPrice
+        +decimal? CompareAtPrice
+        +string Currency
+        +int? WeightGrams
+        +ProductStatus Status
+        +bool Active
+        +IReadOnlyCollection~ProductImage~ Images
+        +IReadOnlyCollection~ProductVariant~ Variants
+        +Create(string sku, string name, Slug slug, Guid categoryId, decimal currentPrice, string currency)$ Product
+        +ChangePrice(decimal newPrice) void
+        +UpdateDetails(string name, string? shortDescription, string? description, string? brand) void
+        +Publish() void
+        +Discontinue() void
+        +AddImage(string url, string? altText, bool isPrimary) void
+        +RemoveImage(Guid imageId) void
+        +ReorderImages(IReadOnlyList~Guid~ orderedImageIds) void
+        +AddVariant(string sku, string name, string attributesJson, decimal additionalPrice) void
+        +RemoveVariant(Guid variantId) void
+    }
+
+    class ProductImage {
+        +string Url
+        +string? AltText
+        +int DisplayOrder
+        +bool IsPrimary
+    }
+
+    class ProductVariant {
+        +string Sku
+        +string Name
+        +string AttributesJson
+        +decimal AdditionalPrice
+        +bool Active
+    }
+
+
+    %% OrderCore.Api.Modules.Catalog.Domain.Enums
+    class ProductStatus {
+        <<enumeration>>
+        Draft
+        Active
+        Discontinued
+    }
+
+
+    %% OrderCore.Api.Modules.Catalog.Domain.Events
+    class ProductCreated {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid ProductId
+    }
+
+    class ProductPriceChanged {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid ProductId
+        +decimal OldPrice
+        +decimal NewPrice
+    }
+
+    class ProductPublished {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid ProductId
+    }
+
+
+    %% OrderCore.Api.Modules.Catalog.Application.Contracts
+    class IProductRepository {
+        <<interface>>
+        +GetByIdAsync(Guid productId) Task~Product?~
+        +GetBySkuAsync(string sku) Task~Product?~
+        +ListAsync(ListProductsFilter filter) Task~IReadOnlyList~Product~~
+        +AddAsync(Product product) Task
+        +SaveChangesAsync() Task
+    }
+
+    class ICategoryRepository {
+        <<interface>>
+        +GetByIdAsync(Guid categoryId) Task~Category?~
+        +ListAsync() Task~IReadOnlyList~Category~~
+        +AddAsync(Category category) Task
+        +SaveChangesAsync() Task
+    }
+
+
+    %% OrderCore.Api.Modules.Catalog.Application.DTOs
+    class CreateProductCommand {
+        +string Sku
+        +string Name
+        +Guid CategoryId
+        +decimal CurrentPrice
+        +string Currency
+    }
+
+    class UpdateProductCommand {
+        +string Name
+        +string? ShortDescription
+        +string? Description
+        +string? Brand
+    }
+
+    class ListProductsFilter {
+        +Guid? CategoryId
+        +bool? Active
+        +string? SearchTerm
+        +int Page
+        +int PageSize
+    }
+
+    class ProductOutput {
+        +Guid Id
+        +string Sku
+        +string Name
+        +decimal CurrentPrice
+        +decimal? CompareAtPrice
+        +ProductStatus Status
+    }
+
+    class CreateCategoryCommand {
+        +string Name
+        +Guid? ParentCategoryId
+    }
+
+    class CategoryOutput {
+        +Guid Id
+        +string Name
+        +string Slug
+    }
+
+
+    %% OrderCore.Api.Modules.Catalog.Application.UseCases
+    class CreateProductUseCase {
+        -IProductRepository products
+        -ICategoryRepository categories
+        +ExecuteAsync(CreateProductCommand command) Task~ProductOutput~
+    }
+
+    class UpdateProductUseCase {
+        -IProductRepository products
+        +ExecuteAsync(Guid productId, UpdateProductCommand command) Task~ProductOutput~
+    }
+
+    class ChangeProductPriceUseCase {
+        -IProductRepository products
+        +ExecuteAsync(Guid productId, decimal newPrice) Task~ProductOutput~
+    }
+
+    class PublishProductUseCase {
+        -IProductRepository products
+        +ExecuteAsync(Guid productId) Task~ProductOutput~
+    }
+
+    class GetProductByIdUseCase {
+        -IProductRepository products
+        +ExecuteAsync(Guid productId) Task~ProductOutput~
+    }
+
+    class ListProductsUseCase {
+        -IProductRepository products
+        +ExecuteAsync(ListProductsFilter filter) Task~IReadOnlyList~ProductOutput~~
+    }
+
+    class CreateCategoryUseCase {
+        -ICategoryRepository categories
+        +ExecuteAsync(CreateCategoryCommand command) Task~CategoryOutput~
+    }
+
+    class ListCategoriesUseCase {
+        -ICategoryRepository categories
+        +ExecuteAsync() Task~IReadOnlyList~CategoryOutput~~
+    }
+
+
+    %% OrderCore.Api.Modules.Catalog
+    class CatalogDependencyInjection {
+        <<static>>
+        +AddCatalogModule(IServiceCollection services)$ IServiceCollection
+    }
+
+
+    %% OrderCore.Api.Modules.Catalog.Infrastructure.Persistence
+    class ProductPersistenceModel {
+        +Guid Id
+        +string Sku
+        +string Name
+        +string Slug
+        +Guid CategoryId
+        +decimal CurrentPrice
+        +decimal? CompareAtPrice
+        +string Status
+        +bool Active
+        +ICollection~ProductImagePersistenceModel~ Images
+        +ICollection~ProductVariantPersistenceModel~ Variants
+    }
+
+    class ProductImagePersistenceModel {
+        +Guid Id
+        +Guid ProductId
+        +string Url
+        +int DisplayOrder
+        +bool IsPrimary
+    }
+
+    class ProductVariantPersistenceModel {
+        +Guid Id
+        +Guid ProductId
+        +string Sku
+        +decimal AdditionalPrice
+    }
+
+    class CategoryPersistenceModel {
+        +Guid Id
+        +string Name
+        +string Slug
+        +Guid? ParentCategoryId
+        +bool Active
+    }
+
+    class ProductMapper {
+        +ToDomain(ProductPersistenceModel model) Product
+        +ToPersistence(Product domain) ProductPersistenceModel
+        +ApplyChanges(Product domain, ProductPersistenceModel model) void
+    }
+
+    class CategoryMapper {
+        +ToDomain(CategoryPersistenceModel model) Category
+        +ToPersistence(Category domain) CategoryPersistenceModel
+    }
+
+    class CatalogDbContext {
+        +DbSet~ProductPersistenceModel~ Products
+        +DbSet~CategoryPersistenceModel~ Categories
+        +SaveChangesAsync() Task~int~
+    }
+
+    class EfProductRepository {
+        -CatalogDbContext dbContext
+        -ProductMapper mapper
+    }
+
+    class EfCategoryRepository {
+        -CatalogDbContext dbContext
+        -CategoryMapper mapper
+    }
+
+
+    %% OrderCore.Api.Modules.Catalog.Presentation
+    class CatalogEndpoints {
+        <<static>>
+        +MapCatalogEndpoints(IEndpointRouteBuilder app)$ IEndpointRouteBuilder
+        +CreateProductAsync(CreateProductRequest request, CreateProductUseCase useCase) Task~IResult~
+        +UpdateProductAsync(Guid id, UpdateProductRequest request, UpdateProductUseCase useCase) Task~IResult~
+        +PublishProductAsync(Guid id, PublishProductUseCase useCase) Task~IResult~
+        +GetProductByIdAsync(Guid id, GetProductByIdUseCase useCase) Task~IResult~
+        +ListProductsAsync(ListProductsFilter filter, ListProductsUseCase useCase) Task~IResult~
+        +CreateCategoryAsync(CreateCategoryRequest request, CreateCategoryUseCase useCase) Task~IResult~
+        +ListCategoriesAsync(ListCategoriesUseCase useCase) Task~IResult~
+    }
+
+    class CreateProductRequest {
+        +string Sku
+        +string Name
+        +Guid CategoryId
+        +decimal CurrentPrice
+    }
+
+    class UpdateProductRequest {
+        +string Name
+        +string? ShortDescription
+        +string? Brand
+    }
+
+    class CreateCategoryRequest {
+        +string Name
+        +Guid? ParentCategoryId
+    }
+
+    class ProductResponse {
+        +Guid Id
+        +string Sku
+        +string Name
+        +decimal CurrentPrice
+        +decimal? CompareAtPrice
+        +string Status
+        +IReadOnlyList~string~ ImageUrls
+    }
+
+    class CategoryResponse {
+        +Guid Id
+        +string Name
+        +string Slug
+    }
+
+    class ProductPresenter {
+        +ToResponse(ProductOutput output) ProductResponse
+    }
+
+    class CategoryPresenter {
+        +ToResponse(CategoryOutput output) CategoryResponse
+    }
+
+
+    AggregateRoot~TId~ <|-- Category
+    AggregateRoot~TId~ <|-- Product
+    Category "1" o-- "0..*" Category : subcategories
+    Category "1" --> "0..*" Product
+    Product "1" *-- "0..*" ProductImage
+    Product "1" *-- "0..*" ProductVariant
+    Product --> ProductStatus
+    Product --> Slug
+    Category --> Slug
+    Product ..> ProductCreated : raises
+    Product ..> ProductPriceChanged : raises
+    Product ..> ProductPublished : raises
+
+    CreateProductUseCase --> IProductRepository
+    CreateProductUseCase --> ICategoryRepository
+    UpdateProductUseCase --> IProductRepository
+    ChangeProductPriceUseCase --> IProductRepository
+    PublishProductUseCase --> IProductRepository
+    GetProductByIdUseCase --> IProductRepository
+    ListProductsUseCase --> IProductRepository
+    CreateCategoryUseCase --> ICategoryRepository
+    ListCategoriesUseCase --> ICategoryRepository
+
+    IProductRepository <|.. EfProductRepository
+    ICategoryRepository <|.. EfCategoryRepository
+    EfProductRepository --> CatalogDbContext
+    EfProductRepository --> ProductMapper
+    EfCategoryRepository --> CatalogDbContext
+    EfCategoryRepository --> CategoryMapper
+    ProductMapper --> ProductPersistenceModel
+    ProductMapper --> Product
+    CategoryMapper --> CategoryPersistenceModel
+    CategoryMapper --> Category
+    CatalogDbContext --> ProductPersistenceModel
+    CatalogDbContext --> CategoryPersistenceModel
+
+    CatalogDependencyInjection --> CreateProductUseCase : registers
+    CatalogDependencyInjection --> IProductRepository : registers
+
+    CatalogEndpoints --> CreateProductUseCase
+    CatalogEndpoints --> UpdateProductUseCase
+    CatalogEndpoints --> PublishProductUseCase
+    CatalogEndpoints --> ListProductsUseCase
+    CatalogEndpoints --> CreateCategoryUseCase
+    CatalogEndpoints --> ProductPresenter
+    CatalogEndpoints --> CategoryPresenter
+    ProductPresenter --> ProductResponse
+    CategoryPresenter --> CategoryResponse
+
+```
+
+## Consumido por outros módulos
+
+- **Orders** lê produtos através de `IProductRepository` (chamado de dentro de um `ProductCatalogAdapter` que implementa o `IProductCatalog` do próprio módulo Orders) — ver [05-orders.md](05-orders.md).
+- **Inventory** referencia produtos apenas pelo `ProductId` (sem depender de `Product`) — ver [04-inventory.md](04-inventory.md).
