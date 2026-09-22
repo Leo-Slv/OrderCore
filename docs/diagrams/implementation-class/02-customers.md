@@ -21,13 +21,14 @@ classDiagram
         +string Email
         +string? Phone
         +string? DocumentNumber
+        +string PasswordHash
         +bool Active
         +DateTimeOffset? EmailVerifiedAt
         +DateTimeOffset CreatedAt
         +DateTimeOffset UpdatedAt
         +IReadOnlyCollection~CustomerAddress~ Addresses
         +IReadOnlyCollection~CustomerPaymentMethod~ PaymentMethods
-        +Create(string name, string email)$ Customer
+        +Create(string name, string email, string passwordHash)$ Customer
         +UpdateProfile(string name, string? phone, string? documentNumber) void
         +VerifyEmail(DateTimeOffset now) void
         +Activate() void
@@ -48,7 +49,8 @@ classDiagram
         +bool IsDefaultShipping
         +bool IsDefaultBilling
         +DateTimeOffset CreatedAt
-        +Create(string label, string recipientName, string? phone, Address address)$ CustomerAddress
+        +DateTimeOffset UpdatedAt
+        +Create(string label, string recipientName, string? phone, Address address, DateTimeOffset now)$ CustomerAddress
         +UpdateContactInfo(string recipientName, string? phone) void
         +MarkAsDefaultShipping() void
         +UnmarkAsDefaultShipping() void
@@ -293,6 +295,10 @@ classDiagram
 ## Comportamento das entidades filhas
 
 `CustomerAddress` e `CustomerPaymentMethod` deixaram de ser bags de propriedades: `Customer.SetDefaultShippingAddress`/`SetDefaultBillingAddress`/`AddPaymentMethod` delegam para `MarkAsDefaultShipping`/`MarkAsDefaultBilling`/`MarkAsDefault` no filho correspondente (e desmarcam o anterior), em vez de mexer nos campos diretamente a partir do agregado. `CustomerPaymentMethod.IsExpired(now)` existe porque comparar mês/ano de expiração é uma regra de negócio, não um detalhe de apresentação — não deveria ser recalculada em cada lugar que precisa checar isso.
+
+## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
+
+`PasswordHash` (em `Customer`) e `UpdatedAt` (em `CustomerAddress`) já existiam no documento de modelagem de banco (seção 4.1/4.2) mas não tinham chegado a este diagrama — adicionados agora, junto com o parâmetro `now`/`passwordHash` que faltava nos respectivos `Create` para que os campos possam de fato ser preenchidos. `CustomerPaymentMethod` já batia com o documento (nenhum `updated_at` lá, então nenhum foi adicionado aqui).
 
 ## Consumido por outros módulos
 

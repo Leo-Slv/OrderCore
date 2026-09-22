@@ -19,17 +19,23 @@ classDiagram
     %% OrderCore.Api.Modules.Payments.Domain.Entities
     class Payment {
         +Guid OrderId
+        +Guid? CustomerPaymentMethodId
         +decimal Amount
         +string Currency
         +PaymentStatus Status
         +string IdempotencyKey
+        +string Provider
         +string? ProviderReference
         +string? FailureReason
+        +DateTimeOffset CreatedAt
+        +DateTimeOffset UpdatedAt
+        +DateTimeOffset? AuthorizedAt
+        +DateTimeOffset? CapturedAt
         +IReadOnlyCollection~Refund~ Refunds
-        +Create(Guid orderId, decimal amount, string currency, string idempotencyKey)$ Payment
+        +Create(Guid orderId, decimal amount, string currency, string idempotencyKey, string provider, Guid? customerPaymentMethodId, DateTimeOffset now)$ Payment
         +MarkProcessing() void
-        +Authorize(string providerReference) void
-        +Capture() void
+        +Authorize(string providerReference, DateTimeOffset now) void
+        +Capture(DateTimeOffset now) void
         +Fail(string reason) void
         +Refund() void
         +RequestRefund(decimal amount, string reason) Refund
@@ -408,6 +414,10 @@ classDiagram
     PaymentPresenter --> RefundResponse
 
 ```
+
+## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
+
+O documento de modelagem de banco já especificava `customer_payment_method_id`, `provider`, `authorized_at`, `captured_at`, `created_at` e `updated_at` em `PAYMENTS` (seção 7.1) — nenhum tinha chegado a este diagrama, que ficava sem qualquer timestamp. Adicionados agora, com `Authorize`/`Capture` passando a receber `now` para preencher `AuthorizedAt`/`CapturedAt`, e `Create` passando a receber `provider`, `customerPaymentMethodId` (nullable — nem todo pagamento usa um cartão salvo) e `now`.
 
 ## Invariante a confirmar
 

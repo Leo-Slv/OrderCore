@@ -14,12 +14,13 @@ classDiagram
     %% OrderCore.Api.Modules.Inventory.Domain.Entities
     class StockItem {
         +Guid ProductId
+        +Guid? ProductVariantId
         +int QuantityOnHand
         +int QuantityReserved
         +int QuantityAvailable
         +int ReorderLevel
         +DateTimeOffset UpdatedAt
-        +Create(Guid productId, int initialQuantity)$ StockItem
+        +Create(Guid productId, int initialQuantity, Guid? productVariantId)$ StockItem
         +Receive(int quantity) void
         +TryReserve(int quantity) bool
         +Release(int quantity) void
@@ -35,9 +36,11 @@ classDiagram
         +ReservationStatus Status
         +DateTimeOffset ReservedAt
         +DateTimeOffset? ExpiresAt
+        +DateTimeOffset? ReleasedAt
+        +DateTimeOffset? ConsumedAt
         +Create(Guid productId, Guid orderId, Guid orderItemId, int quantity, DateTimeOffset now)$ InventoryReservation
-        +Release() void
-        +Consume() void
+        +Release(DateTimeOffset now) void
+        +Consume(DateTimeOffset now) void
         +Expire() void
     }
 
@@ -262,6 +265,10 @@ classDiagram
     StockItemPresenter --> StockItemResponse
 
 ```
+
+## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
+
+O documento de modelagem de banco já especificava `product_variant_id` em `STOCK_ITEMS` (seção 5.5, para estoque por variação) e `released_at`/`consumed_at` em `INVENTORY_RESERVATIONS` (seção 6.5), mas nenhum dos dois tinha chegado a este diagrama. Adicionados agora — `Release`/`Consume` passam a receber `now` para poder preencher o respectivo timestamp (`Expire` não precisa, já que o documento não define um `expired_at` separado: o status `Expired` já é suficiente).
 
 ## Consumido por outros módulos
 
