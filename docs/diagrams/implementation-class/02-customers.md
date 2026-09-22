@@ -48,6 +48,12 @@ classDiagram
         +bool IsDefaultShipping
         +bool IsDefaultBilling
         +DateTimeOffset CreatedAt
+        +Create(string label, string recipientName, string? phone, Address address)$ CustomerAddress
+        +UpdateContactInfo(string recipientName, string? phone) void
+        +MarkAsDefaultShipping() void
+        +UnmarkAsDefaultShipping() void
+        +MarkAsDefaultBilling() void
+        +UnmarkAsDefaultBilling() void
     }
 
     class CustomerPaymentMethod {
@@ -59,6 +65,10 @@ classDiagram
         +int ExpiryYear
         +bool IsDefault
         +DateTimeOffset CreatedAt
+        +Create(string provider, string providerCustomerReference, string brand, string last4Digits, int expiryMonth, int expiryYear)$ CustomerPaymentMethod
+        +IsExpired(DateTimeOffset now) bool
+        +MarkAsDefault() void
+        +UnmarkAsDefault() void
     }
 
 
@@ -279,6 +289,10 @@ classDiagram
     CustomerPresenter --> CustomerAddressResponse
 
 ```
+
+## Comportamento das entidades filhas
+
+`CustomerAddress` e `CustomerPaymentMethod` deixaram de ser bags de propriedades: `Customer.SetDefaultShippingAddress`/`SetDefaultBillingAddress`/`AddPaymentMethod` delegam para `MarkAsDefaultShipping`/`MarkAsDefaultBilling`/`MarkAsDefault` no filho correspondente (e desmarcam o anterior), em vez de mexer nos campos diretamente a partir do agregado. `CustomerPaymentMethod.IsExpired(now)` existe porque comparar mês/ano de expiração é uma regra de negócio, não um detalhe de apresentação — não deveria ser recalculada em cada lugar que precisa checar isso.
 
 ## Consumido por outros módulos
 

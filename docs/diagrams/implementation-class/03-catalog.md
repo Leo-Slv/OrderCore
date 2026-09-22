@@ -63,6 +63,10 @@ classDiagram
         +string? AltText
         +int DisplayOrder
         +bool IsPrimary
+        +Create(string url, string? altText, bool isPrimary)$ ProductImage
+        +ChangeAltText(string? altText) void
+        +MarkAsPrimary() void
+        +UnmarkAsPrimary() void
     }
 
     class ProductVariant {
@@ -71,6 +75,10 @@ classDiagram
         +string AttributesJson
         +decimal AdditionalPrice
         +bool Active
+        +Create(string sku, string name, string attributesJson, decimal additionalPrice)$ ProductVariant
+        +ChangeAdditionalPrice(decimal newAdditionalPrice) void
+        +Activate() void
+        +Deactivate() void
     }
 
 
@@ -391,6 +399,10 @@ classDiagram
     CategoryPresenter --> CategoryResponse
 
 ```
+
+## Comportamento das entidades filhas
+
+`ProductImage` e `ProductVariant` deixaram de ser bags de propriedades: `Product.AddImage`/`ReorderImages` delegam a promoção/rebaixamento de imagem principal para `MarkAsPrimary`/`UnmarkAsPrimary` no filho, em vez de mexer no campo `IsPrimary` diretamente a partir do agregado. `ProductVariant.Activate`/`Deactivate` permite desligar uma variação específica sem afetar o produto inteiro. `AttributesJson` continua como string por simplicidade nesta fase — se o número de atributos consultados crescer, vale considerar um acessor tipado em vez de expor o JSON bruto para quem consome a entidade.
 
 ## Consumido por outros módulos
 

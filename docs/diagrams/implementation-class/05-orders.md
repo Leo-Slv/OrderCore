@@ -106,6 +106,8 @@ classDiagram
         +decimal DiscountAmount
         +decimal Total
         +IncreaseQuantity(int quantity) void
+        +DecreaseQuantity(int quantity) void
+        +ApplyDiscount(decimal amount) void
     }
 
 
@@ -482,6 +484,10 @@ classDiagram
     OrderPresenter --> OrderResponse
 
 ```
+
+## Comportamento de OrderItem
+
+`OrderItem` ganhou `DecreaseQuantity` (simétrico ao `IncreaseQuantity` já existente — sem ele, reduzir a quantidade de uma linha exigia remover e recriar o item inteiro) e `ApplyDiscount(decimal amount)`, que deve validar `0 <= amount <= UnitPrice * Quantity` antes de aceitar o desconto — a propriedade `DiscountAmount` só deve mudar através desse método, nunca setada diretamente. `Total` passa a ser `UnitPrice * Quantity - DiscountAmount`.
 
 ## Fluxo de checkout (leitura sugerida)
 

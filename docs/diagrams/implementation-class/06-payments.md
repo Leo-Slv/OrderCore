@@ -409,6 +409,10 @@ classDiagram
 
 ```
 
+## Invariante a confirmar
+
+`Refund` já não é anêmica (`Complete`/`Fail`), mas a regra "o valor do estorno não pode exceder o saldo reembolsável do pagamento" deve ser validada dentro de `Payment.RequestRefund` (o dono do invariante, que conhece `Amount` e os `Refunds` já concedidos) — não só na camada de Application.
+
 ## Consumido por outros módulos
 
 - **Orders** chama `CreatePaymentUseCase` de dentro de um `PaymentGatewayAdapter` (implementa o `IPaymentGateway` do próprio Orders) e reage a `PaymentAuthorized`/`PaymentFailed` publicados pelo `OutboxPublisherBackgroundService` — ver [05-orders.md](05-orders.md). `Payment.OrderId` guarda apenas o id, nunca uma referência a `Order`.
