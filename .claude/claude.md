@@ -17,6 +17,8 @@ Existing modules include:
 - Catalog
 - Inventory
 - Payments
+- AuditLogs (cross-cutting/technical module, not a business bounded
+  context — mirrors CourseCore's own AuditLogs module)
 
 Cross-cutting functionality belongs under:
 
@@ -185,8 +187,15 @@ same way other module dependencies are registered.
 ## Cross-Cutting Concerns
 
 Cross-cutting concerns shared across multiple business modules belong under
-`Shared/` (currently the domain kernel: `AggregateRoot`, `Entity`,
-`IDomainEvent`).
+`Shared/`, split the same way a module is (`Shared/Domain`,
+`Shared/Application`, `Shared/Presentation`):
+
+- `Shared/Domain` — the domain kernel: `AggregateRoot`, `Entity`,
+  `IDomainEvent`.
+- `Shared/Application` — technical DTOs used by more than one module, e.g.
+  `PagedResult<T>`.
+- `Shared/Presentation` — technical response shapes used by more than one
+  module, e.g. `PagedResponse<T>`.
 
 Do not move module-specific business logic into `Shared/` merely for reuse.
 

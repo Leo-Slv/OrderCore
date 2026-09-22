@@ -305,6 +305,15 @@ A intenção é possibilitar sua futura extração para o projeto independente:
 PayCore
 ```
 
+Além dos módulos de negócio acima, existe um módulo técnico/transversal,
+`AuditLogs`, espelhando o mesmo módulo do CourseCore (registro de ações
+como `OrderCreated`, `PaymentAuthorized`, etc. via `IAuditLogService`).
+Ele não é um bounded context de negócio como Orders/Payments — é
+infraestrutura de observabilidade (seção 30) consumida pelos demais
+módulos através de uma Application Contract, seguindo a mesma estrutura
+`Modules/AuditLogs/{Application,Domain,Infrastructure,Presentation}` da
+seção 5.1.
+
 ---
 
 # 7. Regra fundamental de modularização
