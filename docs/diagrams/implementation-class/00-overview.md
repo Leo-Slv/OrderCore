@@ -9,19 +9,26 @@ graph LR
     Inventory["Inventory module\n(Domain · Application · Infrastructure · Presentation)"]
     Orders["Orders module\n(Domain · Application · Infrastructure · Presentation)"]
     Payments["Payments module\n(Domain · Application · Infrastructure · Presentation)"]
-    Shared["Shared kernel\n(Entity, AggregateRoot, IDomainEvent, Address, Slug)"]
+    AuditLogs["AuditLogs module\n(technical/cross-cutting, not a business bounded context)"]
+    Shared["Shared kernel\n(Entity, AggregateRoot, IDomainEvent, Address, Slug, PagedResult, PagedResponse)"]
 
     Orders -->|IProductCatalog| Catalog
     Orders -->|IInventoryService| Inventory
     Orders -->|IPaymentGateway| Payments
     Orders -.->|"customer_id (sem navegação)"| Customers
     Payments -.->|IntegrationEvents via Outbox| Orders
+    Orders -.->|"IAuditLogService (ainda não chamado)"| AuditLogs
+    Payments -.->|"IAuditLogService (ainda não chamado)"| AuditLogs
+    Inventory -.->|"IAuditLogService (ainda não chamado)"| AuditLogs
+    Catalog -.->|"IAuditLogService (ainda não chamado)"| AuditLogs
+    Customers -.->|"IAuditLogService (ainda não chamado)"| AuditLogs
 
     Customers --> Shared
     Catalog --> Shared
     Inventory --> Shared
     Orders --> Shared
     Payments --> Shared
+    AuditLogs --> Shared
 ```
 
 ## Diagramas detalhados (um por módulo, cada um pequeno o suficiente para renderizar)
@@ -32,5 +39,8 @@ graph LR
 4. [Inventory](04-inventory.md) — saldo de estoque e reservas.
 5. [Orders](05-orders.md) — pedido, itens, ciclo de vida, adapters para os outros módulos.
 6. [Payments](06-payments.md) — pagamento, estornos, outbox de eventos de integração.
+7. [AuditLogs](07-auditlogs.md) — registro de ações via `IAuditLogService`, listagem paginada. Único diagrama desta pasta que reflete código já implementado.
+
+Diferente dos módulos 2-6 (blueprint de arquitetura, seção "Diagrama de implementação" no índice), `AuditLogs` já existe no código — seu diagrama é uma referência do estado atual, não um alvo a construir.
 
 Cada arquivo é autocontido: quando um módulo depende de outro (ex.: Orders → Catalog), a classe externa aparece como um "stub" marcado `<<external>>`, só com a assinatura que importa para aquele módulo — o detalhe completo dela está no arquivo do módulo dono.
