@@ -1,0 +1,46 @@
+networks:
+  ordercore-net:
+    driver: bridge
+
+services:
+  # Fase 1 do ambiente local (seção 41 do contexto do projeto): apenas
+  # OrderCore + PostgreSQL. Redis e RabbitMQ entram no compose somente
+  # quando um módulo passar a depender de fato deles (cache/locks reais e
+  # comunicação assíncrona real), não antecipadamente.
+  postgres:
+    image: postgres:16-alpine
+    container_name: ordercore-postgres
+    environment:
+      POSTGRES_DB: ordercore
+      POSTGRES_USER: ordercore
+      POSTGRES_PASSWORD: ordercore
+    ports:
+      - "5432:5432"
+    volumes:
+      - ordercore-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ordercore -d ordercore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ordercore-net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ordercore-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__OrderCoreDb: "Host=postgres;Port=5432;Database=ordercore;Username=ordercore;Password=ordercore"
+    ports:
+      - "8080:8080"
+    networks:
+      - ordercore-net
+
+volumes:
+  ordercore-postgres-data:

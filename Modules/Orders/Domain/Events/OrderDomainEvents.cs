@@ -1,0 +1,25 @@
+using OrderCore.Api.Shared.Domain;
+
+namespace OrderCore.Api.Modules.Orders.Domain.Events;
+
+/// <summary>
+/// Domain events raised by the <see cref="Entities.Order"/> aggregate
+/// (section 18 of the project context). These are dispatched in-process,
+/// within the same unit of work. When the system evolves towards
+/// cross-module/cross-service communication, a subset of these facts is
+/// translated into Integration Events
+/// (Modules/Payments/Application/Contracts/IntegrationEvents) published
+/// through the Transactional Outbox — the two are deliberately kept as
+/// separate types.
+/// </summary>
+public sealed record OrderCreated(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId, Guid CustomerId)
+    : IDomainEvent;
+
+public sealed record OrderConfirmed(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)
+    : IDomainEvent;
+
+public sealed record OrderCancelled(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId, string Reason)
+    : IDomainEvent;
+
+public sealed record OrderPaymentFailed(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId, string Reason)
+    : IDomainEvent;
