@@ -65,6 +65,7 @@ classDiagram
 
     %% OrderCore.Api.Modules.Orders.Domain.Entities
     class Order {
+        +string OrderNumber
         +Guid CustomerId
         +OrderStatus Status
         +IReadOnlyCollection~OrderItem~ Items
@@ -82,7 +83,9 @@ classDiagram
         +DateTimeOffset UpdatedAt
         +DateTimeOffset? ConfirmedAt
         +DateTimeOffset? CancelledAt
-        +Create(Guid customerId, string currency, DateTimeOffset now)$ Order
+        +DateTimeOffset? ShippedAt
+        +DateTimeOffset? DeliveredAt
+        +Create(Guid customerId, string currency, string orderNumber, DateTimeOffset now)$ Order
         +AddItem(Guid productId, Guid? productVariantId, string productSku, string productName, string? productImageUrl, decimal unitPrice, int quantity) void
         +RemoveItem(Guid productId) void
         +SetAddresses(Address shippingAddress, Address billingAddress) void
@@ -183,6 +186,11 @@ classDiagram
         +RequestPaymentAsync(Guid orderId, decimal amount, string currency, string idempotencyKey) Task~Guid~
     }
 
+    class IOrderNumberGenerator {
+        <<interface>>
+        +NextAsync() Task~string~
+    }
+
 
     %% OrderCore.Api.Modules.Orders.Application.DTOs
     class CreateOrderItem {
@@ -218,6 +226,7 @@ classDiagram
     class CreateOrderHandler {
         -IOrderRepository orderRepository
         -IProductCatalog productCatalog
+        -IOrderNumberGenerator orderNumbers
         -TimeProvider timeProvider
         +HandleAsync(CreateOrderCommand command) Task~CreateOrderResult~
     }
@@ -325,6 +334,11 @@ classDiagram
         -IDomainEventDispatcher dispatcher
     }
 
+    class SequentialOrderNumberGenerator {
+        -OrdersDbContext dbContext
+        +NextAsync() Task~string~
+    }
+
 
     %% OrderCore.Api.Modules.Orders.Infrastructure.Adapters
     class ProductCatalogAdapter {
@@ -414,6 +428,7 @@ classDiagram
 
     class OrderResponse {
         +Guid Id
+        +string OrderNumber
         +string Status
         +decimal TotalAmount
         +string Currency
@@ -437,6 +452,7 @@ classDiagram
 
     CreateOrderHandler --> IOrderRepository
     CreateOrderHandler --> IProductCatalog
+    CreateOrderHandler --> IOrderNumberGenerator
     CreateOrderHandler ..> Order : creates
     SetOrderAddressesUseCase --> IOrderRepository
     RequestOrderPaymentUseCase --> IOrderRepository
@@ -456,6 +472,8 @@ classDiagram
     EfOrderRepository --> OrdersDbContext
     EfOrderRepository --> OrderMapper
     EfOrderRepository --> IDomainEventDispatcher : dispatches after save
+    IOrderNumberGenerator <|.. SequentialOrderNumberGenerator
+    SequentialOrderNumberGenerator --> OrdersDbContext
     OrderMapper --> OrderPersistenceModel
     OrderMapper --> Order
     OrdersDbContext --> OrderPersistenceModel
@@ -477,6 +495,7 @@ classDiagram
 
     OrdersDependencyInjection --> CreateOrderHandler : registers
     OrdersDependencyInjection --> IOrderRepository : registers
+    OrdersDependencyInjection --> IOrderNumberGenerator : registers
 
     OrdersEndpoints --> CreateOrderHandler
     OrdersEndpoints --> SetOrderAddressesUseCase
@@ -496,6 +515,8 @@ classDiagram
 ## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
 
 O documento de modelagem de banco já especificava `internal_notes` e `updated_at` em `ORDERS` (seção 6.1) e `product_variant_id` em `ORDER_ITEMS` (seção 6.2), mas nenhum tinha chegado a este diagrama. Adicionados agora: `InternalNotes` ganhou `SetInternalNotes` como único jeito de alterá-lo (mesmo padrão de encapsulamento do resto do agregado); `UpdatedAt` fica por conta da camada de persistência a cada gravação, sem entrar na assinatura dos métodos de transição; `ProductVariantId` foi ao mesmo tempo adicionado em `OrderItem` e no parâmetro de `Order.AddItem`, já que é o único lugar onde um `OrderItem` é construído.
+
+`OrderNumber`, `ShippedAt` e `DeliveredAt` não existiam em nenhum dos dois documentos — acrescentados em ambos agora. `Id` (Guid) não é algo que se mostre a um cliente numa confirmação de pedido; `OrderNumber` é o identificador legível (ex.: `"ORD-2024-000123"`), gerado por `IOrderNumberGenerator` (novo contrato, com `SequentialOrderNumberGenerator` como implementação apoiada numa sequence do PostgreSQL) e passado para `Order.Create`. `ShippedAt`/`DeliveredAt` seguem o mesmo raciocínio de `ConfirmedAt`/`CancelledAt`: são os dois status mais relevantes para uma tela de acompanhamento do cliente, então ganham timestamp próprio em vez de depender só do histórico (`ORDER_STATUS_HISTORY`); `Ship`/`Deliver` já recebiam `now`, então nenhuma assinatura precisou mudar.
 
 ## Fluxo de checkout (leitura sugerida)
 

@@ -49,6 +49,7 @@ classDiagram
         +decimal? DepthCm
         +ProductStatus Status
         +bool Active
+        +DateTimeOffset? PublishedAt
         +DateTimeOffset CreatedAt
         +DateTimeOffset UpdatedAt
         +IReadOnlyCollection~ProductImage~ Images
@@ -56,7 +57,7 @@ classDiagram
         +Create(string sku, string name, Slug slug, Guid categoryId, decimal currentPrice, string currency, DateTimeOffset now)$ Product
         +ChangePrice(decimal newPrice) void
         +UpdateDetails(string name, string? shortDescription, string? description, string? brand) void
-        +Publish() void
+        +Publish(DateTimeOffset now) void
         +Discontinue() void
         +AddImage(string url, string? altText, bool isPrimary) void
         +RemoveImage(Guid imageId) void
@@ -417,6 +418,8 @@ classDiagram
 ## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
 
 O documento de modelagem de banco (seções 5.1-5.4) já especificava `height_cm`/`width_cm`/`depth_cm` em `PRODUCTS` (para cálculo de frete) e `created_at`/`updated_at` em `CATEGORIES`, `PRODUCTS`, `PRODUCT_IMAGES` e `PRODUCT_VARIANTS`, mas nenhum desses campos tinha chegado a este diagrama — adicionados agora, com o parâmetro `now` correspondente nos respectivos `Create` para que `CreatedAt` seja de fato preenchido na criação (`UpdatedAt` fica por conta da camada de persistência a cada gravação, sem precisar entrar na assinatura de cada método de mutação).
+
+`Product.PublishedAt` não existia em nenhum dos dois documentos — foi acrescentado em ambos (aqui e na seção 5.2 do docx) seguindo o mesmo padrão que `Order.ConfirmedAt`/`CancelledAt` já usa: a transição `Publish()` passou a receber `DateTimeOffset now` para poder registrar quando o produto saiu de `Draft` para `Active`, útil para ordenar "lançamentos recentes" na vitrine sem depender de `CreatedAt` (que pode ser bem anterior à publicação).
 
 ## Consumido por outros módulos
 

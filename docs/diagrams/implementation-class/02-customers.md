@@ -67,6 +67,7 @@ classDiagram
         +int ExpiryYear
         +bool IsDefault
         +DateTimeOffset CreatedAt
+        +DateTimeOffset UpdatedAt
         +Create(string provider, string providerCustomerReference, string brand, string last4Digits, int expiryMonth, int expiryYear)$ CustomerPaymentMethod
         +IsExpired(DateTimeOffset now) bool
         +MarkAsDefault() void
@@ -298,7 +299,7 @@ classDiagram
 
 ## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
 
-`PasswordHash` (em `Customer`) e `UpdatedAt` (em `CustomerAddress`) já existiam no documento de modelagem de banco (seção 4.1/4.2) mas não tinham chegado a este diagrama — adicionados agora, junto com o parâmetro `now`/`passwordHash` que faltava nos respectivos `Create` para que os campos possam de fato ser preenchidos. `CustomerPaymentMethod` já batia com o documento (nenhum `updated_at` lá, então nenhum foi adicionado aqui).
+`PasswordHash` (em `Customer`) e `UpdatedAt` (em `CustomerAddress`) já existiam no documento de modelagem de banco (seção 4.1/4.2) mas não tinham chegado a este diagrama — adicionados agora, junto com o parâmetro `now`/`passwordHash` que faltava nos respectivos `Create` para que os campos possam de fato ser preenchidos. `CustomerPaymentMethod.UpdatedAt` não existia em nenhum dos dois documentos — foi acrescentado em ambos por consistência com toda entidade mutável do sistema (`Customer`, `CustomerAddress`, `Category`, `Product` etc. já rastreiam `updated_at`); mantido como responsabilidade da camada de persistência, sem entrar na assinatura de `MarkAsDefault`/`UnmarkAsDefault`.
 
 ## Consumido por outros módulos
 
