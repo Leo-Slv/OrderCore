@@ -233,3 +233,31 @@ details.
 
 Do not change production architecture solely to make a test easier unless
 there is a justified design reason.
+
+## Documentation
+
+Whenever a new module, or a functionality significant enough to change the
+architecture (a new module, a new cross-module contract, a new persistence
+strategy, etc.), is added, update the documentation in the same change —
+do not treat it as a follow-up:
+
+- Add or update a diagram under `docs/diagrams/implementation-class/` for
+  the module (create `NN-<module>.md` following the existing numbered
+  files' format, one `classDiagram` per module) and update the index files
+  (`docs/diagrams/implementation-class.md` and
+  `docs/diagrams/implementation-class/00-overview.md`) to reference it.
+- Update `docs/architecture/ORDERCORE_CONTEXT.md` when the change affects
+  the module list, module boundaries, or an architectural decision
+  described there.
+- Update this file (`.claude/claude.md`) when the change affects the
+  module list or introduces a convention future work should follow (e.g. a
+  new `Shared/` subfolder, a new cross-cutting pattern).
+
+Keep the diagrams honest about what actually exists: a module diagram
+should say plainly whether it documents already-implemented code or a
+target/blueprint not yet built (see the note at the top of
+`docs/diagrams/implementation-class/07-auditlogs.md` for the pattern).
+
+Commit documentation updates separately from the code they document when
+practical, so the history reads as one commit per concern rather than one
+undifferentiated change.
