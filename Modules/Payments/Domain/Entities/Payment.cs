@@ -8,11 +8,18 @@ namespace OrderCore.Api.Modules.Payments.Domain.Entities;
 /// logically isolated from day one so it can eventually be extracted into
 /// the standalone PayCore service (section 22) without a rewrite: it does
 /// not reference Order, Customer or Product entities directly, only their
-/// ids.
+/// ids. Does not raise domain events (unlike Order/InventoryReservation):
+/// what Orders needs to react to is published as Integration Events via
+/// the outbox (<c>IOutboxWriter</c>), not the in-process
+/// <c>IDomainEventDispatcher</c> — see Docs/specs/payments/payment-processing.md.
 /// </summary>
 public sealed class Payment : AggregateRoot<Guid>
 {
+    private readonly List<Refund> _refunds = new();
+
     public Guid OrderId { get; private set; }
+
+    public Guid? CustomerPaymentMethodId { get; private set; }
 
     public decimal Amount { get; private set; }
 
@@ -26,25 +33,45 @@ public sealed class Payment : AggregateRoot<Guid>
     /// </summary>
     public string IdempotencyKey { get; private set; } = string.Empty;
 
+    public string Provider { get; private set; } = string.Empty;
+
     public string? ProviderReference { get; private set; }
 
     public string? FailureReason { get; private set; }
+
+    public DateTimeOffset CreatedAt { get; private set; }
+
+    public DateTimeOffset UpdatedAt { get; private set; }
+
+    public DateTimeOffset? AuthorizedAt { get; private set; }
+
+    public DateTimeOffset? CapturedAt { get; private set; }
+
+    public IReadOnlyCollection<Refund> Refunds => _refunds.AsReadOnly();
 
     private Payment()
     {
     }
 
-    private Payment(Guid id, Guid orderId, decimal amount, string currency, string idempotencyKey)
+    private Payment(
+        Guid id, Guid orderId, decimal amount, string currency, string idempotencyKey, string provider, Guid? customerPaymentMethodId,
+        DateTimeOffset now)
         : base(id)
     {
         OrderId = orderId;
         Amount = amount;
         Currency = currency;
         IdempotencyKey = idempotencyKey;
+        Provider = provider;
+        CustomerPaymentMethodId = customerPaymentMethodId;
+        CreatedAt = now;
+        UpdatedAt = now;
         Status = PaymentStatus.Pending;
     }
 
-    public static Payment Create(Guid orderId, decimal amount, string currency, string idempotencyKey)
+    public static Payment Create(
+        Guid orderId, decimal amount, string currency, string idempotencyKey, string provider, Guid? customerPaymentMethodId,
+        DateTimeOffset now)
     {
         if (amount <= 0)
         {
@@ -56,7 +83,12 @@ public sealed class Payment : AggregateRoot<Guid>
             throw new ArgumentException("An idempotency key is required.", nameof(idempotencyKey));
         }
 
-        var payment = new Payment(Guid.NewGuid(), orderId, amount, currency, idempotencyKey);
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            throw new ArgumentException("A provider is required.", nameof(provider));
+        }
+
+        var payment = new Payment(Guid.NewGuid(), orderId, amount, currency, idempotencyKey, provider, customerPaymentMethodId, now);
         payment.IncrementVersion();
         return payment;
     }
@@ -68,18 +100,20 @@ public sealed class Payment : AggregateRoot<Guid>
         IncrementVersion();
     }
 
-    public void Authorize(string providerReference)
+    public void Authorize(string providerReference, DateTimeOffset now)
     {
         EnsureStatus(PaymentStatus.Processing);
         Status = PaymentStatus.Authorized;
         ProviderReference = providerReference;
+        AuthorizedAt = now;
         IncrementVersion();
     }
 
-    public void Capture()
+    public void Capture(DateTimeOffset now)
     {
         EnsureStatus(PaymentStatus.Authorized);
         Status = PaymentStatus.Captured;
+        CapturedAt = now;
         IncrementVersion();
     }
 
@@ -102,6 +136,34 @@ public sealed class Payment : AggregateRoot<Guid>
         IncrementVersion();
     }
 
+    /// <summary>
+    /// <paramref name="now"/> is not in 06-payments.md's signature, but
+    /// <c>Refund.RequestedAt</c> needs a value — same class of gap as
+    /// <c>Customer.Create</c> gaining `now`. Validates the refundable-
+    /// balance invariant from the diagram's "Invariante a confirmar": the
+    /// requested amount plus every already-granted (non-failed) refund can
+    /// never exceed <see cref="Amount"/>.
+    /// </summary>
+    // Fully qualified return type: this class also has a method named
+    // `Refund` (matching 06-payments.md exactly), which shadows the type
+    // name `Refund` within the class body — a naming collision the diagram
+    // itself has, not a design change.
+    public global::OrderCore.Api.Modules.Payments.Domain.Entities.Refund RequestRefund(decimal amount, string reason, DateTimeOffset now)
+    {
+        EnsureStatus(PaymentStatus.Captured);
+
+        var alreadyRefunded = _refunds.Where(r => r.Status != RefundStatus.Failed).Sum(r => r.Amount);
+        if (amount > Amount - alreadyRefunded)
+        {
+            throw new InvalidOperationException("Refund amount exceeds the payment's refundable balance.");
+        }
+
+        var refund = global::OrderCore.Api.Modules.Payments.Domain.Entities.Refund.Create(amount, reason, now);
+        _refunds.Add(refund);
+        IncrementVersion();
+        return refund;
+    }
+
     private void EnsureStatus(PaymentStatus expected)
     {
         if (Status != expected)
@@ -109,5 +171,44 @@ public sealed class Payment : AggregateRoot<Guid>
             throw new InvalidOperationException(
                 $"Cannot transition payment '{Id}' from '{Status}' as if it were '{expected}'.");
         }
+    }
+
+    /// <summary>
+    /// Reconstructs a <see cref="Payment"/> from already-persisted state,
+    /// distinct from <see cref="Create"/> the same way
+    /// <c>Customer.Rehydrate</c> is (Shared kernel module).
+    /// </summary>
+    internal static Payment Rehydrate(
+        Guid id,
+        Guid orderId,
+        Guid? customerPaymentMethodId,
+        decimal amount,
+        string currency,
+        PaymentStatus status,
+        string idempotencyKey,
+        string provider,
+        string? providerReference,
+        string? failureReason,
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt,
+        DateTimeOffset? authorizedAt,
+        DateTimeOffset? capturedAt,
+        int version,
+        IEnumerable<Refund> refunds)
+    {
+        var payment = new Payment(id, orderId, amount, currency, idempotencyKey, provider, customerPaymentMethodId, createdAt)
+        {
+            Status = status,
+            ProviderReference = providerReference,
+            FailureReason = failureReason,
+            UpdatedAt = updatedAt,
+            AuthorizedAt = authorizedAt,
+            CapturedAt = capturedAt,
+            Version = version,
+        };
+
+        payment._refunds.AddRange(refunds);
+
+        return payment;
     }
 }
