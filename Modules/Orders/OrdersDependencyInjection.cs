@@ -1,9 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
+using OrderCore.Api.Modules.Orders.Domain.Events;
 using OrderCore.Api.Modules.Orders.Infrastructure.Adapters;
+using OrderCore.Api.Modules.Orders.Infrastructure.EventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Shared.Application.Abstractions;
 
 namespace OrderCore.Api.Modules.Orders;
 
@@ -22,9 +25,22 @@ public static class OrdersDependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 
         services.AddScoped<IOrderRepository, EfOrderRepository>();
+        services.AddScoped<IOrderNumberGenerator, SequentialOrderNumberGenerator>();
         services.AddScoped<IProductCatalog, ProductCatalogAdapter>();
+        services.AddScoped<IInventoryService, InventoryServiceAdapter>();
+
+        services.AddScoped<IDomainEventHandler<OrderCreated>, OrderStatusHistoryProjector>();
+        services.AddScoped<IDomainEventHandler<OrderConfirmed>, OrderStatusHistoryProjector>();
+        services.AddScoped<IDomainEventHandler<OrderCancelled>, OrderStatusHistoryProjector>();
+        services.AddScoped<IDomainEventHandler<OrderPaymentFailed>, OrderStatusHistoryProjector>();
 
         services.AddScoped<CreateOrderHandler>();
+        services.AddScoped<SetOrderAddressesUseCase>();
+        services.AddScoped<ConfirmOrderUseCase>();
+        services.AddScoped<MarkOrderPaymentFailedUseCase>();
+        services.AddScoped<CancelOrderUseCase>();
+        services.AddScoped<GetOrderByIdUseCase>();
+        services.AddScoped<ListCustomerOrdersUseCase>();
 
         return services;
     }

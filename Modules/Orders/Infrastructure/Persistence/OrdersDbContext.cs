@@ -16,9 +16,16 @@ public sealed class OrdersDbContext : DbContext
 
     public DbSet<OrderPersistenceModel> Orders => Set<OrderPersistenceModel>();
 
+    public DbSet<OrderStatusHistoryPersistenceModel> StatusHistory => Set<OrderStatusHistoryPersistenceModel>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrdersDbContext).Assembly, type =>
             type.Namespace == "OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Configurations");
+
+        // Backs SequentialOrderNumberGenerator — a PostgreSQL sequence, not
+        // an application-level counter, so concurrent order creation can
+        // never hand out the same number twice.
+        modelBuilder.HasSequence<long>("order_number_seq").StartsAt(1).IncrementsBy(1);
     }
 }

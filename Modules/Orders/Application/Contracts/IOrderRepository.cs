@@ -14,6 +14,14 @@ public interface IOrderRepository
 {
     Task<Order?> GetByIdAsync(Guid orderId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Not in 05-orders.md's IOrderRepository — added because
+    /// <c>ListCustomerOrdersUseCase</c> depends on this interface and has
+    /// nothing else to query by; same class of gap as
+    /// <c>IInventoryReservationRepository.ListByOrderIdAsync</c>.
+    /// </summary>
+    Task<IReadOnlyList<Order>> ListByCustomerIdAsync(Guid customerId, CancellationToken cancellationToken);
+
     Task AddAsync(Order order, CancellationToken cancellationToken);
 
     Task SaveChangesAsync(CancellationToken cancellationToken);
