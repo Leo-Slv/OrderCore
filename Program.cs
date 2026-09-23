@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.AuditLogs;
 using OrderCore.Api.Modules.Orders;
 using OrderCore.Api.Modules.Payments;
+using OrderCore.Api.Shared;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 // from growing with individual service registrations as more modules gain
 // Application/Infrastructure wiring.
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSharedKernel();
 builder.Services.AddOrdersModule();
 builder.Services.AddPaymentsModule();
 builder.Services.AddAuditLogsModule();
