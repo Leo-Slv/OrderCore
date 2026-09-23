@@ -54,6 +54,7 @@ public static class OrderMapper
         model.Status = domain.Status.ToString();
         model.ConfirmedAt = domain.ConfirmedAt;
         model.CancelledAt = domain.CancelledAt;
+        model.Version = domain.Version;
 
         var domainByProductId = domain.Items.ToDictionary(i => i.ProductId);
 

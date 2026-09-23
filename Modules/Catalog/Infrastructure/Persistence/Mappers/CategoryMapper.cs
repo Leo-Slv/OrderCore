@@ -47,5 +47,6 @@ public static class CategoryMapper
         model.DisplayOrder = domain.DisplayOrder;
         model.Active = domain.Active;
         model.UpdatedAt = domain.UpdatedAt;
+        model.Version = domain.Version;
     }
 }

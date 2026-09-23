@@ -68,6 +68,7 @@ public static class CustomerMapper
         model.Active = domain.Active;
         model.EmailVerifiedAt = domain.EmailVerifiedAt;
         model.UpdatedAt = domain.UpdatedAt;
+        model.Version = domain.Version;
 
         ChildCollectionReconciler.Reconcile(domain.Addresses, model.Addresses, ToPersistence, ApplyChanges, a => a.Id);
         ChildCollectionReconciler.Reconcile(domain.PaymentMethods, model.PaymentMethods, ToPersistence, ApplyChanges, m => m.Id);

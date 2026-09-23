@@ -92,6 +92,7 @@ public static class ProductMapper
         model.Active = domain.Active;
         model.PublishedAt = domain.PublishedAt;
         model.UpdatedAt = domain.UpdatedAt;
+        model.Version = domain.Version;
 
         ChildCollectionReconciler.Reconcile(domain.Images, model.Images, ToPersistence, ApplyChanges, i => i.Id);
         ChildCollectionReconciler.Reconcile(domain.Variants, model.Variants, ToPersistence, ApplyChanges, v => v.Id);
