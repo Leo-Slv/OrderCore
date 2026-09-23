@@ -284,3 +284,30 @@ target/blueprint not yet built (see the note at the top of
 Commit documentation updates separately from the code they document when
 practical, so the history reads as one commit per concern rather than one
 undifferentiated change.
+
+## Implementation Workflow
+
+Follow the same process used in the CourseCore backend repo, one feature at
+a time:
+
+1. **Spec (WHAT/WHY only)** at `Docs/specs/<domain>/<feature>.md` — no
+   implementation detail.
+2. **Resolve open decisions explicitly.** If something can't be inferred
+   from the existing code, this file, or the reference project, list the
+   questions and ask before proceeding — don't assume silently.
+3. **Implementation plan (HOW)** at
+   `Docs/specs/<domain>/<feature>-implementation-plan.md`.
+4. **Implement.**
+5. **Tests.** Fix/add tests until `dotnet build` (compilation, which is
+   also this project's type check), `dotnet test` (all three projects —
+   `Tests/OrderCore.UnitTests`, `Tests/OrderCore.IntegrationTests`,
+   `Tests/OrderCore.ArchitectureTests`), and
+   `dotnet format OrderCore.sln --verify-no-changes` (formatting/lint) all
+   pass.
+6. **Docs.** Update `README.md` (and this file, if the architecture
+   changed) to reflect the new feature — see the Documentation section
+   above for the diagram/context-doc updates that also apply.
+7. **Commit.** Conventional Commits, in English, separated by context
+   (several small commits, never one giant commit). Never add a
+   `Co-Authored-By: Claude` trailer — commits are attributed to the user
+   only. Never push to the remote without an explicit request.
