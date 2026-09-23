@@ -307,7 +307,15 @@ a time:
    pass.
 6. **Docs.** Update `README.md` (and this file, if the architecture
    changed) to reflect the new feature — see the Documentation section
-   above for the diagram/context-doc updates that also apply.
+   above for the diagram/context-doc updates that also apply. This
+   includes the class diagram itself: any class, attribute, method
+   signature, or dependency that implementation ended up needing but the
+   diagram didn't have (a `now` parameter, an added field, a whole new
+   abstraction like `IUnitOfWork`) gets added back into the diagram before
+   the feature is considered done — never left as an undocumented
+   difference between the diagram and the code. This is not optional or
+   deferrable to a later pass; it happens at the end of every feature's
+   workflow, every time, no matter how small the deviation looks.
 7. **Commit.** Conventional Commits, in English, separated by context
    (several small commits, never one giant commit). Never add a
    `Co-Authored-By: Claude` trailer — commits are attributed to the user
