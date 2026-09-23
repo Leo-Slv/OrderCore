@@ -1,47 +1,92 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Domain.Enums;
+using OrderCore.Api.Modules.Inventory.Domain.Events;
 using Xunit;
 
 namespace OrderCore.UnitTests.Inventory;
 
 public sealed class InventoryReservationTests
 {
+    private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
+
+    private static InventoryReservation CreateReservation() =>
+        InventoryReservation.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), quantity: 1, Now);
+
     [Fact]
-    public void Create_starts_in_Reserved_status()
+    public void Create_starts_in_Reserved_status_and_raises_a_movement_event()
     {
-        var reservation = InventoryReservation.Create(Guid.NewGuid(), Guid.NewGuid(), quantity: 1, DateTimeOffset.UtcNow);
+        var reservation = CreateReservation();
 
         reservation.Status.Should().Be(ReservationStatus.Reserved);
+        var raised = reservation.DomainEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<InventoryStockMovementRecorded>().Subject;
+        raised.MovementType.Should().Be(StockMovementType.ReservationCreated);
+    }
+
+    [Fact]
+    public void Release_sets_ReleasedAt_and_raises_a_movement_event()
+    {
+        var reservation = CreateReservation();
+        reservation.ClearDomainEvents();
+
+        reservation.Release(Now);
+
+        reservation.ReleasedAt.Should().Be(Now);
+        reservation.DomainEvents.OfType<InventoryStockMovementRecorded>().Should()
+            .ContainSingle(m => m.MovementType == StockMovementType.ReservationReleased);
     }
 
     [Fact]
     public void Release_then_Release_again_is_rejected()
     {
-        var reservation = InventoryReservation.Create(Guid.NewGuid(), Guid.NewGuid(), quantity: 1, DateTimeOffset.UtcNow);
-        reservation.Release();
+        var reservation = CreateReservation();
+        reservation.Release(Now);
 
-        var act = () => reservation.Release();
+        var act = () => reservation.Release(Now);
 
         act.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]
+    public void Consume_sets_ConsumedAt_and_raises_a_movement_event()
+    {
+        var reservation = CreateReservation();
+        reservation.ClearDomainEvents();
+
+        reservation.Consume(Now);
+
+        reservation.ConsumedAt.Should().Be(Now);
+        reservation.DomainEvents.OfType<InventoryStockMovementRecorded>().Should()
+            .ContainSingle(m => m.MovementType == StockMovementType.ReservationConsumed);
+    }
+
+    [Fact]
     public void Consume_after_Expire_is_rejected()
     {
-        var reservation = InventoryReservation.Create(Guid.NewGuid(), Guid.NewGuid(), quantity: 1, DateTimeOffset.UtcNow);
+        var reservation = CreateReservation();
         reservation.Expire();
 
-        var act = () => reservation.Consume();
+        var act = () => reservation.Consume(Now);
 
         act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Expire_does_not_raise_a_movement_event()
+    {
+        var reservation = CreateReservation();
+        reservation.ClearDomainEvents();
+
+        reservation.Expire();
+
+        reservation.DomainEvents.Should().BeEmpty();
     }
 }
 
 // NOTE: the concurrency scenario described in section 34 of the project
 // context ("Stock = 1, 100 concurrent requests, exactly 1 succeeds") is an
 // integration-level guarantee — it depends on the persistence layer
-// (unique constraint / optimistic concurrency against PostgreSQL), not on
-// this in-memory aggregate. That test belongs in
-// OrderCore.IntegrationTests/Inventory once the EF Core mapping and
-// concurrency strategy are implemented (see ADR-009, once written).
+// (optimistic concurrency against PostgreSQL), not on this in-memory
+// aggregate. That test lives in
+// OrderCore.IntegrationTests/Inventory/EfStockItemRepositoryTests.

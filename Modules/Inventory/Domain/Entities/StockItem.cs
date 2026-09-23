@@ -1,0 +1,170 @@
+using OrderCore.Api.Shared.Domain;
+
+namespace OrderCore.Api.Modules.Inventory.Domain.Entities;
+
+/// <summary>
+/// Stock balance for a product (optionally a specific variant) —
+/// 04-inventory.md. Reserving/releasing/consuming stock always goes
+/// through this aggregate; nothing outside it ever does a bare
+/// <c>stock -= quantity</c> (section 12 of the project context).
+/// <see cref="QuantityAvailable"/> is computed, not stored — same
+/// treatment as <c>Order.TotalAmount</c>.
+/// </summary>
+public sealed class StockItem : AggregateRoot<Guid>
+{
+    public Guid ProductId { get; private set; }
+
+    public Guid? ProductVariantId { get; private set; }
+
+    public int QuantityOnHand { get; private set; }
+
+    public int QuantityReserved { get; private set; }
+
+    public int QuantityAvailable => QuantityOnHand - QuantityReserved;
+
+    /// <summary>
+    /// Threshold used to flag low stock. No method sets it yet — nothing
+    /// in 04-inventory.md exposes a way to change it after creation, so it
+    /// stays at its default (0) until a "reorder alert" feature adds one.
+    /// </summary>
+    public int ReorderLevel { get; private set; }
+
+    public DateTimeOffset UpdatedAt { get; private set; }
+
+    private StockItem()
+    {
+    }
+
+    private StockItem(Guid id, Guid productId, Guid? productVariantId, int initialQuantity, DateTimeOffset now) : base(id)
+    {
+        ProductId = productId;
+        ProductVariantId = productVariantId;
+        QuantityOnHand = initialQuantity;
+        UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// <paramref name="now"/> is not in 04-inventory.md's Create signature,
+    /// but <see cref="UpdatedAt"/> needs a value from somewhere — same
+    /// reasoning as <c>Customer.Create</c>'s `now` parameter.
+    /// </summary>
+    public static StockItem Create(Guid productId, int initialQuantity, Guid? productVariantId, DateTimeOffset now)
+    {
+        if (initialQuantity < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(initialQuantity), "Initial quantity cannot be negative.");
+        }
+
+        var stockItem = new StockItem(Guid.NewGuid(), productId, productVariantId, initialQuantity, now);
+        stockItem.IncrementVersion();
+        return stockItem;
+    }
+
+    public void Receive(int quantity)
+    {
+        RequirePositive(quantity);
+
+        QuantityOnHand += quantity;
+        IncrementVersion();
+    }
+
+    /// <summary>
+    /// Returns <c>false</c> instead of throwing when there isn't enough
+    /// available stock — that is the whole point of the <c>bool</c> return
+    /// in 04-inventory.md: callers (section 11's central race) check the
+    /// result rather than catching an exception per contended request.
+    /// </summary>
+    public bool TryReserve(int quantity)
+    {
+        RequirePositive(quantity);
+
+        if (QuantityAvailable < quantity)
+        {
+            return false;
+        }
+
+        QuantityReserved += quantity;
+        IncrementVersion();
+        return true;
+    }
+
+    public void Release(int quantity)
+    {
+        RequirePositive(quantity);
+
+        if (quantity > QuantityReserved)
+        {
+            throw new InvalidOperationException("Cannot release more than is currently reserved.");
+        }
+
+        QuantityReserved -= quantity;
+        IncrementVersion();
+    }
+
+    public void Consume(int quantity)
+    {
+        RequirePositive(quantity);
+
+        if (quantity > QuantityReserved)
+        {
+            throw new InvalidOperationException("Cannot consume more than is currently reserved.");
+        }
+
+        QuantityReserved -= quantity;
+        QuantityOnHand -= quantity;
+        IncrementVersion();
+    }
+
+    public void Adjust(int quantity, string reason)
+    {
+        if (quantity == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(quantity), "Adjustment quantity cannot be zero.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("A reason is required.", nameof(reason));
+        }
+
+        var newQuantityOnHand = QuantityOnHand + quantity;
+        if (newQuantityOnHand < QuantityReserved)
+        {
+            throw new InvalidOperationException("Adjustment would leave fewer units on hand than are currently reserved.");
+        }
+
+        QuantityOnHand = newQuantityOnHand;
+        IncrementVersion();
+    }
+
+    private static void RequirePositive(int quantity)
+    {
+        if (quantity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be greater than zero.");
+        }
+    }
+
+    /// <summary>
+    /// Reconstructs a <see cref="StockItem"/> from already-persisted state,
+    /// distinct from <see cref="Create"/> the same way
+    /// <c>Customer.Rehydrate</c> is (Shared kernel module).
+    /// </summary>
+    internal static StockItem Rehydrate(
+        Guid id,
+        Guid productId,
+        Guid? productVariantId,
+        int quantityOnHand,
+        int quantityReserved,
+        int reorderLevel,
+        DateTimeOffset updatedAt,
+        int version)
+    {
+        return new StockItem(id, productId, productVariantId, quantityOnHand, updatedAt)
+        {
+            QuantityReserved = quantityReserved,
+            ReorderLevel = reorderLevel,
+            Version = version,
+        };
+    }
+}
