@@ -1,7 +1,7 @@
 using OrderCore.Api.Modules.Customers.Domain.Entities;
 using OrderCore.Api.Modules.Customers.Infrastructure.Persistence.Models;
-using OrderCore.Api.Shared.Domain;
 using OrderCore.Api.Shared.Domain.ValueObjects;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Customers.Infrastructure.Persistence.Mappers;
 
@@ -69,8 +69,8 @@ public static class CustomerMapper
         model.EmailVerifiedAt = domain.EmailVerifiedAt;
         model.UpdatedAt = domain.UpdatedAt;
 
-        ApplyChildren(domain.Addresses, model.Addresses, ToPersistence, ApplyChanges, a => a.Id);
-        ApplyChildren(domain.PaymentMethods, model.PaymentMethods, ToPersistence, ApplyChanges, m => m.Id);
+        ChildCollectionReconciler.Reconcile(domain.Addresses, model.Addresses, ToPersistence, ApplyChanges, a => a.Id);
+        ChildCollectionReconciler.Reconcile(domain.PaymentMethods, model.PaymentMethods, ToPersistence, ApplyChanges, m => m.Id);
     }
 
     private static CustomerAddressPersistenceModel ToPersistence(CustomerAddress domain) => new()
@@ -154,41 +154,4 @@ public static class CustomerMapper
         model.IsDefault,
         model.CreatedAt,
         model.UpdatedAt);
-
-    /// <summary>
-    /// Reconciles a tracked EF Core child collection with the current
-    /// domain state: updates models that still exist, removes ones the
-    /// aggregate no longer has, and adds new ones — instead of clearing and
-    /// re-adding the whole collection, which would make EF Core delete and
-    /// re-insert every child on every save.
-    /// </summary>
-    private static void ApplyChildren<TDomain, TModel>(
-        IReadOnlyCollection<TDomain> domainChildren,
-        ICollection<TModel> modelChildren,
-        Func<TDomain, TModel> toPersistence,
-        Action<TDomain, TModel> applyChanges,
-        Func<TModel, Guid> modelId)
-        where TDomain : Entity<Guid>
-    {
-        var domainById = domainChildren.ToDictionary(d => d.Id);
-
-        foreach (var model in modelChildren.Where(m => !domainById.ContainsKey(modelId(m))).ToList())
-        {
-            modelChildren.Remove(model);
-        }
-
-        var modelById = modelChildren.ToDictionary(modelId);
-
-        foreach (var domain in domainChildren)
-        {
-            if (modelById.TryGetValue(domain.Id, out var model))
-            {
-                applyChanges(domain, model);
-            }
-            else
-            {
-                modelChildren.Add(toPersistence(domain));
-            }
-        }
-    }
 }
