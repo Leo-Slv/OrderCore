@@ -1549,14 +1549,22 @@ Não criar tabelas simplesmente para representar cada classe.
 
 O modelo relacional deve representar as necessidades de persistência do domínio.
 
-`Customers` e `Catalog` são os dois módulos com EF Core de fato
-implementado até agora (os demais ainda são scaffolding). `Customers`
+`Customers`, `Catalog` e `Orders` (persistência apenas — o restante de
+05-orders.md continua blueprint) têm EF Core de fato implementado até
+agora (os demais módulos ainda são scaffolding). `Customers`
 (`Modules/Customers/Infrastructure/Persistence`) cria `customers`,
 `customer_addresses` e `customer_payment_methods` via
 `InitialCustomersSchema`; `Catalog` (`Modules/Catalog/Infrastructure/Persistence`)
 cria `products`, `product_images`, `product_variants` e `categories` via
-`InitialCatalogSchema`. O padrão estabelecido em `Customers` e replicado em
-`Catalog`, a ser seguido pelos demais módulos ao ganharem persistência
+`InitialCatalogSchema`; `Orders` (`Modules/Orders/Infrastructure/Persistence`)
+cria `orders` e `order_items` via `InitialOrdersSchema` — `order_items` é
+chaveado por `(OrderId, ProductId)`, não um id substituto, porque
+`OrderItem` não tem identidade própria no domínio. `IProductCatalog`
+(contrato do próprio Orders) também ganhou sua implementação real,
+`ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`), que lê
+de `IProductRepository` do Catalog — a indireção de "Application Contract"
+da seção 7. O padrão estabelecido em `Customers` e replicado em `Catalog`
+e `Orders`, a ser seguido pelos demais módulos ao ganharem persistência
 real:
 
 - Um `<Módulo>DbContext` por módulo (não um `ApplicationDbContext` único),
