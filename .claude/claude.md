@@ -112,8 +112,9 @@ Do not expose persistence models through the API.
 Infrastructure contains technical implementations such as persistence and
 external integrations (e.g. payment providers).
 
-Persistence (EF Core, not yet implemented) should follow the same
-separation used elsewhere in the project once introduced:
+Persistence (EF Core — see the Persistence section below for which
+modules already have it) should follow the same separation across every
+module:
 
 - Domain entities
 - Persistence models
