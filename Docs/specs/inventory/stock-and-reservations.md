@@ -66,6 +66,20 @@ same way `Catalog.IProductRepository` unblocked `ProductCatalogAdapter`.
   `StockItem`. Deviating from the diagram: `ExpireReservationUseCase` also
   takes `IStockItemRepository` and calls `StockItem.Release` — the same
   class of necessary gap-filling as `Customer.Create` gaining `now`.
+- **Cross-aggregate atomicity (`IUnitOfWork`)**: `ReserveStock`/`Release`/
+  `Consume`/`ExpireReservationUseCase` all mutate both `StockItem` and
+  `InventoryReservation` in one operation. Every prior repository
+  (`ICustomerRepository`, `IProductRepository`, `IOrderRepository`, ...)
+  has its own `SaveChangesAsync`, which only works because each use case
+  so far ever touched one aggregate root per call. That stops being true
+  here, and calling two separate `SaveChangesAsync`s would be two separate
+  SQL transactions — not atomic. Per claude.md's Transactions section
+  ("introduce one consistent abstraction... register it the same way
+  other module dependencies are registered"), `IStockItemRepository`/
+  `IInventoryReservationRepository` drop `SaveChangesAsync` (deviating
+  from the diagram) in favor of a single `IUnitOfWork.SaveChangesAsync`
+  shared by both, which is also where `IDomainEventDispatcher.DispatchAsync`
+  is actually called for the first time in the codebase.
 
 ## Out of scope
 

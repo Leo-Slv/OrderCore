@@ -32,13 +32,19 @@ before each commit.
 
 - `Modules/Inventory/Application/Contracts/IStockItemRepository.cs`,
   `IInventoryReservationRepository.cs` (+ `CancellationToken`, matching
-  every other repository contract in the project).
+  every other repository contract in the project) — no `SaveChangesAsync`
+  on either (resolved decision: `IUnitOfWork` instead).
+- `Modules/Inventory/Application/Contracts/IUnitOfWork.cs`
+  (`SaveChangesAsync(CancellationToken)`), and
+  `StockConcurrencyConflictException.cs` (thrown by the repository when
+  the underlying `DbUpdateConcurrencyException` hits a `StockItem`).
 - DTOs: `ReserveStockCommand`, `ReserveStockResult`, `StockItemOutput`.
 - Use cases: `ReserveStockUseCase` (the retry loop from the resolved
-  concurrency decision lives here), `ReleaseReservationUseCase`,
-  `ConsumeReservationUseCase`, `ExpireReservationUseCase` (takes
-  `IStockItemRepository` too — resolved decision), `AdjustStockUseCase`,
-  `GetStockByProductIdUseCase`.
+  concurrency decision lives here, catching `StockConcurrencyConflictException`),
+  `ReleaseReservationUseCase`, `ConsumeReservationUseCase`,
+  `ExpireReservationUseCase` (takes `IStockItemRepository` too — resolved
+  decision), `AdjustStockUseCase`, `GetStockByProductIdUseCase`. Every use
+  case that mutates state takes `IUnitOfWork` and calls it once, at the end.
 - Unit tests with fake repositories (`FakeStockItemRepository`,
   `FakeInventoryReservationRepository`), including one that simulates a
   concurrency conflict to prove the retry loop works, and the
@@ -66,14 +72,23 @@ before each commit.
   `StockMovementPersistenceModel` via `InventoryDbContext` (added to the
   change tracker, not saved independently — flushed by the same
   `SaveChangesAsync` call that dispatches it).
-- `EfStockItemRepository`, `EfInventoryReservationRepository` — the latter
-  is where `IDomainEventDispatcher.DispatchAsync` gets called for the
-  first time in the codebase, right after `_dbContext.SaveChangesAsync()`
-  succeeds, over every tracked aggregate's `DomainEvents`, followed by
-  `ClearDomainEvents()`.
+- `EfStockItemRepository`, `EfInventoryReservationRepository` — each
+  implements an internal `IPendingChangesTracker` (`ApplyPendingChanges()`,
+  `CollectAndClearDomainEvents()`) instead of exposing `SaveChangesAsync`.
+  `InventoryUnitOfWork` (implements `IUnitOfWork`) takes the two concrete
+  repository types (not their public interfaces) plus `InventoryDbContext`
+  and `IDomainEventDispatcher`: calls `ApplyPendingChanges` on both,
+  `_dbContext.SaveChangesAsync()` once, then dispatches the combined
+  domain events — this is where `IDomainEventDispatcher.DispatchAsync`
+  gets called for the first time in the codebase. On
+  `DbUpdateConcurrencyException`, wraps it as `StockConcurrencyConflictException`
+  and forgets both repositories' tracked entries so the next query is
+  forced fresh.
 - `InventoryDependencyInjection.AddInventoryModule(configuration)`,
-  registering `InventoryDbContext`, both repositories, both use-case sets,
-  wired into `Program.cs`.
+  registering `InventoryDbContext`, both concrete repositories AND their
+  interfaces resolving to the same Scoped instance (`services.AddScoped<IStockItemRepository>(sp => sp.GetRequiredService<EfStockItemRepository>())`,
+  same for reservations), `IUnitOfWork`, both use-case sets, wired into
+  `Program.cs`.
 - Migration `InitialInventorySchema` (`dotnet ef migrations add`).
 - Integration tests (`OrderCore.IntegrationTests/Inventory`, Testcontainers.PostgreSql,
   matching `EfCustomerRepositoryTests`): round-trip test, and the
