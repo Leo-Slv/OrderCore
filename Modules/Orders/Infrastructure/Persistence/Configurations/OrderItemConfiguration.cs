@@ -12,7 +12,10 @@ public sealed class OrderItemConfiguration : IEntityTypeConfiguration<OrderItemP
 
         builder.HasKey(i => new { i.OrderId, i.ProductId });
 
+        builder.Property(i => i.ProductSku).HasMaxLength(50).IsRequired();
         builder.Property(i => i.ProductName).HasMaxLength(200).IsRequired();
+        builder.Property(i => i.ProductImageUrl).HasMaxLength(2000);
         builder.Property(i => i.UnitPrice).HasPrecision(18, 2);
+        builder.Property(i => i.DiscountAmount).HasPrecision(18, 2);
     }
 }

@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Orders.Domain.Enums;
 using OrderCore.Api.Modules.Orders.Domain.Events;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.Api.Modules.Orders.Domain.Entities;
 
@@ -13,36 +14,68 @@ public sealed class Order : AggregateRoot<Guid>
 {
     private readonly List<OrderItem> _items = new();
 
+    public string OrderNumber { get; private set; } = string.Empty;
+
     public Guid CustomerId { get; private set; }
 
     public OrderStatus Status { get; private set; }
 
     public IReadOnlyCollection<OrderItem> Items => _items.AsReadOnly();
 
-    public decimal TotalAmount => _items.Sum(i => i.Total);
+    public decimal SubtotalAmount => _items.Sum(i => i.Total);
+
+    public decimal DiscountAmount { get; private set; }
+
+    public decimal ShippingAmount { get; private set; }
+
+    public decimal TaxAmount { get; private set; }
+
+    public decimal TotalAmount => SubtotalAmount - DiscountAmount + ShippingAmount + TaxAmount;
 
     public string Currency { get; private set; } = "BRL";
 
+    public Address? ShippingAddress { get; private set; }
+
+    public Address? BillingAddress { get; private set; }
+
+    public string? CustomerNotes { get; private set; }
+
+    public string? InternalNotes { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
+
+    public DateTimeOffset UpdatedAt { get; private set; }
 
     public DateTimeOffset? ConfirmedAt { get; private set; }
 
     public DateTimeOffset? CancelledAt { get; private set; }
+
+    public DateTimeOffset? ShippedAt { get; private set; }
+
+    public DateTimeOffset? DeliveredAt { get; private set; }
 
     // Required by EF Core.
     private Order()
     {
     }
 
-    private Order(Guid id, Guid customerId, string currency, DateTimeOffset createdAt) : base(id)
+    private Order(Guid id, Guid customerId, string currency, string orderNumber, DateTimeOffset createdAt) : base(id)
     {
         CustomerId = customerId;
         Currency = currency;
+        OrderNumber = orderNumber;
         CreatedAt = createdAt;
+        UpdatedAt = createdAt;
         Status = OrderStatus.Created;
     }
 
-    public static Order Create(Guid customerId, string currency, DateTimeOffset now)
+    /// <summary>
+    /// <paramref name="customerNotes"/> is not in 05-orders.md's Create
+    /// signature, but no other method ever sets <see cref="CustomerNotes"/>
+    /// either — same class of gap as <c>Category.Create</c> gaining
+    /// `description`.
+    /// </summary>
+    public static Order Create(Guid customerId, string currency, string orderNumber, DateTimeOffset now, string? customerNotes = null)
     {
         if (customerId == Guid.Empty)
         {
@@ -54,7 +87,12 @@ public sealed class Order : AggregateRoot<Guid>
             throw new ArgumentException("Currency is required.", nameof(currency));
         }
 
-        var order = new Order(Guid.NewGuid(), customerId, currency, now);
+        if (string.IsNullOrWhiteSpace(orderNumber))
+        {
+            throw new ArgumentException("Order number is required.", nameof(orderNumber));
+        }
+
+        var order = new Order(Guid.NewGuid(), customerId, currency, orderNumber, now) { CustomerNotes = customerNotes };
         order.IncrementVersion();
         order.Raise(new OrderCreated(Guid.NewGuid(), now, order.Id, customerId));
         return order;
@@ -65,7 +103,14 @@ public sealed class Order : AggregateRoot<Guid>
     /// allowed while the order has not yet moved past <see cref="OrderStatus.Created"/>,
     /// so that a pending/confirmed order cannot be silently altered.
     /// </summary>
-    public void AddItem(Guid productId, string productName, decimal unitPrice, int quantity)
+    public void AddItem(
+        Guid productId,
+        Guid? productVariantId,
+        string productSku,
+        string productName,
+        string? productImageUrl,
+        decimal unitPrice,
+        int quantity)
     {
         EnsureStatus(OrderStatus.Created, $"Cannot add items to an order in status '{Status}'.");
 
@@ -76,7 +121,7 @@ public sealed class Order : AggregateRoot<Guid>
         }
         else
         {
-            _items.Add(new OrderItem(productId, productName, unitPrice, quantity));
+            _items.Add(new OrderItem(productId, productVariantId, productSku, productName, productImageUrl, unitPrice, quantity));
         }
 
         IncrementVersion();
@@ -90,6 +135,86 @@ public sealed class Order : AggregateRoot<Guid>
             ?? throw new InvalidOperationException($"Product '{productId}' is not part of this order.");
 
         _items.Remove(existing);
+        IncrementVersion();
+    }
+
+    /// <summary>
+    /// Not in 05-orders.md's method list: <c>OrderItem.DecreaseQuantity</c>
+    /// is `internal` (only <see cref="Order"/> can call it, same as
+    /// <c>IncreaseQuantity</c> already was), so the aggregate needs its own
+    /// pass-through to actually reach it from outside.
+    /// </summary>
+    public void DecreaseItemQuantity(Guid productId, int quantity)
+    {
+        EnsureStatus(OrderStatus.Created, $"Cannot change item quantities on an order in status '{Status}'.");
+
+        var existing = FindItem(productId);
+        existing.DecreaseQuantity(quantity);
+        IncrementVersion();
+    }
+
+    /// <summary>
+    /// Not in 05-orders.md's method list — see
+    /// <see cref="DecreaseItemQuantity"/>'s remarks; same reasoning for
+    /// <c>OrderItem.ApplyDiscount</c>.
+    /// </summary>
+    public void ApplyItemDiscount(Guid productId, decimal amount)
+    {
+        var existing = FindItem(productId);
+        existing.ApplyDiscount(amount);
+        IncrementVersion();
+    }
+
+    private OrderItem FindItem(Guid productId) =>
+        _items.FirstOrDefault(i => i.ProductId == productId)
+            ?? throw new InvalidOperationException($"Product '{productId}' is not part of this order.");
+
+    public void SetAddresses(Address shippingAddress, Address billingAddress)
+    {
+        ArgumentNullException.ThrowIfNull(shippingAddress);
+        ArgumentNullException.ThrowIfNull(billingAddress);
+
+        ShippingAddress = shippingAddress;
+        BillingAddress = billingAddress;
+        IncrementVersion();
+    }
+
+    public void SetInternalNotes(string? notes)
+    {
+        InternalNotes = notes;
+        IncrementVersion();
+    }
+
+    public void ApplyDiscount(decimal amount)
+    {
+        if (amount < 0 || amount > SubtotalAmount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount), "Discount must be between 0 and the order's subtotal.");
+        }
+
+        DiscountAmount = amount;
+        IncrementVersion();
+    }
+
+    public void SetShippingAmount(decimal amount)
+    {
+        if (amount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount), "Shipping amount cannot be negative.");
+        }
+
+        ShippingAmount = amount;
+        IncrementVersion();
+    }
+
+    public void SetTaxAmount(decimal amount)
+    {
+        if (amount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount), "Tax amount cannot be negative.");
+        }
+
+        TaxAmount = amount;
         IncrementVersion();
     }
 
@@ -133,6 +258,7 @@ public sealed class Order : AggregateRoot<Guid>
         EnsureStatus(OrderStatus.Processing, $"Cannot ship an order in status '{Status}'.");
 
         Status = OrderStatus.Shipped;
+        ShippedAt = now;
         IncrementVersion();
     }
 
@@ -141,6 +267,7 @@ public sealed class Order : AggregateRoot<Guid>
         EnsureStatus(OrderStatus.Shipped, $"Cannot deliver an order in status '{Status}'.");
 
         Status = OrderStatus.Delivered;
+        DeliveredAt = now;
         IncrementVersion();
     }
 
@@ -187,20 +314,41 @@ public sealed class Order : AggregateRoot<Guid>
     /// </summary>
     internal static Order Rehydrate(
         Guid id,
+        string orderNumber,
         Guid customerId,
         OrderStatus status,
+        decimal discountAmount,
+        decimal shippingAmount,
+        decimal taxAmount,
         string currency,
+        Address? shippingAddress,
+        Address? billingAddress,
+        string? customerNotes,
+        string? internalNotes,
         DateTimeOffset createdAt,
+        DateTimeOffset updatedAt,
         DateTimeOffset? confirmedAt,
         DateTimeOffset? cancelledAt,
+        DateTimeOffset? shippedAt,
+        DateTimeOffset? deliveredAt,
         int version,
         IEnumerable<OrderItem> items)
     {
-        var order = new Order(id, customerId, currency, createdAt)
+        var order = new Order(id, customerId, currency, orderNumber, createdAt)
         {
+            DiscountAmount = discountAmount,
+            ShippingAmount = shippingAmount,
+            TaxAmount = taxAmount,
+            ShippingAddress = shippingAddress,
+            BillingAddress = billingAddress,
+            CustomerNotes = customerNotes,
+            InternalNotes = internalNotes,
+            UpdatedAt = updatedAt,
             Status = status,
             ConfirmedAt = confirmedAt,
             CancelledAt = cancelledAt,
+            ShippedAt = shippedAt,
+            DeliveredAt = deliveredAt,
             Version = version,
         };
 

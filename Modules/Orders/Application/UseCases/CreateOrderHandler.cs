@@ -16,12 +16,15 @@ public sealed class CreateOrderHandler
 {
     private readonly IOrderRepository _orderRepository;
     private readonly IProductCatalog _productCatalog;
+    private readonly IOrderNumberGenerator _orderNumbers;
     private readonly TimeProvider _timeProvider;
 
-    public CreateOrderHandler(IOrderRepository orderRepository, IProductCatalog productCatalog, TimeProvider timeProvider)
+    public CreateOrderHandler(
+        IOrderRepository orderRepository, IProductCatalog productCatalog, IOrderNumberGenerator orderNumbers, TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _productCatalog = productCatalog;
+        _orderNumbers = orderNumbers;
         _timeProvider = timeProvider;
     }
 
@@ -33,14 +36,17 @@ public sealed class CreateOrderHandler
         }
 
         var now = _timeProvider.GetUtcNow();
-        var order = Order.Create(command.CustomerId, command.Currency, now);
+        var orderNumber = await _orderNumbers.NextAsync(cancellationToken);
+        var order = Order.Create(command.CustomerId, command.Currency, orderNumber, now);
 
         foreach (var item in command.Items)
         {
             var product = await _productCatalog.GetAsync(item.ProductId, cancellationToken)
                 ?? throw new InvalidOperationException($"Product '{item.ProductId}' was not found.");
 
-            order.AddItem(product.Id, product.Name, product.CurrentPrice, item.Quantity);
+            var primaryImageUrl = product.Images.FirstOrDefault(i => i.IsPrimary)?.Url ?? product.Images.FirstOrDefault()?.Url;
+
+            order.AddItem(product.Id, productVariantId: null, product.Sku, product.Name, primaryImageUrl, product.CurrentPrice, item.Quantity);
         }
 
         await _orderRepository.AddAsync(order, cancellationToken);
