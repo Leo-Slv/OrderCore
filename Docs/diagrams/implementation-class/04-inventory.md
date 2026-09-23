@@ -209,11 +209,11 @@ classDiagram
 
 
     %% OrderCore.Api.Modules.Inventory.Presentation
-    class InventoryEndpoints {
-        <<static>>
-        +MapInventoryEndpoints(IEndpointRouteBuilder app)$ IEndpointRouteBuilder
-        +GetStockByProductIdAsync(Guid productId, GetStockByProductIdUseCase useCase) Task~IResult~
-        +AdjustStockAsync(Guid productId, AdjustStockRequest request, AdjustStockUseCase useCase) Task~IResult~
+    class InventoryController {
+        -GetStockByProductIdUseCase getStockByProductIdUseCase
+        -AdjustStockUseCase adjustStockUseCase
+        +GetStockByProductIdAsync(Guid productId) Task~ActionResult~StockItemResponse~~
+        +AdjustStockAsync(Guid productId, AdjustStockRequest request) Task~ActionResult~StockItemResponse~~
     }
 
     class AdjustStockRequest {
@@ -259,9 +259,9 @@ classDiagram
 
     InventoryDependencyInjection --> ReserveStockUseCase : registers
 
-    InventoryEndpoints --> GetStockByProductIdUseCase
-    InventoryEndpoints --> AdjustStockUseCase
-    InventoryEndpoints --> StockItemPresenter
+    InventoryController --> GetStockByProductIdUseCase
+    InventoryController --> AdjustStockUseCase
+    InventoryController --> StockItemPresenter
     StockItemPresenter --> StockItemResponse
 
 ```

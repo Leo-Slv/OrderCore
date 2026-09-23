@@ -1549,6 +1549,29 @@ Não criar tabelas simplesmente para representar cada classe.
 
 O modelo relacional deve representar as necessidades de persistência do domínio.
 
+`Customers` é o primeiro módulo com EF Core de fato implementado (antes só
+existia como scaffolding — ver `Modules/Customers/Infrastructure/Persistence`),
+criando as tabelas `customers`, `customer_addresses` e
+`customer_payment_methods` via a migration `InitialCustomersSchema`. O
+padrão estabelecido lá, a ser seguido pelos demais módulos ao ganharem
+persistência real:
+
+- Um `<Módulo>DbContext` por módulo (não um `ApplicationDbContext` único),
+  cada um só enxergando as tabelas do próprio módulo — preserva o
+  isolamento de módulos também na camada de persistência.
+- `<Entidade>Mapper.ToDomain`/`ToPersistence`/`ApplyChanges` traduzindo
+  entre a entidade de domínio e seu Persistence Model, nunca mapeando EF
+  Core diretamente sobre a entidade de domínio (seção 5.1).
+- Entidades de domínio que precisam ser reconstruídas a partir do banco
+  ganham um factory `internal static Rehydrate(...)`, separado de
+  `Create(...)`: `Create` valida invariantes de criação e levanta domain
+  events; `Rehydrate` não deveria fazer nenhum dos dois.
+- O repositório concreto (`Ef<Entidade>Repository`) guarda a associação
+  entre a instância de domínio devolvida por um `GetByIdAsync`/`GetByEmailAsync`
+  e o Persistence Model rastreado pelo EF Core, para poder aplicar
+  `ApplyChanges` antes de `SaveChangesAsync` — a interface do repositório
+  não tem um `UpdateAsync` explícito (mesmo formato de `IOrderRepository`).
+
 ---
 
 # 41. Docker

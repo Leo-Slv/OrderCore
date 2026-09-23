@@ -161,9 +161,11 @@ to a module.
 
 ## Persistence
 
-The project targets PostgreSQL via Entity Framework Core, but this is not
-implemented yet — `Infrastructure/Persistence` folders exist as scaffolding
-only. When implementing it, follow the intended shape:
+The project targets PostgreSQL via Entity Framework Core.
+`Modules/Customers/Infrastructure/Persistence` is the first (and, until
+another module needs it, the reference) implementation — every other
+module's `Infrastructure/Persistence` folder is still scaffolding only.
+Follow its shape when implementing persistence for another module:
 
 Domain Entity
     ↕ Mapper
@@ -171,6 +173,21 @@ Persistence Model
     ↕ EF Core
 Database
 
+- one `<Module>DbContext` per module (not a single project-wide
+  `ApplicationDbContext`), each one only mapping its own module's tables —
+  keeps module isolation at the persistence layer too;
+- `<Entity>Mapper.ToDomain`/`ToPersistence`/`ApplyChanges` translate
+  between the domain entity and its persistence model — never map EF Core
+  directly onto the domain entity;
+- a domain entity that needs to be reconstructed from storage gets an
+  `internal static Rehydrate(...)` factory, separate from `Create(...)`:
+  `Create` validates creation invariants and raises domain events,
+  `Rehydrate` should do neither;
+- the concrete repository (`Ef<Entity>Repository`) keeps its own mapping
+  from the domain instance it handed out (via `GetByIdAsync` etc.) to the
+  EF-tracked persistence model, and reconciles the two with `ApplyChanges`
+  right before `SaveChangesAsync` — the repository interface has no
+  explicit `UpdateAsync` (same shape as `IOrderRepository`);
 - use EF Core migrations, not schema changes applied ad hoc;
 - do not run or apply production migrations automatically from application
   startup;

@@ -305,16 +305,21 @@ classDiagram
 
 
     %% OrderCore.Api.Modules.Catalog.Presentation
-    class CatalogEndpoints {
-        <<static>>
-        +MapCatalogEndpoints(IEndpointRouteBuilder app)$ IEndpointRouteBuilder
-        +CreateProductAsync(CreateProductRequest request, CreateProductUseCase useCase) Task~IResult~
-        +UpdateProductAsync(Guid id, UpdateProductRequest request, UpdateProductUseCase useCase) Task~IResult~
-        +PublishProductAsync(Guid id, PublishProductUseCase useCase) Task~IResult~
-        +GetProductByIdAsync(Guid id, GetProductByIdUseCase useCase) Task~IResult~
-        +ListProductsAsync(ListProductsFilter filter, ListProductsUseCase useCase) Task~IResult~
-        +CreateCategoryAsync(CreateCategoryRequest request, CreateCategoryUseCase useCase) Task~IResult~
-        +ListCategoriesAsync(ListCategoriesUseCase useCase) Task~IResult~
+    class CatalogController {
+        -CreateProductUseCase createProductUseCase
+        -UpdateProductUseCase updateProductUseCase
+        -PublishProductUseCase publishProductUseCase
+        -GetProductByIdUseCase getProductByIdUseCase
+        -ListProductsUseCase listProductsUseCase
+        -CreateCategoryUseCase createCategoryUseCase
+        -ListCategoriesUseCase listCategoriesUseCase
+        +CreateProductAsync(CreateProductRequest request) Task~ActionResult~ProductResponse~~
+        +UpdateProductAsync(Guid id, UpdateProductRequest request) Task~ActionResult~ProductResponse~~
+        +PublishProductAsync(Guid id) Task~IActionResult~
+        +GetProductByIdAsync(Guid id) Task~ActionResult~ProductResponse~~
+        +ListProductsAsync(ListProductsFilter filter) Task~ActionResult~IReadOnlyList~ProductResponse~~~
+        +CreateCategoryAsync(CreateCategoryRequest request) Task~ActionResult~CategoryResponse~~
+        +ListCategoriesAsync() Task~ActionResult~IReadOnlyList~CategoryResponse~~~
     }
 
     class CreateProductRequest {
@@ -399,13 +404,13 @@ classDiagram
     CatalogDependencyInjection --> CreateProductUseCase : registers
     CatalogDependencyInjection --> IProductRepository : registers
 
-    CatalogEndpoints --> CreateProductUseCase
-    CatalogEndpoints --> UpdateProductUseCase
-    CatalogEndpoints --> PublishProductUseCase
-    CatalogEndpoints --> ListProductsUseCase
-    CatalogEndpoints --> CreateCategoryUseCase
-    CatalogEndpoints --> ProductPresenter
-    CatalogEndpoints --> CategoryPresenter
+    CatalogController --> CreateProductUseCase
+    CatalogController --> UpdateProductUseCase
+    CatalogController --> PublishProductUseCase
+    CatalogController --> ListProductsUseCase
+    CatalogController --> CreateCategoryUseCase
+    CatalogController --> ProductPresenter
+    CatalogController --> CategoryPresenter
     ProductPresenter --> ProductResponse
     CategoryPresenter --> CategoryResponse
 

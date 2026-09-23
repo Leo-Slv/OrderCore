@@ -385,15 +385,19 @@ classDiagram
 
 
     %% OrderCore.Api.Modules.Orders.Presentation
-    class OrdersEndpoints {
-        <<static>>
-        +MapOrdersEndpoints(IEndpointRouteBuilder app)$ IEndpointRouteBuilder
-        +CreateOrderAsync(CreateOrderRequest request, CreateOrderHandler handler) Task~IResult~
-        +SetAddressesAsync(Guid id, SetOrderAddressesRequest request, SetOrderAddressesUseCase useCase) Task~IResult~
-        +RequestPaymentAsync(Guid id, RequestOrderPaymentUseCase useCase) Task~IResult~
-        +GetByIdAsync(Guid id, GetOrderByIdUseCase useCase) Task~IResult~
-        +ListByCustomerAsync(Guid customerId, ListCustomerOrdersUseCase useCase) Task~IResult~
-        +CancelAsync(Guid id, CancelOrderRequest request, CancelOrderUseCase useCase) Task~IResult~
+    class OrdersController {
+        -CreateOrderHandler createOrderHandler
+        -SetOrderAddressesUseCase setOrderAddressesUseCase
+        -RequestOrderPaymentUseCase requestOrderPaymentUseCase
+        -GetOrderByIdUseCase getOrderByIdUseCase
+        -ListCustomerOrdersUseCase listCustomerOrdersUseCase
+        -CancelOrderUseCase cancelOrderUseCase
+        +CreateOrderAsync(CreateOrderRequest request) Task~ActionResult~OrderResponse~~
+        +SetAddressesAsync(Guid id, SetOrderAddressesRequest request) Task~IActionResult~
+        +RequestPaymentAsync(Guid id) Task~IActionResult~
+        +GetByIdAsync(Guid id) Task~ActionResult~OrderResponse~~
+        +ListByCustomerAsync(Guid customerId) Task~ActionResult~IReadOnlyList~OrderResponse~~~
+        +CancelAsync(Guid id, CancelOrderRequest request) Task~IActionResult~
     }
 
     class CreateOrderItemRequest {
@@ -497,13 +501,13 @@ classDiagram
     OrdersDependencyInjection --> IOrderRepository : registers
     OrdersDependencyInjection --> IOrderNumberGenerator : registers
 
-    OrdersEndpoints --> CreateOrderHandler
-    OrdersEndpoints --> SetOrderAddressesUseCase
-    OrdersEndpoints --> RequestOrderPaymentUseCase
-    OrdersEndpoints --> GetOrderByIdUseCase
-    OrdersEndpoints --> ListCustomerOrdersUseCase
-    OrdersEndpoints --> CancelOrderUseCase
-    OrdersEndpoints --> OrderPresenter
+    OrdersController --> CreateOrderHandler
+    OrdersController --> SetOrderAddressesUseCase
+    OrdersController --> RequestOrderPaymentUseCase
+    OrdersController --> GetOrderByIdUseCase
+    OrdersController --> ListCustomerOrdersUseCase
+    OrdersController --> CancelOrderUseCase
+    OrdersController --> OrderPresenter
     OrderPresenter --> OrderResponse
 
 ```

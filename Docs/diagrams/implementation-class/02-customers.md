@@ -2,6 +2,13 @@
 
 Cadastro de clientes, endereços salvos e métodos de pagamento tokenizados. Base: [Shared kernel](01-shared-kernel.md) (`AggregateRoot<Guid>`, `Address`).
 
+Diferente da maioria dos diagramas desta pasta, este módulo já está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core e Presentation) — não é mais um blueprint futuro. `CustomersEndpoints` (minimal API estática) foi substituído por `CustomersController` ([ApiController]) ao implementar, para seguir a mesma convenção já usada por `AuditLogsController` em vez de introduzir um segundo padrão de Presentation (seção 33 do contexto do projeto). Outras diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
+
+- `Customer.Create`/`CustomerPaymentMethod.Create` recebem um `now` explícito (como `Order.Create`), já que `CreatedAt`/`UpdatedAt` precisam de um valor e o domínio não deve ler o relógio sozinho.
+- `RegisterCustomerCommand`/`RegisterCustomerRequest` incluem `PasswordHash` (placeholder até existir um módulo de autenticação real com hashing no servidor) e `AddCustomerAddressCommand`/`AddCustomerAddressRequest` incluem todos os campos de `Address` (não só Street/City/State/PostalCode), já que `Address.Create` exige todos eles.
+- `Customer`, `CustomerAddress` e `CustomerPaymentMethod` ganharam um factory `internal static Rehydrate(...)`, distinto de `Create`, para que `CustomerMapper` reconstrua o agregado a partir do banco sem re-levantar `CustomerRegistered`.
+- `CustomerAddressPersistenceModel` guarda todos os campos de `Address` (não só Street/City/State/PostalCode) pelo mesmo motivo.
+
 ```mermaid
 
 classDiagram
@@ -212,13 +219,15 @@ classDiagram
 
 
     %% OrderCore.Api.Modules.Customers.Presentation
-    class CustomersEndpoints {
-        <<static>>
-        +MapCustomersEndpoints(IEndpointRouteBuilder app)$ IEndpointRouteBuilder
-        +RegisterAsync(RegisterCustomerRequest request, RegisterCustomerUseCase useCase) Task~IResult~
-        +GetByIdAsync(Guid id, GetCustomerByIdUseCase useCase) Task~IResult~
-        +AddAddressAsync(Guid id, AddCustomerAddressRequest request, AddCustomerAddressUseCase useCase) Task~IResult~
-        +ListAddressesAsync(Guid id, ListCustomerAddressesUseCase useCase) Task~IResult~
+    class CustomersController {
+        -RegisterCustomerUseCase registerCustomerUseCase
+        -GetCustomerByIdUseCase getCustomerByIdUseCase
+        -AddCustomerAddressUseCase addCustomerAddressUseCase
+        -ListCustomerAddressesUseCase listCustomerAddressesUseCase
+        +RegisterAsync(RegisterCustomerRequest request) Task~ActionResult~CustomerResponse~~
+        +GetByIdAsync(Guid id) Task~ActionResult~CustomerResponse~~
+        +AddAddressAsync(Guid id, AddCustomerAddressRequest request) Task~IActionResult~
+        +ListAddressesAsync(Guid id) Task~ActionResult~IReadOnlyList~CustomerAddressResponse~~~
     }
 
     class RegisterCustomerRequest {
@@ -283,11 +292,11 @@ classDiagram
     CustomersDependencyInjection --> RegisterCustomerUseCase : registers
     CustomersDependencyInjection --> ICustomerRepository : registers
 
-    CustomersEndpoints --> RegisterCustomerUseCase
-    CustomersEndpoints --> GetCustomerByIdUseCase
-    CustomersEndpoints --> AddCustomerAddressUseCase
-    CustomersEndpoints --> ListCustomerAddressesUseCase
-    CustomersEndpoints --> CustomerPresenter
+    CustomersController --> RegisterCustomerUseCase
+    CustomersController --> GetCustomerByIdUseCase
+    CustomersController --> AddCustomerAddressUseCase
+    CustomersController --> ListCustomerAddressesUseCase
+    CustomersController --> CustomerPresenter
     CustomerPresenter --> CustomerResponse
     CustomerPresenter --> CustomerAddressResponse
 

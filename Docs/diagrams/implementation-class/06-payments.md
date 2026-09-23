@@ -314,12 +314,13 @@ classDiagram
 
 
     %% OrderCore.Api.Modules.Payments.Presentation
-    class PaymentsEndpoints {
-        <<static>>
-        +MapPaymentsEndpoints(IEndpointRouteBuilder app)$ IEndpointRouteBuilder
-        +CreateAsync(CreatePaymentRequest request, CreatePaymentUseCase useCase) Task~IResult~
-        +GetByOrderIdAsync(Guid orderId, GetPaymentByOrderIdUseCase useCase) Task~IResult~
-        +RequestRefundAsync(Guid id, RequestRefundRequest request, RequestRefundUseCase useCase) Task~IResult~
+    class PaymentsController {
+        -CreatePaymentUseCase createPaymentUseCase
+        -GetPaymentByOrderIdUseCase getPaymentByOrderIdUseCase
+        -RequestRefundUseCase requestRefundUseCase
+        +CreateAsync(CreatePaymentRequest request) Task~ActionResult~PaymentResponse~~
+        +GetByOrderIdAsync(Guid orderId) Task~ActionResult~PaymentResponse~~
+        +RequestRefundAsync(Guid id, RequestRefundRequest request) Task~ActionResult~RefundResponse~~
     }
 
     class CreatePaymentRequest {
@@ -406,10 +407,10 @@ classDiagram
     PaymentsDependencyInjection --> IPaymentRepository : registers
     PaymentsDependencyInjection --> CreatePaymentUseCase : registers
 
-    PaymentsEndpoints --> CreatePaymentUseCase
-    PaymentsEndpoints --> GetPaymentByOrderIdUseCase
-    PaymentsEndpoints --> RequestRefundUseCase
-    PaymentsEndpoints --> PaymentPresenter
+    PaymentsController --> CreatePaymentUseCase
+    PaymentsController --> GetPaymentByOrderIdUseCase
+    PaymentsController --> RequestRefundUseCase
+    PaymentsController --> PaymentPresenter
     PaymentPresenter --> PaymentResponse
     PaymentPresenter --> RefundResponse
 
