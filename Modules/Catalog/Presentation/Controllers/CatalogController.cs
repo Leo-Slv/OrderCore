@@ -1,0 +1,133 @@
+using Microsoft.AspNetCore.Mvc;
+using OrderCore.Api.Modules.Catalog.Application.DTOs;
+using OrderCore.Api.Modules.Catalog.Application.UseCases;
+using OrderCore.Api.Modules.Catalog.Presentation.Presenters;
+using OrderCore.Api.Modules.Catalog.Presentation.Requests;
+using OrderCore.Api.Modules.Catalog.Presentation.Responses;
+
+namespace OrderCore.Api.Modules.Catalog.Presentation.Controllers;
+
+/// <summary>
+/// Thin endpoint delegating to the Catalog use cases (section 39) — same
+/// [ApiController]/ControllerBase shape as CustomersController and
+/// AuditLogsController (see the note on CustomersController about
+/// 02-customers.md's CustomersEndpoints).
+///
+/// ChangeProductPriceUseCase has no route here: 03-catalog.md's
+/// CatalogController never wires it to an endpoint, so it stays reachable
+/// only from other Application-layer code until the diagram says
+/// otherwise.
+///
+/// The use cases currently signal "not found" / "duplicate" with a plain
+/// <see cref="InvalidOperationException"/>, same caveat as
+/// CustomersController's.
+/// </summary>
+[ApiController]
+[Route("api/catalog")]
+public sealed class CatalogController : ControllerBase
+{
+    private readonly CreateProductUseCase _createProductUseCase;
+    private readonly UpdateProductUseCase _updateProductUseCase;
+    private readonly PublishProductUseCase _publishProductUseCase;
+    private readonly GetProductByIdUseCase _getProductByIdUseCase;
+    private readonly ListProductsUseCase _listProductsUseCase;
+    private readonly CreateCategoryUseCase _createCategoryUseCase;
+    private readonly ListCategoriesUseCase _listCategoriesUseCase;
+
+    public CatalogController(
+        CreateProductUseCase createProductUseCase,
+        UpdateProductUseCase updateProductUseCase,
+        PublishProductUseCase publishProductUseCase,
+        GetProductByIdUseCase getProductByIdUseCase,
+        ListProductsUseCase listProductsUseCase,
+        CreateCategoryUseCase createCategoryUseCase,
+        ListCategoriesUseCase listCategoriesUseCase)
+    {
+        _createProductUseCase = createProductUseCase;
+        _updateProductUseCase = updateProductUseCase;
+        _publishProductUseCase = publishProductUseCase;
+        _getProductByIdUseCase = getProductByIdUseCase;
+        _listProductsUseCase = listProductsUseCase;
+        _createCategoryUseCase = createCategoryUseCase;
+        _listCategoriesUseCase = listCategoriesUseCase;
+    }
+
+    [HttpPost("products")]
+    [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ProductResponse>> CreateProductAsync(
+        [FromBody] CreateProductRequest request,
+        CancellationToken cancellationToken)
+    {
+        var output = await _createProductUseCase.ExecuteAsync(ProductPresenter.ToCommand(request), cancellationToken);
+        var response = ProductPresenter.ToResponse(output);
+
+        return CreatedAtAction(nameof(GetProductByIdAsync), new { id = response.Id }, response);
+    }
+
+    [HttpPut("products/{id:guid}")]
+    [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ProductResponse>> UpdateProductAsync(
+        Guid id,
+        [FromBody] UpdateProductRequest request,
+        CancellationToken cancellationToken)
+    {
+        var output = await _updateProductUseCase.ExecuteAsync(id, ProductPresenter.ToCommand(request), cancellationToken);
+
+        return Ok(ProductPresenter.ToResponse(output));
+    }
+
+    [HttpPost("products/{id:guid}/publish")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> PublishProductAsync(Guid id, CancellationToken cancellationToken)
+    {
+        await _publishProductUseCase.ExecuteAsync(id, cancellationToken);
+
+        return NoContent();
+    }
+
+    [HttpGet("products/{id:guid}")]
+    [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ProductResponse>> GetProductByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var output = await _getProductByIdUseCase.ExecuteAsync(id, cancellationToken);
+
+        return Ok(ProductPresenter.ToResponse(output));
+    }
+
+    [HttpGet("products")]
+    [ProducesResponseType(typeof(IReadOnlyList<ProductResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<ProductResponse>>> ListProductsAsync(
+        [FromQuery] ListProductsFilter filter,
+        CancellationToken cancellationToken)
+    {
+        var products = await _listProductsUseCase.ExecuteAsync(filter, cancellationToken);
+
+        return Ok(products.Select(ProductPresenter.ToResponse).ToList());
+    }
+
+    [HttpPost("categories")]
+    [ProducesResponseType(typeof(CategoryResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<CategoryResponse>> CreateCategoryAsync(
+        [FromBody] CreateCategoryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var output = await _createCategoryUseCase.ExecuteAsync(CategoryPresenter.ToCommand(request), cancellationToken);
+        var response = CategoryPresenter.ToResponse(output);
+
+        return CreatedAtAction(nameof(ListCategoriesAsync), null, response);
+    }
+
+    [HttpGet("categories")]
+    [ProducesResponseType(typeof(IReadOnlyList<CategoryResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<CategoryResponse>>> ListCategoriesAsync(CancellationToken cancellationToken)
+    {
+        var categories = await _listCategoriesUseCase.ExecuteAsync(cancellationToken);
+
+        return Ok(categories.Select(CategoryPresenter.ToResponse).ToList());
+    }
+}
