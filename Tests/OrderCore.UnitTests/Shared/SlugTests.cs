@@ -37,4 +37,22 @@ public sealed class SlugTests
     {
         Slug.Create("widget").Should().Be(Slug.Create("widget"));
     }
+
+    [Theory]
+    [InlineData("Wireless Mouse", "wireless-mouse")]
+    [InlineData("  Café Latte  ", "cafe-latte")]
+    [InlineData("Men's T-Shirt (Blue)", "men-s-t-shirt-blue")]
+    [InlineData("Consumer Electronics", "consumer-electronics")]
+    public void GenerateFrom_derives_a_valid_slug_from_free_text(string text, string expected)
+    {
+        Slug.GenerateFrom(text).Value.Should().Be(expected);
+    }
+
+    [Fact]
+    public void GenerateFrom_throws_when_text_has_no_usable_characters()
+    {
+        var act = () => Slug.GenerateFrom("!!!");
+
+        act.Should().Throw<ArgumentException>();
+    }
 }

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace OrderCore.Api.Shared.Domain.ValueObjects;
@@ -33,8 +35,56 @@ public sealed partial record Slug
         return new Slug(value);
     }
 
+    /// <summary>
+    /// Derives a <see cref="Slug"/> from free text (e.g. a product or
+    /// category name) — 03-catalog.md's CreateProductCommand/
+    /// CreateCategoryCommand have no slug field of their own, so the use
+    /// case is expected to generate one from the name instead of asking
+    /// the caller for it.
+    /// </summary>
+    public static Slug GenerateFrom(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new ArgumentException("Text is required.", nameof(text));
+        }
+
+        var withoutDiacritics = RemoveDiacritics(text.Trim().ToLowerInvariant());
+        var slugified = NonSlugCharacters().Replace(withoutDiacritics, "-");
+        var collapsed = RepeatedHyphens().Replace(slugified, "-").Trim('-');
+
+        if (collapsed.Length == 0)
+        {
+            throw new ArgumentException("Text does not contain any character usable in a slug.", nameof(text));
+        }
+
+        return Create(collapsed);
+    }
+
     public override string ToString() => Value;
+
+    private static string RemoveDiacritics(string text)
+    {
+        var normalized = text.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+
+        foreach (var c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(c);
+            }
+        }
+
+        return builder.ToString().Normalize(NormalizationForm.FormC);
+    }
 
     [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
     private static partial Regex SlugFormat();
+
+    [GeneratedRegex("[^a-z0-9]+")]
+    private static partial Regex NonSlugCharacters();
+
+    [GeneratedRegex("-{2,}")]
+    private static partial Regex RepeatedHyphens();
 }
