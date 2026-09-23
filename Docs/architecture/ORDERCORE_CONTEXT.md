@@ -1549,23 +1549,25 @@ Não criar tabelas simplesmente para representar cada classe.
 
 O modelo relacional deve representar as necessidades de persistência do domínio.
 
-`Customers`, `Catalog` e `Orders` (persistência apenas — o restante de
-05-orders.md continua blueprint) têm EF Core de fato implementado até
-agora (os demais módulos ainda são scaffolding). `Customers`
-(`Modules/Customers/Infrastructure/Persistence`) cria `customers`,
-`customer_addresses` e `customer_payment_methods` via
+`Customers`, `Catalog`, `Orders` (persistência apenas — o restante de
+05-orders.md continua blueprint) e `Inventory` têm EF Core de fato
+implementado até agora (os demais módulos ainda são scaffolding).
+`Customers` (`Modules/Customers/Infrastructure/Persistence`) cria
+`customers`, `customer_addresses` e `customer_payment_methods` via
 `InitialCustomersSchema`; `Catalog` (`Modules/Catalog/Infrastructure/Persistence`)
 cria `products`, `product_images`, `product_variants` e `categories` via
 `InitialCatalogSchema`; `Orders` (`Modules/Orders/Infrastructure/Persistence`)
 cria `orders` e `order_items` via `InitialOrdersSchema` — `order_items` é
 chaveado por `(OrderId, ProductId)`, não um id substituto, porque
-`OrderItem` não tem identidade própria no domínio. `IProductCatalog`
-(contrato do próprio Orders) também ganhou sua implementação real,
-`ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`), que lê
-de `IProductRepository` do Catalog — a indireção de "Application Contract"
-da seção 7. O padrão estabelecido em `Customers` e replicado em `Catalog`
-e `Orders`, a ser seguido pelos demais módulos ao ganharem persistência
-real:
+`OrderItem` não tem identidade própria no domínio; `Inventory`
+(`Modules/Inventory/Infrastructure/Persistence`) cria `stock_items`,
+`inventory_reservations` e `stock_movements` via `InitialInventorySchema`.
+`IProductCatalog` (contrato do próprio Orders) também ganhou sua
+implementação real, `ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`),
+que lê de `IProductRepository` do Catalog — a indireção de "Application
+Contract" da seção 7. O padrão estabelecido em `Customers` e replicado em
+`Catalog`, `Orders` e `Inventory`, a ser seguido pelos demais módulos ao
+ganharem persistência real:
 
 - Um `<Módulo>DbContext` por módulo (não um `ApplicationDbContext` único),
   cada um só enxergando as tabelas do próprio módulo — preserva o
@@ -1587,6 +1589,30 @@ real:
   `Shared/Infrastructure/Persistence/ChildCollectionReconciler`, não
   duplicada em cada `Mapper` — extraída quando `Catalog` precisou da mesma
   lógica que `Customers` já tinha para `CustomerAddress`/`CustomerPaymentMethod`.
+- **`ApplyChanges` deve sempre sincronizar `Version`.** Bug real descoberto
+  ao escrever o teste de concorrência do Inventory (seção 34): nenhum dos
+  quatro mappers existentes (`Customer`/`Product`/`Category`/`Order`)
+  copiava `domain.Version` para o Persistence Model em `ApplyChanges` —
+  só em `ToPersistence` (usado apenas no insert). Isso tornava a checagem
+  de concorrência otimista do EF Core um no-op após o primeiro update em
+  qualquer agregado do projeto: a coluna `Version` nunca mudava de fato,
+  então o "valor original" que um segundo escritor concorrente comparava
+  continuava batendo. Corrigido nos quatro mappers existentes e em
+  `StockItemMapper`/`InventoryReservationMapper` desde o início.
+- Quando um caso de uso mexe em mais de um agregado raiz na mesma
+  operação (ex.: `ReserveStockUseCase` mexe em `StockItem` e
+  `InventoryReservation`), um `SaveChangesAsync` por repositório deixa de
+  funcionar — seriam duas transações SQL separadas, não uma unidade
+  atômica. `Inventory` introduziu `IUnitOfWork` (`Modules/Inventory/Application/Contracts/IUnitOfWork.cs`,
+  implementado por `InventoryUnitOfWork`) para esse caso — ver a seção
+  Transactions do `claude.md`, que antes dizia que não existia nenhum
+  equivalente ainda.
+- `InventoryUnitOfWork.SaveChangesAsync` é o primeiro lugar do código que
+  de fato chama `IDomainEventDispatcher.DispatchAsync` (shared kernel):
+  acontece depois que o save do EF Core já teve sucesso, sobre os eventos
+  de domínio combinados de todos os agregados rastreados pelos
+  repositórios envolvidos. `StockMovementRecorder` é o primeiro
+  `IDomainEventHandler<T>` real do projeto.
 
 ---
 

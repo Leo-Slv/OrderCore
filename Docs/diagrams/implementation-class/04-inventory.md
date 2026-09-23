@@ -2,12 +2,36 @@
 
 Saldo de estoque (`StockItem`) e reserva explícita por item de pedido (`InventoryReservation`, já existente no código). Base: [Shared kernel](01-shared-kernel.md) (`AggregateRoot<Guid>`).
 
+Como [02-customers.md](02-customers.md) e [03-catalog.md](03-catalog.md), este módulo já está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core e Presentation) — não é mais um blueprint futuro. Ver `Docs/specs/inventory/stock-and-reservations.md` para o spec completo e as decisões em aberto resolvidas antes da implementação. Diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
+
+- `StockItem.Create` recebe um `now` explícito (como `Customer.Create`), já que `UpdatedAt` precisa de um valor.
+- `IStockItemRepository`/`IInventoryReservationRepository` **não têm** `SaveChangesAsync`: toda operação que muda estado mexe nos dois agregados (`StockItem` e `InventoryReservation`) na mesma chamada, e dois `SaveChangesAsync` separados seriam duas transações SQL diferentes, não uma unidade atômica. Introduzido `IUnitOfWork` (novo, não estava no diagrama) — ver a seção Transactions do `claude.md`.
+- `ExpireReservationUseCase` também depende de `IStockItemRepository`: o diagrama original só listava `IInventoryReservationRepository`, o que deixaria a quantidade reservada presa no `StockItem` para sempre depois de uma reserva expirar.
+- `StockItemPersistenceModel`/`InventoryReservationPersistenceModel` guardam todos os campos das respectivas entidades de domínio (`ProductVariantId`/`UpdatedAt`/`Version` no primeiro; `ReservedAt`/`ReleasedAt`/`ConsumedAt`/`Version` no segundo), não só o subconjunto abreviado do diagrama — mesma razão de `CustomerAddressPersistenceModel`.
+- `StockItemMapper`/`InventoryReservationMapper` ganharam um `ApplyChanges` que o diagrama não lista — mesmo motivo de `CategoryMapper`.
+- `EfStockItemRepository`/`EfInventoryReservationRepository` implementam uma interface interna `IPendingChangesTracker` (não estava no diagrama) em vez de expor `SaveChangesAsync` — é o que permite a `InventoryUnitOfWork` coordenar os dois em um único save atômico.
+- `StockMovementRecorder` é um `IDomainEventHandler<InventoryStockMovementRecorded>` de verdade (não um serviço com `RecordAsync` chamado diretamente pelos use cases) — o primeiro handler de domain event real do projeto, despachado por `InventoryUnitOfWork.SaveChangesAsync` através do `InProcessDomainEventDispatcher` do shared kernel, que até esta feature nunca era efetivamente chamado por ninguém.
+- `InventoryStockMovementRecorded` (novo domain event, não estava no diagrama) é levantado por `InventoryReservation.Create`/`Release`/`Consume` — as três operações que o diagrama já ligava a `StockMovementRecorder`. `StockItem.Receive`/`Adjust` não levantam esse evento: não existe `ReceiveStockUseCase` e `AdjustStockUseCase` não tem seta pontilhada para `StockMovementRecorder` no diagrama original — `Inbound`/`Outbound`/`Adjustment` continuam definidos em `StockMovementType` mas não usados por enquanto (mesmo tratamento de `ChangeProductPriceUseCase` sem rota em Catalog).
+- Corrigido também, ao escrever o teste de concorrência desta feature: `CustomerMapper`/`ProductMapper`/`CategoryMapper`/`OrderMapper.ApplyChanges` nunca sincronizavam `Version` — o token de concorrência otimista nunca incrementava de fato após um update, tornando a checagem do EF Core um no-op em todo o projeto. Corrigido em todos os quatro (commit separado, fora do escopo do Inventory).
+
 ```mermaid
 
 classDiagram
     direction LR
 
     class AggregateRoot~TId~ {
+        <<external>>
+    }
+
+    class IDomainEvent {
+        <<external>>
+    }
+
+    class IDomainEventHandler~TEvent~ {
+        <<external>>
+    }
+
+    class IDomainEventDispatcher {
         <<external>>
     }
 
@@ -20,7 +44,7 @@ classDiagram
         +int QuantityAvailable
         +int ReorderLevel
         +DateTimeOffset UpdatedAt
-        +Create(Guid productId, int initialQuantity, Guid? productVariantId)$ StockItem
+        +Create(Guid productId, int initialQuantity, Guid? productVariantId, DateTimeOffset now)$ StockItem
         +Receive(int quantity) void
         +TryReserve(int quantity) bool
         +Release(int quantity) void
@@ -65,12 +89,23 @@ classDiagram
     }
 
 
+    %% OrderCore.Api.Modules.Inventory.Domain.Events
+    class InventoryStockMovementRecorded {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid ProductId
+        +StockMovementType MovementType
+        +int Quantity
+        +string ReferenceType
+        +Guid ReferenceId
+    }
+
+
     %% OrderCore.Api.Modules.Inventory.Application.Contracts
     class IStockItemRepository {
         <<interface>>
         +GetByProductIdAsync(Guid productId) Task~StockItem?~
         +AddAsync(StockItem stockItem) Task
-        +SaveChangesAsync() Task
     }
 
     class IInventoryReservationRepository {
@@ -78,7 +113,15 @@ classDiagram
         +GetByIdAsync(Guid reservationId) Task~InventoryReservation?~
         +ListByOrderIdAsync(Guid orderId) Task~IReadOnlyList~InventoryReservation~~
         +AddAsync(InventoryReservation reservation) Task
+    }
+
+    class IUnitOfWork {
+        <<interface>>
         +SaveChangesAsync() Task
+    }
+
+    class StockConcurrencyConflictException {
+        <<exception>>
     }
 
 
@@ -106,28 +149,34 @@ classDiagram
     class ReserveStockUseCase {
         -IStockItemRepository stockItems
         -IInventoryReservationRepository reservations
+        -IUnitOfWork unitOfWork
         +ExecuteAsync(ReserveStockCommand command) Task~ReserveStockResult~
     }
 
     class ReleaseReservationUseCase {
         -IStockItemRepository stockItems
         -IInventoryReservationRepository reservations
+        -IUnitOfWork unitOfWork
         +ExecuteAsync(Guid reservationId) Task
     }
 
     class ConsumeReservationUseCase {
         -IStockItemRepository stockItems
         -IInventoryReservationRepository reservations
+        -IUnitOfWork unitOfWork
         +ExecuteAsync(Guid reservationId) Task
     }
 
     class ExpireReservationUseCase {
         -IInventoryReservationRepository reservations
+        -IStockItemRepository stockItems
+        -IUnitOfWork unitOfWork
         +ExecuteAsync(Guid reservationId) Task
     }
 
     class AdjustStockUseCase {
         -IStockItemRepository stockItems
+        -IUnitOfWork unitOfWork
         +ExecuteAsync(Guid productId, int quantity, string reason) Task~StockItemOutput~
     }
 
@@ -148,9 +197,12 @@ classDiagram
     class StockItemPersistenceModel {
         +Guid Id
         +Guid ProductId
+        +Guid? ProductVariantId
         +int QuantityOnHand
         +int QuantityReserved
         +int ReorderLevel
+        +DateTimeOffset UpdatedAt
+        +int Version
     }
 
     class InventoryReservationPersistenceModel {
@@ -160,7 +212,11 @@ classDiagram
         +Guid OrderItemId
         +int Quantity
         +string Status
+        +DateTimeOffset ReservedAt
         +DateTimeOffset? ExpiresAt
+        +DateTimeOffset? ReleasedAt
+        +DateTimeOffset? ConsumedAt
+        +int Version
     }
 
     class StockMovementPersistenceModel {
@@ -176,11 +232,13 @@ classDiagram
     class StockItemMapper {
         +ToDomain(StockItemPersistenceModel model) StockItem
         +ToPersistence(StockItem domain) StockItemPersistenceModel
+        +ApplyChanges(StockItem domain, StockItemPersistenceModel model) void
     }
 
     class InventoryReservationMapper {
         +ToDomain(InventoryReservationPersistenceModel model) InventoryReservation
         +ToPersistence(InventoryReservation domain) InventoryReservationPersistenceModel
+        +ApplyChanges(InventoryReservation domain, InventoryReservationPersistenceModel model) void
     }
 
     class InventoryDbContext {
@@ -190,21 +248,35 @@ classDiagram
         +SaveChangesAsync() Task~int~
     }
 
+    class IPendingChangesTracker {
+        <<interface>>
+        <<internal>>
+        +ApplyPendingChanges() void
+        +CollectAndClearDomainEvents() IReadOnlyCollection~IDomainEvent~
+        +ForgetTrackedEntries() void
+    }
+
     class EfStockItemRepository {
         -InventoryDbContext dbContext
-        -StockItemMapper mapper
     }
 
     class EfInventoryReservationRepository {
         -InventoryDbContext dbContext
-        -InventoryReservationMapper mapper
+    }
+
+    class InventoryUnitOfWork {
+        -InventoryDbContext dbContext
+        -EfStockItemRepository stockItemRepository
+        -EfInventoryReservationRepository reservationRepository
+        -IDomainEventDispatcher domainEventDispatcher
+        +SaveChangesAsync() Task
     }
 
 
     %% OrderCore.Api.Modules.Inventory.Infrastructure.EventHandlers
     class StockMovementRecorder {
         -InventoryDbContext dbContext
-        +RecordAsync(Guid productId, StockMovementType type, int quantity, string? referenceType, Guid? referenceId) Task
+        +HandleAsync(InventoryStockMovementRecorded domainEvent) Task
     }
 
 
@@ -235,26 +307,37 @@ classDiagram
     AggregateRoot~TId~ <|-- StockItem
     AggregateRoot~TId~ <|-- InventoryReservation
     InventoryReservation --> ReservationStatus
+    IDomainEvent <|.. InventoryStockMovementRecorded
+    InventoryReservation ..> InventoryStockMovementRecorded : raises
 
     ReserveStockUseCase --> IStockItemRepository
     ReserveStockUseCase --> IInventoryReservationRepository
+    ReserveStockUseCase --> IUnitOfWork
     ReleaseReservationUseCase --> IStockItemRepository
     ReleaseReservationUseCase --> IInventoryReservationRepository
+    ReleaseReservationUseCase --> IUnitOfWork
     ConsumeReservationUseCase --> IStockItemRepository
     ConsumeReservationUseCase --> IInventoryReservationRepository
+    ConsumeReservationUseCase --> IUnitOfWork
     ExpireReservationUseCase --> IInventoryReservationRepository
+    ExpireReservationUseCase --> IStockItemRepository
+    ExpireReservationUseCase --> IUnitOfWork
     AdjustStockUseCase --> IStockItemRepository
+    AdjustStockUseCase --> IUnitOfWork
     GetStockByProductIdUseCase --> IStockItemRepository
-    ReserveStockUseCase ..> StockMovementRecorder : records movement
-    ReleaseReservationUseCase ..> StockMovementRecorder : records movement
-    ConsumeReservationUseCase ..> StockMovementRecorder : records movement
+    IUnitOfWork ..> StockConcurrencyConflictException : throws on conflict
 
     IStockItemRepository <|.. EfStockItemRepository
     IInventoryReservationRepository <|.. EfInventoryReservationRepository
+    IPendingChangesTracker <|.. EfStockItemRepository
+    IPendingChangesTracker <|.. EfInventoryReservationRepository
     EfStockItemRepository --> InventoryDbContext
-    EfStockItemRepository --> StockItemMapper
     EfInventoryReservationRepository --> InventoryDbContext
-    EfInventoryReservationRepository --> InventoryReservationMapper
+    IUnitOfWork <|.. InventoryUnitOfWork
+    InventoryUnitOfWork --> EfStockItemRepository
+    InventoryUnitOfWork --> EfInventoryReservationRepository
+    InventoryUnitOfWork --> IDomainEventDispatcher : dispatches after save
+    IDomainEventHandler~TEvent~ <|.. StockMovementRecorder
     StockMovementRecorder --> InventoryDbContext
 
     InventoryDependencyInjection --> ReserveStockUseCase : registers

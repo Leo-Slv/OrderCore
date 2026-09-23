@@ -164,12 +164,14 @@ to a module.
 
 The project targets PostgreSQL via Entity Framework Core.
 `Modules/Customers/Infrastructure/Persistence`,
-`Modules/Catalog/Infrastructure/Persistence` and
-`Modules/Orders/Infrastructure/Persistence` are implemented so far (Orders'
-Presentation/other use cases from 05-orders.md are still blueprint —
-only its persistence and `IProductCatalog` implementation exist) — every
-other module's `Infrastructure/Persistence` folder is still scaffolding
-only. Follow their shape when implementing persistence for another module:
+`Modules/Catalog/Infrastructure/Persistence`,
+`Modules/Orders/Infrastructure/Persistence` (Orders' Presentation/other use
+cases from 05-orders.md are still blueprint — only its persistence and
+`IProductCatalog` implementation exist) and
+`Modules/Inventory/Infrastructure/Persistence` are implemented so far —
+every other module's `Infrastructure/Persistence` folder is still
+scaffolding only. Follow their shape when implementing persistence for
+another module:
 
 Domain Entity
     ↕ Mapper
@@ -195,6 +197,26 @@ Database
 - child-collection add/update/remove reconciliation lives in
   `Shared/Infrastructure/Persistence/ChildCollectionReconciler`, reused by
   every `<Entity>Mapper.ApplyChanges` — do not re-implement it per module;
+- **`ApplyChanges` must set `model.Version = domain.Version`.** A real bug
+  slipped into all four existing mappers before Inventory's concurrency
+  test caught it: `Version` was only ever set in `ToPersistence` (insert
+  time), never in `ApplyChanges` (update time), which made EF Core's
+  optimistic-concurrency check a no-op after the first update — the
+  column never actually changed, so a concurrent writer's original-value
+  comparison kept matching. Every `ApplyChanges` must copy `Version`
+  across, full stop;
+- when a use case mutates more than one aggregate root in the same
+  operation (see Transactions below), route the save through that
+  module's `IUnitOfWork` instead of each repository's own
+  `SaveChangesAsync` — see `Modules/Inventory/Application/Contracts/IUnitOfWork.cs`
+  and `InventoryUnitOfWork`;
+- if an aggregate's domain events need to actually reach an
+  `IDomainEventHandler<T>` (shared kernel), dispatch them via
+  `IDomainEventDispatcher.DispatchAsync` right after the save succeeds —
+  `InventoryUnitOfWork.SaveChangesAsync` is the first (and, for modules
+  without an `IUnitOfWork`, the reference) place this actually happens;
+  domain events raised but never dispatched (true for every module before
+  Inventory) just sit unused on the aggregate until `ClearDomainEvents()`;
 - use EF Core migrations, not schema changes applied ad hoc;
 - do not run or apply production migrations automatically from application
   startup;
@@ -203,10 +225,19 @@ Database
 
 ## Transactions
 
-There is no `IUnitOfWork` (or equivalent) yet. When a use case needs
-transactional behavior, introduce one consistent abstraction rather than
-ad-hoc transaction handling scattered across use cases, and register it the
-same way other module dependencies are registered.
+`Modules/Inventory/Application/Contracts/IUnitOfWork.cs` (implemented by
+`InventoryUnitOfWork`) is the first `IUnitOfWork` in the project, added
+because `ReserveStock`/`Release`/`Consume`/`ExpireReservationUseCase` all
+mutate two aggregate roots (`StockItem` and `InventoryReservation`) in one
+operation — a separate `SaveChangesAsync` per repository would be two
+separate SQL transactions, not one atomic unit. When another module's use
+case needs the same (touches more than one aggregate root per operation),
+introduce a `IUnitOfWork` the same way rather than ad-hoc transaction
+handling scattered across use cases, and register it the same way other
+module dependencies are registered. A module whose use cases only ever
+touch one aggregate root per operation does not need one — keep using each
+repository's own `SaveChangesAsync`, matching `ICustomerRepository`/
+`IProductRepository`/`IOrderRepository`.
 
 ## Cross-Cutting Concerns
 

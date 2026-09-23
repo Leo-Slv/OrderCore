@@ -190,13 +190,18 @@ A API expõe `GET /health` para health check e `GET /` como smoke test.
 
 ## Estado atual do scaffold
 
-Este repositório está no estágio inicial da Fase 1 (Modular Monolith):
-solution, módulos, aggregate `Order` com máquina de estados completa,
-`InventoryReservation`, `Payment` com `FakePaymentProvider`, e a suíte de
-testes de arquitetura validando os limites entre camadas. Persistência real
-(EF Core + PostgreSQL), o caso de uso completo de reserva de estoque sob
-concorrência, o Transactional Outbox e a integração com RabbitMQ ainda não
-foram implementados — eles entram conforme as fases descritas em
+`Customers`, `Catalog`, `Inventory` e a persistência de `Orders` (Domain +
+Application + Infrastructure/EF Core + Presentation, exceto os demais
+casos de uso/Presentation de Orders, ainda blueprint) estão implementados
+de ponta a ponta contra PostgreSQL real — ver o topo de cada
+`Docs/diagrams/implementation-class/0N-*.md` para o que já existe vs. o
+que ainda é blueprint. O caso de uso completo de reserva de estoque sob
+concorrência (`Stock = 1`, N requisições concorrentes, exatamente 1
+reserva bem-sucedida) está implementado e validado contra Postgres real —
+ver a seção acima. `Payment` com `FakePaymentProvider`, a integração
+`Orders`↔`Inventory`/`Catalog` completa (`InventoryServiceAdapter`), o
+Transactional Outbox e a integração com RabbitMQ ainda não foram
+implementados — eles entram conforme as fases descritas em
 [Arquitetura](#arquitetura), com ADR próprio quando a decisão for tomada.
 
 ## Filosofia
