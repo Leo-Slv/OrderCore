@@ -162,10 +162,11 @@ to a module.
 ## Persistence
 
 The project targets PostgreSQL via Entity Framework Core.
-`Modules/Customers/Infrastructure/Persistence` is the first (and, until
-another module needs it, the reference) implementation — every other
-module's `Infrastructure/Persistence` folder is still scaffolding only.
-Follow its shape when implementing persistence for another module:
+`Modules/Customers/Infrastructure/Persistence` and
+`Modules/Catalog/Infrastructure/Persistence` are implemented so far —
+every other module's `Infrastructure/Persistence` folder is still
+scaffolding only. Follow their shape when implementing persistence for
+another module:
 
 Domain Entity
     ↕ Mapper
@@ -188,6 +189,9 @@ Database
   EF-tracked persistence model, and reconciles the two with `ApplyChanges`
   right before `SaveChangesAsync` — the repository interface has no
   explicit `UpdateAsync` (same shape as `IOrderRepository`);
+- child-collection add/update/remove reconciliation lives in
+  `Shared/Infrastructure/Persistence/ChildCollectionReconciler`, reused by
+  every `<Entity>Mapper.ApplyChanges` — do not re-implement it per module;
 - use EF Core migrations, not schema changes applied ad hoc;
 - do not run or apply production migrations automatically from application
   startup;

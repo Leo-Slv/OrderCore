@@ -2,6 +2,15 @@
 
 Categorias e produtos (com imagens e variações). É o módulo que substitui o `Product` cru atual por uma entidade robusta o suficiente para alimentar vitrine, PDP e busca no front-end. Base: [Shared kernel](01-shared-kernel.md) (`AggregateRoot<Guid>`, `Slug`).
 
+Como [02-customers.md](02-customers.md), este módulo já está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core e Presentation), não é mais um blueprint futuro. Diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
+
+- `Product.ChangePrice`/`AddImage`/`AddVariant` e `Category.Create` recebem um `now`/`description` explícito que faltava na assinatura abreviada do diagrama, pela mesma razão já documentada em `Customer.Create` (02-customers.md).
+- `CreateProductCommand`/`CreateProductRequest` ganham `Currency`; `CreateCategoryCommand`/`CreateCategoryRequest` e `UpdateProductRequest` ganham `Description`; `ProductOutput`/`ProductResponse` já tinham `ImageUrls` no diagrama mas nada os preenchia — passou a vir do agregado.
+- Nenhuma delas tem um campo de `Slug`: `CreateProductUseCase`/`CreateCategoryUseCase` derivam o slug do nome via `Slug.GenerateFrom` (novo método no shared kernel), em vez do chamador enviar um.
+- `ProductPersistenceModel`/`CategoryPersistenceModel` guardam todos os campos das respectivas entidades de domínio (não só o subconjunto abreviado do diagrama), pela mesma razão de `CustomerAddressPersistenceModel`.
+- `CategoryMapper` ganhou um `ApplyChanges` que o diagrama não lista — sem ele, `Rename`/`ChangeDisplayOrder`/`Activate`/`Deactivate` nunca seriam persistidos.
+- `ChangeProductPriceUseCase` não tem endpoint em `CatalogController`: o diagrama nunca liga esse caso de uso a uma rota, então nenhuma foi criada.
+
 ```mermaid
 
 classDiagram

@@ -1549,12 +1549,15 @@ Não criar tabelas simplesmente para representar cada classe.
 
 O modelo relacional deve representar as necessidades de persistência do domínio.
 
-`Customers` é o primeiro módulo com EF Core de fato implementado (antes só
-existia como scaffolding — ver `Modules/Customers/Infrastructure/Persistence`),
-criando as tabelas `customers`, `customer_addresses` e
-`customer_payment_methods` via a migration `InitialCustomersSchema`. O
-padrão estabelecido lá, a ser seguido pelos demais módulos ao ganharem
-persistência real:
+`Customers` e `Catalog` são os dois módulos com EF Core de fato
+implementado até agora (os demais ainda são scaffolding). `Customers`
+(`Modules/Customers/Infrastructure/Persistence`) cria `customers`,
+`customer_addresses` e `customer_payment_methods` via
+`InitialCustomersSchema`; `Catalog` (`Modules/Catalog/Infrastructure/Persistence`)
+cria `products`, `product_images`, `product_variants` e `categories` via
+`InitialCatalogSchema`. O padrão estabelecido em `Customers` e replicado em
+`Catalog`, a ser seguido pelos demais módulos ao ganharem persistência
+real:
 
 - Um `<Módulo>DbContext` por módulo (não um `ApplicationDbContext` único),
   cada um só enxergando as tabelas do próprio módulo — preserva o
@@ -1571,6 +1574,11 @@ persistência real:
   e o Persistence Model rastreado pelo EF Core, para poder aplicar
   `ApplyChanges` antes de `SaveChangesAsync` — a interface do repositório
   não tem um `UpdateAsync` explícito (mesmo formato de `IOrderRepository`).
+- A reconciliação de coleções filhas (add/update/remove ao comparar o
+  agregado de domínio com a coleção rastreada pelo EF Core) vive em
+  `Shared/Infrastructure/Persistence/ChildCollectionReconciler`, não
+  duplicada em cada `Mapper` — extraída quando `Catalog` precisou da mesma
+  lógica que `Customers` já tinha para `CustomerAddress`/`CustomerPaymentMethod`.
 
 ---
 
