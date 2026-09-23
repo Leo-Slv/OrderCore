@@ -15,10 +15,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Tests\ sits next to this project at the repo root, same as CourseCore's Tests\ -->
+    <!-- Tests\ and Docs\ sit next to this project at the repo root, same
+         as CourseCore's Tests\/Docs\ — neither is part of the API project
+         itself, so both are excluded from its default SDK-style globs. -->
     <Compile Remove="Tests\**\*.cs" />
     <Content Remove="Tests\**\*" />
     <None Remove="Tests\**\*" />
+    <Content Remove="Docs\**\*" />
+    <None Remove="Docs\**\*" />
   </ItemGroup>
 
   <ItemGroup>

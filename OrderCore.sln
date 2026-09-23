@@ -5,8 +5,6 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{73AD0545-C092-4CE7-B6D2-3557AADF5BFE}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{33113F53-BECC-43E2-B62F-10A5FA91BB27}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrderCore.Api", "OrderCore.Api.csproj", "{2745D871-C6FA-4757-96BB-0A5ACB9A6CF1}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrderCore.UnitTests", "Tests\OrderCore.UnitTests\OrderCore.UnitTests.csproj", "{3F40D8AD-9430-4D00-8DDE-5010B7642C84}"
