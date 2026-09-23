@@ -178,4 +178,34 @@ public sealed class Order : AggregateRoot<Guid>
             throw new InvalidOperationException(errorMessage);
         }
     }
+
+    /// <summary>
+    /// Reconstructs an <see cref="Order"/> from already-persisted state,
+    /// distinct from <see cref="Create"/> the same way
+    /// <c>Customer.Rehydrate</c> is (Shared kernel module) — loading an
+    /// existing order must never re-raise <c>OrderCreated</c>.
+    /// </summary>
+    internal static Order Rehydrate(
+        Guid id,
+        Guid customerId,
+        OrderStatus status,
+        string currency,
+        DateTimeOffset createdAt,
+        DateTimeOffset? confirmedAt,
+        DateTimeOffset? cancelledAt,
+        int version,
+        IEnumerable<OrderItem> items)
+    {
+        var order = new Order(id, customerId, currency, createdAt)
+        {
+            Status = status,
+            ConfirmedAt = confirmedAt,
+            CancelledAt = cancelledAt,
+            Version = version,
+        };
+
+        order._items.AddRange(items);
+
+        return order;
+    }
 }

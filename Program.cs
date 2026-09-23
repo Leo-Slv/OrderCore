@@ -17,7 +17,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSharedKernel();
 builder.Services.AddCustomersModule(builder.Configuration);
 builder.Services.AddCatalogModule(builder.Configuration);
-builder.Services.AddOrdersModule();
+builder.Services.AddOrdersModule(builder.Configuration);
 builder.Services.AddPaymentsModule();
 builder.Services.AddAuditLogsModule();
 

@@ -1,4 +1,9 @@
+using Microsoft.EntityFrameworkCore;
+using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
+using OrderCore.Api.Modules.Orders.Infrastructure.Adapters;
+using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
+using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
 
 namespace OrderCore.Api.Modules.Orders;
 
@@ -11,8 +16,14 @@ namespace OrderCore.Api.Modules.Orders;
 /// </summary>
 public static class OrdersDependencyInjection
 {
-    public static IServiceCollection AddOrdersModule(this IServiceCollection services)
+    public static IServiceCollection AddOrdersModule(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddDbContext<OrdersDbContext>(options =>
+            options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
+
+        services.AddScoped<IOrderRepository, EfOrderRepository>();
+        services.AddScoped<IProductCatalog, ProductCatalogAdapter>();
+
         services.AddScoped<CreateOrderHandler>();
 
         return services;
