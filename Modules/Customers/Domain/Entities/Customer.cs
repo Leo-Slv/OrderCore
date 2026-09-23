@@ -174,6 +174,45 @@ public sealed class Customer : AggregateRoot<Guid>
         IncrementVersion();
     }
 
+    /// <summary>
+    /// Reconstructs a <see cref="Customer"/> from already-persisted state.
+    /// Distinct from <see cref="Create"/> on purpose: rehydration must not
+    /// re-run creation invariants or raise <see cref="CustomerRegistered"/>
+    /// again. `internal` because only <c>CustomerMapper</c> (Infrastructure,
+    /// same assembly) should call it — see 02-customers.md's
+    /// Domain/Mapper/PersistenceModel separation.
+    /// </summary>
+    internal static Customer Rehydrate(
+        Guid id,
+        string name,
+        string email,
+        string? phone,
+        string? documentNumber,
+        string passwordHash,
+        bool active,
+        DateTimeOffset? emailVerifiedAt,
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt,
+        int version,
+        IEnumerable<CustomerAddress> addresses,
+        IEnumerable<CustomerPaymentMethod> paymentMethods)
+    {
+        var customer = new Customer(id, name, email, passwordHash, createdAt)
+        {
+            Phone = phone,
+            DocumentNumber = documentNumber,
+            Active = active,
+            EmailVerifiedAt = emailVerifiedAt,
+            UpdatedAt = updatedAt,
+            Version = version,
+        };
+
+        customer._addresses.AddRange(addresses);
+        customer._paymentMethods.AddRange(paymentMethods);
+
+        return customer;
+    }
+
     private CustomerAddress FindAddress(Guid addressId) =>
         _addresses.FirstOrDefault(a => a.Id == addressId)
             ?? throw new InvalidOperationException($"Address '{addressId}' does not belong to this customer.");

@@ -97,6 +97,34 @@ public sealed class CustomerPaymentMethod : Entity<Guid>
             Guid.NewGuid(), provider, providerCustomerReference, brand, last4Digits, expiryMonth, expiryYear, now);
     }
 
+    /// <summary>
+    /// Reconstructs a <see cref="CustomerPaymentMethod"/> from
+    /// already-persisted state. `internal` because only
+    /// <c>CustomerMapper</c> should call it — see
+    /// <see cref="Customer.Rehydrate"/>.
+    /// </summary>
+    internal static CustomerPaymentMethod Rehydrate(
+        Guid id,
+        string provider,
+        string providerCustomerReference,
+        string brand,
+        string last4Digits,
+        int expiryMonth,
+        int expiryYear,
+        bool isDefault,
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt)
+    {
+        var method = new CustomerPaymentMethod(
+            id, provider, providerCustomerReference, brand, last4Digits, expiryMonth, expiryYear, createdAt)
+        {
+            IsDefault = isDefault,
+            UpdatedAt = updatedAt,
+        };
+
+        return method;
+    }
+
     public bool IsExpired(DateTimeOffset now) =>
         ExpiryYear < now.Year || (ExpiryYear == now.Year && ExpiryMonth < now.Month);
 

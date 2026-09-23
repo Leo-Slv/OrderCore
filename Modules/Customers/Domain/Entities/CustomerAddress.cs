@@ -71,6 +71,32 @@ public sealed class CustomerAddress : Entity<Guid>
         Phone = phone;
     }
 
+    /// <summary>
+    /// Reconstructs a <see cref="CustomerAddress"/> from already-persisted
+    /// state. `internal` because only <c>CustomerMapper</c> should call it
+    /// — see <see cref="Customer.Rehydrate"/>.
+    /// </summary>
+    internal static CustomerAddress Rehydrate(
+        Guid id,
+        string label,
+        string recipientName,
+        string? phone,
+        Address address,
+        bool isDefaultShipping,
+        bool isDefaultBilling,
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt)
+    {
+        var customerAddress = new CustomerAddress(id, label, recipientName, phone, address, createdAt)
+        {
+            IsDefaultShipping = isDefaultShipping,
+            IsDefaultBilling = isDefaultBilling,
+            UpdatedAt = updatedAt,
+        };
+
+        return customerAddress;
+    }
+
     public void MarkAsDefaultShipping() => IsDefaultShipping = true;
 
     public void UnmarkAsDefaultShipping() => IsDefaultShipping = false;
