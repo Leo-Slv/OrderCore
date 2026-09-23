@@ -266,7 +266,7 @@ classDiagram
 
 ```
 
-## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
+## Paridade com `Docs/database/OrderCore_Modelagem_Banco_Backend.docx`
 
 O documento de modelagem de banco já especificava `product_variant_id` em `STOCK_ITEMS` (seção 5.5, para estoque por variação) e `released_at`/`consumed_at` em `INVENTORY_RESERVATIONS` (seção 6.5), mas nenhum dos dois tinha chegado a este diagrama. Adicionados agora — `Release`/`Consume` passam a receber `now` para poder preencher o respectivo timestamp (`Expire` não precisa, já que o documento não define um `expired_at` separado: o status `Expired` já é suficiente).
 

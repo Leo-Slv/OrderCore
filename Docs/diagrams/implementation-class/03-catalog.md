@@ -415,7 +415,7 @@ classDiagram
 
 `ProductImage` e `ProductVariant` deixaram de ser bags de propriedades: `Product.AddImage`/`ReorderImages` delegam a promoção/rebaixamento de imagem principal para `MarkAsPrimary`/`UnmarkAsPrimary` no filho, em vez de mexer no campo `IsPrimary` diretamente a partir do agregado. `ProductVariant.Activate`/`Deactivate` permite desligar uma variação específica sem afetar o produto inteiro. `AttributesJson` continua como string por simplicidade nesta fase — se o número de atributos consultados crescer, vale considerar um acessor tipado em vez de expor o JSON bruto para quem consome a entidade.
 
-## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
+## Paridade com `Docs/database/OrderCore_Modelagem_Banco_Backend.docx`
 
 O documento de modelagem de banco (seções 5.1-5.4) já especificava `height_cm`/`width_cm`/`depth_cm` em `PRODUCTS` (para cálculo de frete) e `created_at`/`updated_at` em `CATEGORIES`, `PRODUCTS`, `PRODUCT_IMAGES` e `PRODUCT_VARIANTS`, mas nenhum desses campos tinha chegado a este diagrama — adicionados agora, com o parâmetro `now` correspondente nos respectivos `Create` para que `CreatedAt` seja de fato preenchido na criação (`UpdatedAt` fica por conta da camada de persistência a cada gravação, sem precisar entrar na assinatura de cada método de mutação).
 

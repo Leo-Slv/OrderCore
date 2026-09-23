@@ -33,7 +33,7 @@ the established project convention.
 
 For the full architectural rationale (why Modular Monolith, module
 boundaries, concurrency strategy, the planned Payments -> PayCore
-extraction, etc.), see `docs/architecture/ORDERCORE_CONTEXT.md`.
+extraction, etc.), see `Docs/architecture/ORDERCORE_CONTEXT.md`.
 
 ## Module Structure
 
@@ -216,9 +216,9 @@ instead of ad hoc handling per endpoint.
 
 Tests are located under:
 
-`tests/OrderCore.UnitTests/<Module>/`
-`tests/OrderCore.IntegrationTests/<Module>/`
-`tests/OrderCore.ArchitectureTests/`
+`Tests/OrderCore.UnitTests/<Module>/`
+`Tests/OrderCore.IntegrationTests/<Module>/`
+`Tests/OrderCore.ArchitectureTests/`
 
 Tests are organized by business module (not by technical layer), the same
 criterion used in `Modules/`. `OrderCore.ArchitectureTests` is the
@@ -241,12 +241,12 @@ architecture (a new module, a new cross-module contract, a new persistence
 strategy, etc.), is added, update the documentation in the same change —
 do not treat it as a follow-up:
 
-- Add or update a diagram under `docs/diagrams/implementation-class/` for
+- Add or update a diagram under `Docs/diagrams/implementation-class/` for
   the module (create `NN-<module>.md` following the existing numbered
   files' format, one `classDiagram` per module) and update the index files
-  (`docs/diagrams/implementation-class.md` and
-  `docs/diagrams/implementation-class/00-overview.md`) to reference it.
-- Update `docs/architecture/ORDERCORE_CONTEXT.md` when the change affects
+  (`Docs/diagrams/implementation-class.md` and
+  `Docs/diagrams/implementation-class/00-overview.md`) to reference it.
+- Update `Docs/architecture/ORDERCORE_CONTEXT.md` when the change affects
   the module list, module boundaries, or an architectural decision
   described there.
 - Update this file (`.claude/claude.md`) when the change affects the
@@ -256,7 +256,7 @@ do not treat it as a follow-up:
 Keep the diagrams honest about what actually exists: a module diagram
 should say plainly whether it documents already-implemented code or a
 target/blueprint not yet built (see the note at the top of
-`docs/diagrams/implementation-class/07-auditlogs.md` for the pattern).
+`Docs/diagrams/implementation-class/07-auditlogs.md` for the pattern).
 
 Commit documentation updates separately from the code they document when
 practical, so the history reads as one commit per concern rather than one

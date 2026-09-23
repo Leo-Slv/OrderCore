@@ -177,7 +177,7 @@ OrderCore/
 ├── OrderCore.Api.csproj
 ├── Dockerfile
 │
-├── tests/
+├── Tests/
 │   │
 │   ├── OrderCore.UnitTests/
 │   │   ├── Orders/
@@ -195,7 +195,7 @@ OrderCore/
 │   │
 │   └── OrderCore.ArchitectureTests/
 │
-├── docs/
+├── Docs/
 │   ├── architecture/
 │   ├── adr/
 │   ├── diagrams/
@@ -1402,7 +1402,7 @@ Decisões arquiteturais importantes devem ser documentadas.
 Exemplos:
 
 ```text
-docs/adr/
+Docs/adr/
 
 ADR-001-modular-monolith.md
 ADR-002-module-boundaries.md

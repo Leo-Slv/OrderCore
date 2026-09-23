@@ -297,7 +297,7 @@ classDiagram
 
 `CustomerAddress` e `CustomerPaymentMethod` deixaram de ser bags de propriedades: `Customer.SetDefaultShippingAddress`/`SetDefaultBillingAddress`/`AddPaymentMethod` delegam para `MarkAsDefaultShipping`/`MarkAsDefaultBilling`/`MarkAsDefault` no filho correspondente (e desmarcam o anterior), em vez de mexer nos campos diretamente a partir do agregado. `CustomerPaymentMethod.IsExpired(now)` existe porque comparar mês/ano de expiração é uma regra de negócio, não um detalhe de apresentação — não deveria ser recalculada em cada lugar que precisa checar isso.
 
-## Paridade com `docs/database/OrderCore_Modelagem_Banco_Backend.docx`
+## Paridade com `Docs/database/OrderCore_Modelagem_Banco_Backend.docx`
 
 `PasswordHash` (em `Customer`) e `UpdatedAt` (em `CustomerAddress`) já existiam no documento de modelagem de banco (seção 4.1/4.2) mas não tinham chegado a este diagrama — adicionados agora, junto com o parâmetro `now`/`passwordHash` que faltava nos respectivos `Create` para que os campos possam de fato ser preenchidos. `CustomerPaymentMethod.UpdatedAt` não existia em nenhum dos dois documentos — foi acrescentado em ambos por consistência com toda entidade mutável do sistema (`Customer`, `CustomerAddress`, `Category`, `Product` etc. já rastreiam `updated_at`); mantido como responsabilidade da camada de persistência, sem entrar na assinatura de `MarkAsDefault`/`UnmarkAsDefault`.
 

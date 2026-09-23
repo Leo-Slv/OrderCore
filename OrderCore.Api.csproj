@@ -15,10 +15,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- tests/ sits next to this project at the repo root, same as CourseCore's Tests\ -->
-    <Compile Remove="tests\**\*.cs" />
-    <Content Remove="tests\**\*" />
-    <None Remove="tests\**\*" />
+    <!-- Tests\ sits next to this project at the repo root, same as CourseCore's Tests\ -->
+    <Compile Remove="Tests\**\*.cs" />
+    <Content Remove="Tests\**\*" />
+    <None Remove="Tests\**\*" />
   </ItemGroup>
 
 </Project>

@@ -18,6 +18,6 @@ publish/
 *.snupkg
 *.tmp
 *.temp
-tests/
-docs/
+Tests/
+Docs/
 OrderCore.Api.csproj.user

@@ -3,7 +3,7 @@ namespace OrderCore.Api.Shared.Domain;
 /// <summary>
 /// Base type for aggregate roots. An aggregate root is the only entry point
 /// through which changes to the aggregate's internal state are allowed
-/// (see docs/adr and section 8 of the project context: no anemic entities,
+/// (see Docs/adr and section 8 of the project context: no anemic entities,
 /// no state mutated from outside via public setters).
 /// </summary>
 public abstract class AggregateRoot<TId> : Entity<TId>

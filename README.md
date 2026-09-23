@@ -31,7 +31,7 @@ que** cada decisão técnica foi tomada — não apenas o que foi usado.
 ## Arquitetura
 
 O projeto começa como um **Modular Monolith** (ver
-[ADR-001](docs/adr/ADR-001-modular-monolith.md)): um único processo,
+[ADR-001](Docs/adr/ADR-001-modular-monolith.md)): um único processo,
 organizado por módulos de negócio que não acessam as estruturas internas
 uns dos outros diretamente.
 
@@ -121,12 +121,12 @@ Stripe).
 
 ## Decisões arquiteturais (ADRs)
 
-Decisões relevantes ficam registradas em [`docs/adr/`](docs/adr/), no
+Decisões relevantes ficam registradas em [`Docs/adr/`](Docs/adr/), no
 formato Context / Decision / Alternatives / Consequences — nunca só para
 documentar o uso de uma tecnologia (ver
-[ADR-000 (template)](docs/adr/ADR-000-template.md)). Hoje:
+[ADR-000 (template)](Docs/adr/ADR-000-template.md)). Hoje:
 
-- [ADR-001 — Iniciar como Modular Monolith](docs/adr/ADR-001-modular-monolith.md)
+- [ADR-001 — Iniciar como Modular Monolith](Docs/adr/ADR-001-modular-monolith.md)
 
 Novos ADRs são adicionados conforme decisões concretas são tomadas ao
 longo das fases descritas acima (outbox, RabbitMQ, extração de Payments,
@@ -149,7 +149,7 @@ etc.), não antecipadamente.
 ## Testes
 
 ```text
-tests/
+Tests/
 ├── OrderCore.UnitTests/          # regras de domínio, por módulo de negócio
 │   ├── Orders/
 │   ├── Customers/
