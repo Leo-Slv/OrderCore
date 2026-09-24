@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.UseCases;
+using OrderCore.Api.Modules.Catalog.Infrastructure.Adapters;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Repositories;
 
@@ -20,12 +21,14 @@ public static class CatalogDependencyInjection
 
         services.AddScoped<IProductRepository, EfProductRepository>();
         services.AddScoped<ICategoryRepository, EfCategoryRepository>();
+        services.AddScoped<IStockAvailabilityProvider, InventoryStockAvailabilityAdapter>();
 
         services.AddScoped<CreateProductUseCase>();
         services.AddScoped<UpdateProductUseCase>();
         services.AddScoped<ChangeProductPriceUseCase>();
         services.AddScoped<PublishProductUseCase>();
         services.AddScoped<GetProductByIdUseCase>();
+        services.AddScoped<GetProductBySlugUseCase>();
         services.AddScoped<ListProductsUseCase>();
         services.AddScoped<CreateCategoryUseCase>();
         services.AddScoped<ListCategoriesUseCase>();

@@ -4,6 +4,7 @@ using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Mappers;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Models;
+using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Repositories;
 
@@ -35,9 +36,15 @@ public sealed class EfProductRepository : IProductRepository
         return model is null ? null : Track(model);
     }
 
-    public async Task<IReadOnlyList<Product>> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken)
+    public async Task<Product?> GetBySlugAsync(Slug slug, CancellationToken cancellationToken)
     {
-        var query = Query();
+        var model = await Query().FirstOrDefaultAsync(p => p.Slug == slug.Value, cancellationToken);
+        return model is null ? null : Track(model);
+    }
+
+    public async Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken)
+    {
+        IQueryable<ProductPersistenceModel> query = _dbContext.Products;
 
         if (filter.CategoryId is { } categoryId)
         {
@@ -54,13 +61,24 @@ public sealed class EfProductRepository : IProductRepository
             query = query.Where(p => EF.Functions.ILike(p.Name, $"%{filter.SearchTerm}%"));
         }
 
-        var models = await query
-            .OrderBy(p => p.Name)
+        if (filter.OnSale is { } onSale)
+        {
+            query = onSale
+                ? query.Where(p => p.CompareAtPrice != null && p.CompareAtPrice > p.CurrentPrice)
+                : query.Where(p => p.CompareAtPrice == null || p.CompareAtPrice <= p.CurrentPrice);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var models = await Sort(query, filter.Sort)
+            .Include(p => p.Images)
+            .Include(p => p.Variants)
+            .AsSplitQuery()
             .Skip((filter.Page - 1) * filter.PageSize)
             .Take(filter.PageSize)
             .ToListAsync(cancellationToken);
 
-        return models.Select(Track).ToList();
+        return (models.Select(Track).ToList(), totalCount);
     }
 
     public async Task AddAsync(Product product, CancellationToken cancellationToken)
@@ -79,6 +97,23 @@ public sealed class EfProductRepository : IProductRepository
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Every order ends with <c>Id</c> as a tie-breaker, so products with
+    /// equal names/prices/dates keep a stable order and don't appear on two
+    /// pages (or on none) between requests.
+    /// </summary>
+    private static IQueryable<ProductPersistenceModel> Sort(IQueryable<ProductPersistenceModel> query, ProductSortOrder sort) => sort switch
+    {
+        ProductSortOrder.PriceAsc => query.OrderBy(p => p.CurrentPrice).ThenBy(p => p.Id),
+        ProductSortOrder.PriceDesc => query.OrderByDescending(p => p.CurrentPrice).ThenBy(p => p.Id),
+        ProductSortOrder.Newest => query
+            .OrderBy(p => p.PublishedAt == null)
+            .ThenByDescending(p => p.PublishedAt)
+            .ThenByDescending(p => p.CreatedAt)
+            .ThenBy(p => p.Id),
+        _ => query.OrderBy(p => p.Name).ThenBy(p => p.Id),
+    };
 
     private Product Track(ProductPersistenceModel model)
     {

@@ -9,12 +9,15 @@ namespace OrderCore.Api.Modules.Catalog.Application.UseCases;
 public sealed class PublishProductUseCase
 {
     private readonly IProductRepository _products;
+    private readonly IStockAvailabilityProvider _availability;
     private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public PublishProductUseCase(IProductRepository products, IAuditLogService auditLog, TimeProvider timeProvider)
+    public PublishProductUseCase(
+        IProductRepository products, IStockAvailabilityProvider availability, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _products = products;
+        _availability = availability;
         _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
@@ -29,6 +32,7 @@ public sealed class PublishProductUseCase
 
         await _auditLog.RecordAsync(AuditLogActionNames.ProductPublished, "Product", productId, metadata: null, userId: null, cancellationToken);
 
-        return ProductOutput.From(product);
+        var availability = await _availability.GetAvailabilityAsync(product.Id, cancellationToken);
+        return ProductOutput.From(product, availability);
     }
 }

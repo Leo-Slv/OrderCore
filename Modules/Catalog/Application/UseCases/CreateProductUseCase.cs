@@ -11,14 +11,20 @@ namespace OrderCore.Api.Modules.Catalog.Application.UseCases;
 public sealed class CreateProductUseCase
 {
     private readonly IProductRepository _products;
+    private readonly IStockAvailabilityProvider _availability;
     private readonly ICategoryRepository _categories;
     private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
     public CreateProductUseCase(
-        IProductRepository products, ICategoryRepository categories, IAuditLogService auditLog, TimeProvider timeProvider)
+        IProductRepository products,
+        IStockAvailabilityProvider availability,
+        ICategoryRepository categories,
+        IAuditLogService auditLog,
+        TimeProvider timeProvider)
     {
         _products = products;
+        _availability = availability;
         _categories = categories;
         _auditLog = auditLog;
         _timeProvider = timeProvider;
@@ -36,8 +42,9 @@ public sealed class CreateProductUseCase
         }
 
         var now = _timeProvider.GetUtcNow();
+        var slug = await GenerateUniqueSlugAsync(command.Name, command.Sku, cancellationToken);
         var product = Product.Create(
-            command.Sku, command.Name, Slug.GenerateFrom(command.Name), category.Id, command.CurrentPrice, command.Currency, now);
+            command.Sku, command.Name, slug, category.Id, command.CurrentPrice, command.Currency, now);
 
         await _products.AddAsync(product, cancellationToken);
         await _products.SaveChangesAsync(cancellationToken);
@@ -50,6 +57,32 @@ public sealed class CreateProductUseCase
             userId: null,
             cancellationToken);
 
-        return ProductOutput.From(product);
+        var availability = await _availability.GetAvailabilityAsync(product.Id, cancellationToken);
+        return ProductOutput.From(product, availability);
+    }
+
+    /// <summary>
+    /// Slugs identify product pages, so they must be unique (enforced by a
+    /// unique index). The name alone is tried first; on a collision the
+    /// SKU is appended, and SKUs are already unique. A second collision
+    /// is only possible if another product's name happens to produce
+    /// this exact "name-sku" slug, so it is reported as a conflict
+    /// instead of retrying forever.
+    /// </summary>
+    private async Task<Slug> GenerateUniqueSlugAsync(string name, string sku, CancellationToken cancellationToken)
+    {
+        var slug = Slug.GenerateFrom(name);
+        if (await _products.GetBySlugAsync(slug, cancellationToken) is null)
+        {
+            return slug;
+        }
+
+        var withSku = Slug.GenerateFrom($"{name} {sku}");
+        if (await _products.GetBySlugAsync(withSku, cancellationToken) is null)
+        {
+            return withSku;
+        }
+
+        throw new ConflictException("slug_already_exists", $"Could not generate a unique slug for product '{name}'.");
     }
 }

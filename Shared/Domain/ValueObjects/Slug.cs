@@ -18,6 +18,13 @@ public sealed partial record Slug
         Value = value;
     }
 
+    /// <summary>
+    /// Whether <paramref name="value"/> would be accepted by <see cref="Create"/>.
+    /// For untrusted input (e.g. a route parameter) where a bad format
+    /// means "no such resource", not a validation error.
+    /// </summary>
+    public static bool IsValid(string? value) => !string.IsNullOrWhiteSpace(value) && SlugFormat().IsMatch(value);
+
     public static Slug Create(string value)
     {
         if (string.IsNullOrWhiteSpace(value))

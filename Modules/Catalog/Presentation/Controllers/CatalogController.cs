@@ -4,6 +4,7 @@ using OrderCore.Api.Modules.Catalog.Application.UseCases;
 using OrderCore.Api.Modules.Catalog.Presentation.Presenters;
 using OrderCore.Api.Modules.Catalog.Presentation.Requests;
 using OrderCore.Api.Modules.Catalog.Presentation.Responses;
+using OrderCore.Api.Shared.Presentation.Responses;
 
 namespace OrderCore.Api.Modules.Catalog.Presentation.Controllers;
 
@@ -26,6 +27,7 @@ public sealed class CatalogController : ControllerBase
     private readonly UpdateProductUseCase _updateProductUseCase;
     private readonly PublishProductUseCase _publishProductUseCase;
     private readonly GetProductByIdUseCase _getProductByIdUseCase;
+    private readonly GetProductBySlugUseCase _getProductBySlugUseCase;
     private readonly ListProductsUseCase _listProductsUseCase;
     private readonly CreateCategoryUseCase _createCategoryUseCase;
     private readonly ListCategoriesUseCase _listCategoriesUseCase;
@@ -35,6 +37,7 @@ public sealed class CatalogController : ControllerBase
         UpdateProductUseCase updateProductUseCase,
         PublishProductUseCase publishProductUseCase,
         GetProductByIdUseCase getProductByIdUseCase,
+        GetProductBySlugUseCase getProductBySlugUseCase,
         ListProductsUseCase listProductsUseCase,
         CreateCategoryUseCase createCategoryUseCase,
         ListCategoriesUseCase listCategoriesUseCase)
@@ -43,6 +46,7 @@ public sealed class CatalogController : ControllerBase
         _updateProductUseCase = updateProductUseCase;
         _publishProductUseCase = publishProductUseCase;
         _getProductByIdUseCase = getProductByIdUseCase;
+        _getProductBySlugUseCase = getProductBySlugUseCase;
         _listProductsUseCase = listProductsUseCase;
         _createCategoryUseCase = createCategoryUseCase;
         _listCategoriesUseCase = listCategoriesUseCase;
@@ -98,15 +102,35 @@ public sealed class CatalogController : ControllerBase
         return Ok(ProductPresenter.ToResponse(output));
     }
 
+    /// <summary>
+    /// Only published, active products are returned. See
+    /// <see cref="GetProductBySlugUseCase"/>.
+    /// </summary>
+    [HttpGet("products/by-slug/{slug}")]
+    [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ProductResponse>> GetProductBySlugAsync(string slug, CancellationToken cancellationToken)
+    {
+        var output = await _getProductBySlugUseCase.ExecuteAsync(slug, cancellationToken);
+
+        return Ok(ProductPresenter.ToResponse(output));
+    }
+
+    /// <summary>
+    /// Returns every product matching the filter, drafts included. The
+    /// storefront passes <c>active=true</c>; hiding drafts from public
+    /// callers entirely waits for authentication (V2).
+    /// </summary>
     [HttpGet("products")]
-    [ProducesResponseType(typeof(IReadOnlyList<ProductResponse>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<ProductResponse>>> ListProductsAsync(
+    [ProducesResponseType(typeof(PagedResponse<ProductSummaryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PagedResponse<ProductSummaryResponse>>> ListProductsAsync(
         [FromQuery] ListProductsFilter filter,
         CancellationToken cancellationToken)
     {
         var products = await _listProductsUseCase.ExecuteAsync(filter, cancellationToken);
 
-        return Ok(products.Select(ProductPresenter.ToResponse).ToList());
+        return Ok(ProductPresenter.ToResponse(products));
     }
 
     [HttpPost("categories")]

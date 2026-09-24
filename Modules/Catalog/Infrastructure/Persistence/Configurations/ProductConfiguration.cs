@@ -25,6 +25,7 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<ProductPersi
         builder.Property(p => p.DepthCm).HasPrecision(10, 2);
 
         builder.HasIndex(p => p.Sku).IsUnique();
+        builder.HasIndex(p => p.Slug).IsUnique();
         builder.HasIndex(p => p.CategoryId);
 
         builder.Property(p => p.Version).IsConcurrencyToken();

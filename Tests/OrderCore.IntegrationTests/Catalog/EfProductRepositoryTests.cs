@@ -1,5 +1,8 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Repositories;
@@ -110,5 +113,150 @@ public sealed class EfProductRepositoryTests : IAsyncLifetime
 
             reloaded!.Status.Should().Be(Api.Modules.Catalog.Domain.Enums.ProductStatus.Active);
         }
+    }
+
+    private static async Task<Guid> SeedAsync(
+        CatalogDbContext dbContext, string sku, string name, decimal price, decimal? compareAtPrice = null, DateTimeOffset? publishedAt = null)
+    {
+        var repository = new EfProductRepository(dbContext);
+        var product = Product.Create(sku, name, Slug.GenerateFrom(name), Guid.NewGuid(), price, "BRL", DateTimeOffset.UtcNow);
+        await repository.AddAsync(product, CancellationToken.None);
+        await repository.SaveChangesAsync(CancellationToken.None);
+
+        // No domain method sets CompareAtPrice or back-dates PublishedAt,
+        // so both are written straight to the row.
+        await dbContext.Products
+            .Where(p => p.Id == product.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.CompareAtPrice, compareAtPrice)
+                .SetProperty(p => p.PublishedAt, publishedAt));
+
+        return product.Id;
+    }
+
+    [Fact]
+    public async Task ListAsync_returns_one_page_and_the_total_across_pages()
+    {
+        await using (var dbContext = CreateDbContext())
+        {
+            await SeedAsync(dbContext, "SKU-A", "Alpha", 10m);
+            await SeedAsync(dbContext, "SKU-B", "Bravo", 20m);
+            await SeedAsync(dbContext, "SKU-C", "Charlie", 30m);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var (items, totalCount) = await new EfProductRepository(dbContext)
+                .ListAsync(new ListProductsFilter { Page = 2, PageSize = 2 }, CancellationToken.None);
+
+            totalCount.Should().Be(3);
+            items.Select(p => p.Name).Should().Equal("Charlie");
+        }
+    }
+
+    [Theory]
+    [InlineData(ProductSortOrder.Name, new[] { "Alpha", "Bravo", "Charlie" })]
+    [InlineData(ProductSortOrder.PriceAsc, new[] { "Bravo", "Charlie", "Alpha" })]
+    [InlineData(ProductSortOrder.PriceDesc, new[] { "Alpha", "Charlie", "Bravo" })]
+    [InlineData(ProductSortOrder.Newest, new[] { "Charlie", "Alpha", "Bravo" })]
+    public async Task ListAsync_applies_the_requested_sort(ProductSortOrder sort, string[] expectedNames)
+    {
+        var now = DateTimeOffset.UtcNow;
+        await using (var dbContext = CreateDbContext())
+        {
+            await SeedAsync(dbContext, "SKU-A", "Alpha", 30m, publishedAt: now.AddDays(-2));
+            await SeedAsync(dbContext, "SKU-B", "Bravo", 10m, publishedAt: null);
+            await SeedAsync(dbContext, "SKU-C", "Charlie", 20m, publishedAt: now.AddDays(-1));
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var (items, _) = await new EfProductRepository(dbContext)
+                .ListAsync(new ListProductsFilter { Sort = sort }, CancellationToken.None);
+
+            items.Select(p => p.Name).Should().Equal(expectedNames);
+        }
+    }
+
+    [Fact]
+    public async Task ListAsync_with_on_sale_keeps_only_products_priced_below_their_compare_at_price()
+    {
+        await using (var dbContext = CreateDbContext())
+        {
+            await SeedAsync(dbContext, "SKU-A", "Alpha", 10m, compareAtPrice: 15m);
+            await SeedAsync(dbContext, "SKU-B", "Bravo", 10m, compareAtPrice: 10m);
+            await SeedAsync(dbContext, "SKU-C", "Charlie", 10m);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfProductRepository(dbContext);
+
+            var (onSale, onSaleCount) = await repository.ListAsync(new ListProductsFilter { OnSale = true }, CancellationToken.None);
+            var (notOnSale, _) = await repository.ListAsync(new ListProductsFilter { OnSale = false }, CancellationToken.None);
+
+            onSaleCount.Should().Be(1);
+            onSale.Select(p => p.Name).Should().Equal("Alpha");
+            notOnSale.Select(p => p.Name).Should().Equal("Bravo", "Charlie");
+        }
+    }
+
+    [Fact]
+    public async Task GetBySlugAsync_finds_the_product_with_that_slug()
+    {
+        Guid productId;
+        await using (var dbContext = CreateDbContext())
+        {
+            productId = await SeedAsync(dbContext, "SKU-A", "Wireless Mouse", 10m);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfProductRepository(dbContext);
+
+            (await repository.GetBySlugAsync(Slug.Create("wireless-mouse"), CancellationToken.None))!.Id.Should().Be(productId);
+            (await repository.GetBySlugAsync(Slug.Create("unknown"), CancellationToken.None)).Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task Two_products_cannot_share_a_slug()
+    {
+        await using (var dbContext = CreateDbContext())
+        {
+            await SeedAsync(dbContext, "SKU-A", "Wireless Mouse", 10m);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var act = () => SeedAsync(dbContext, "SKU-B", "Wireless Mouse", 20m);
+
+            await act.Should().ThrowAsync<DbUpdateException>();
+        }
+    }
+
+    [Fact]
+    public async Task Slug_index_migration_renames_existing_duplicates_before_creating_the_index()
+    {
+        await using var dbContext = CreateDbContext();
+        var migrator = dbContext.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260923162046_InitialCatalogSchema");
+
+        var oldest = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+        var newer = Guid.Parse("bbbbbbbb-1111-0000-0000-000000000002");
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO products ("Id", "Sku", "Name", "Slug", "CategoryId", "CurrentPrice", "Currency", "Status", "Active", "CreatedAt", "UpdatedAt", "Version")
+            VALUES
+                ({0}, 'SKU-A', 'Mouse', 'mouse', {2}, 10, 'BRL', 'Draft', true, now() - interval '1 day', now(), 1),
+                ({1}, 'SKU-B', 'Mouse', 'mouse', {2}, 20, 'BRL', 'Draft', true, now(), now(), 1);
+            """,
+            oldest, newer, Guid.NewGuid());
+
+        await migrator.MigrateAsync();
+
+        var slugs = await dbContext.Products.AsNoTracking().ToDictionaryAsync(p => p.Id, p => p.Slug);
+        slugs[oldest].Should().Be("mouse");
+        slugs[newer].Should().Be("mouse-bbbbbbbb");
     }
 }

@@ -1,12 +1,11 @@
 namespace OrderCore.Api.Modules.Catalog.Presentation.Responses;
 
 /// <summary>
-/// Full product detail — the product page (<c>GET catalog/products/by-slug/{slug}</c>)
-/// and the admin create/update/get-by-id endpoints. <see cref="Availability"/>
-/// is <c>InStock</c>, <c>LowStock</c> or <c>OutOfStock</c>; quantities are
-/// never exposed.
+/// One product card in <c>GET catalog/products</c>. See
+/// <see cref="ProductResponse"/> for the full detail and for what
+/// <see cref="Availability"/> can be.
 /// </summary>
-public sealed class ProductResponse
+public sealed class ProductSummaryResponse
 {
     public Guid Id { get; init; }
 
@@ -17,8 +16,6 @@ public sealed class ProductResponse
     public string Name { get; init; } = string.Empty;
 
     public string? ShortDescription { get; init; }
-
-    public string? Description { get; init; }
 
     public string? Brand { get; init; }
 
@@ -32,9 +29,7 @@ public sealed class ProductResponse
 
     public string Status { get; init; } = string.Empty;
 
-    public IReadOnlyList<ProductImageResponse> Images { get; init; } = [];
-
-    public IReadOnlyList<ProductVariantResponse> Variants { get; init; } = [];
+    public string? PrimaryImageUrl { get; init; }
 
     public string Availability { get; init; } = string.Empty;
 }

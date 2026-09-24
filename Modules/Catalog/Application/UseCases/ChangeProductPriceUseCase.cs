@@ -10,12 +10,15 @@ namespace OrderCore.Api.Modules.Catalog.Application.UseCases;
 public sealed class ChangeProductPriceUseCase
 {
     private readonly IProductRepository _products;
+    private readonly IStockAvailabilityProvider _availability;
     private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public ChangeProductPriceUseCase(IProductRepository products, IAuditLogService auditLog, TimeProvider timeProvider)
+    public ChangeProductPriceUseCase(
+        IProductRepository products, IStockAvailabilityProvider availability, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _products = products;
+        _availability = availability;
         _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
@@ -36,6 +39,7 @@ public sealed class ChangeProductPriceUseCase
             userId: null,
             cancellationToken);
 
-        return ProductOutput.From(product);
+        var availability = await _availability.GetAvailabilityAsync(product.Id, cancellationToken);
+        return ProductOutput.From(product, availability);
     }
 }

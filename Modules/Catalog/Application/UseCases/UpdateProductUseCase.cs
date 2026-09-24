@@ -7,10 +7,12 @@ namespace OrderCore.Api.Modules.Catalog.Application.UseCases;
 public sealed class UpdateProductUseCase
 {
     private readonly IProductRepository _products;
+    private readonly IStockAvailabilityProvider _availability;
 
-    public UpdateProductUseCase(IProductRepository products)
+    public UpdateProductUseCase(IProductRepository products, IStockAvailabilityProvider availability)
     {
         _products = products;
+        _availability = availability;
     }
 
     public async Task<ProductOutput> ExecuteAsync(Guid productId, UpdateProductCommand command, CancellationToken cancellationToken)
@@ -21,6 +23,7 @@ public sealed class UpdateProductUseCase
         product.UpdateDetails(command.Name, command.ShortDescription, command.Description, command.Brand);
         await _products.SaveChangesAsync(cancellationToken);
 
-        return ProductOutput.From(product);
+        var availability = await _availability.GetAvailabilityAsync(product.Id, cancellationToken);
+        return ProductOutput.From(product, availability);
     }
 }

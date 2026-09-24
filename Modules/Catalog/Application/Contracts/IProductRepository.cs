@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
+using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.Api.Modules.Catalog.Application.Contracts;
 
@@ -15,7 +16,14 @@ public interface IProductRepository
 
     Task<Product?> GetBySkuAsync(string sku, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<Product>> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken);
+    Task<Product?> GetBySlugAsync(Slug slug, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// One page of the filtered products, in <see cref="ListProductsFilter.Sort"/>
+    /// order, plus the total number of matches across all pages. Same
+    /// shape as <c>IAuditLogRepository.ListPagedAsync</c>.
+    /// </summary>
+    Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken);
 
     Task AddAsync(Product product, CancellationToken cancellationToken);
 

@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
+using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.UnitTests.Catalog;
 
@@ -19,8 +20,18 @@ internal sealed class FakeProductRepository : IProductRepository
     public Task<Product?> GetBySkuAsync(string sku, CancellationToken cancellationToken) =>
         Task.FromResult(_products.Values.FirstOrDefault(p => p.Sku == sku));
 
-    public Task<IReadOnlyList<Product>> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<Product>>(_products.Values.ToList());
+    public Task<Product?> GetBySlugAsync(Slug slug, CancellationToken cancellationToken) =>
+        Task.FromResult(_products.Values.FirstOrDefault(p => p.Slug == slug));
+
+    /// <summary>
+    /// Ignores filtering and sorting, which are covered by the EF
+    /// repository's integration tests; only paging is applied.
+    /// </summary>
+    public Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken)
+    {
+        var page = _products.Values.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize).ToList();
+        return Task.FromResult<(IReadOnlyList<Product>, int)>((page, _products.Count));
+    }
 
     public Task AddAsync(Product product, CancellationToken cancellationToken)
     {
