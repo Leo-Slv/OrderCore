@@ -6,6 +6,15 @@ using OrderCore.Api.Modules.Payments.Domain.Repositories;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
+/// <summary>
+/// Returns the created <see cref="Domain.Entities.Refund"/> — 06-payments.md's
+/// signature returns plain <c>Task</c>, but <c>PaymentsController.RequestRefundAsync</c>
+/// has no other way to build a <c>RefundResponse</c> afterward: its field
+/// list only has this use case, <c>CreatePaymentUseCase</c> and
+/// <c>GetPaymentByOrderIdUseCase</c>, none of which can look a payment up
+/// by its own id. Same class of gap as <c>ConfirmOrderUseCase</c> et al.
+/// needing `now`.
+/// </summary>
 public sealed class RequestRefundUseCase
 {
     private readonly IPaymentRepository _payments;
@@ -21,7 +30,7 @@ public sealed class RequestRefundUseCase
         _timeProvider = timeProvider;
     }
 
-    public async Task ExecuteAsync(RequestRefundCommand command, CancellationToken cancellationToken)
+    public async Task<Domain.Entities.Refund> ExecuteAsync(RequestRefundCommand command, CancellationToken cancellationToken)
     {
         var payment = await _payments.GetByIdAsync(command.PaymentId, cancellationToken)
             ?? throw new InvalidOperationException($"Payment '{command.PaymentId}' was not found.");
@@ -62,5 +71,7 @@ public sealed class RequestRefundUseCase
         }
 
         await _payments.SaveChangesAsync(cancellationToken);
+
+        return refund;
     }
 }
