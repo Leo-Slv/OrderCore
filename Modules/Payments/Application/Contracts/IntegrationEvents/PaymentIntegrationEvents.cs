@@ -1,3 +1,5 @@
+using OrderCore.Api.Shared.Domain;
+
 namespace OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
 
 /// <summary>
@@ -6,12 +8,20 @@ namespace OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents
 /// the other side of the wire (e.g. PayCore) must be able to deserialize
 /// this contract without depending on OrderCore's domain model.
 ///
-/// Today these are placeholders: while Payments still lives in-process,
-/// nothing publishes them yet. They exist so the shape of the eventual
-/// contract is designed deliberately (section 3, Fase 3) instead of
-/// improvised at extraction time.
+/// No longer just a placeholder: <see cref="OutboxPublisherBackgroundService"/>
+/// (Infrastructure/Outbox) actually publishes these now, by calling the
+/// existing <see cref="IDomainEventDispatcher"/> directly — RabbitMQ
+/// (section 21) is still a later phase, so this is a deliberate, temporary
+/// bridge that reuses the in-process dispatcher's plumbing instead of
+/// inventing a second one for a transport that doesn't exist yet. That is
+/// the only thing shared with domain events: an <see cref="IntegrationEvent"/>
+/// is still conceptually cross-process (routed through the outbox table,
+/// carries its own <see cref="Version"/> for schema evolution), not an
+/// in-process domain fact. See
+/// Docs/specs/payments/payment-processing.md's "How publish works before
+/// RabbitMQ exists".
 /// </summary>
-public abstract record IntegrationEvent
+public abstract record IntegrationEvent : IDomainEvent
 {
     public required Guid EventId { get; init; }
 
