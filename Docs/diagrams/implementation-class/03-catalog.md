@@ -11,6 +11,16 @@ Como [02-customers.md](02-customers.md), este módulo já está **implementado**
 - `CategoryMapper` ganhou um `ApplyChanges` que o diagrama não lista — sem ele, `Rename`/`ChangeDisplayOrder`/`Activate`/`Deactivate` nunca seriam persistidos.
 - `ChangeProductPriceUseCase` não tem endpoint em `CatalogController`: o diagrama nunca liga esse caso de uso a uma rota, então nenhuma foi criada.
 
+Adicionado pelo MVP do storefront (`Docs/specs/storefront/storefront-api-mvp.md`, etapa 3):
+
+- **Listagem da vitrine** — `GET catalog/products` passou a devolver `PagedResponse<ProductSummaryResponse>` (total de itens/páginas, `pageSize` até 100), com ordenação `Sort` (`Name`, `PriceAsc`, `PriceDesc`, `Newest`, sempre com `Id` como desempate) e filtro `OnSale` (`CompareAtPrice > CurrentPrice`). `IProductRepository.ListAsync` devolve `(Items, TotalCount)`, no mesmo formato de `IAuditLogRepository.ListPagedAsync`. A listagem continua trazendo rascunhos se o chamador não mandar `active=true` (o admin também a usa; esconder do público depende de autenticação).
+- **Página do produto por slug** — `GET catalog/products/by-slug/{slug}` (`GetProductBySlugUseCase`) só devolve produto publicado e ativo; rascunho, descontinuado e slug mal formado dão o mesmo 404. `Slug.IsValid` (shared kernel) evita tratar um slug mal formado como erro de validação.
+- **Slug único** — índice único em `products.Slug` (a migração `AddProductSlugUniqueIndex` renomeia duplicatas antigas antes de criar o índice) e `CreateProductUseCase` acrescenta o SKU quando o slug do nome já está em uso.
+- **Disponibilidade** — novo contrato `IStockAvailabilityProvider` (Catalog → Inventory), implementado por `InventoryStockAvailabilityAdapter` sobre `GetStockAvailabilityUseCase`; só o estado (`StockAvailability`: `InStock`/`LowStock`/`OutOfStock`) sai do Catalog, nunca quantidades. Todos os casos de uso que devolvem `ProductOutput` consultam a disponibilidade, para `ProductResponse` ter sempre o mesmo formato.
+- `ProductOutput`/`ProductResponse` ganharam slug, descrições, marca, categoria, moeda, imagens ordenadas (`ProductImageOutput`/`ProductImageResponse`), variantes ativas (`ProductVariantOutput`/`ProductVariantResponse`, com `AttributesJson` convertido num mapa nome/valor pelo presenter) e disponibilidade; `ImageUrls` foi substituído por `Images`.
+- `IProductRepository.ListByIdsAsync` existe para o `ProductCatalogAdapter` do Orders buscar vários produtos de uma vez (cotação do carrinho e checkout).
+- `ProductImagePersistenceModel.Id`/`ProductVariantPersistenceModel.Id` usam `ValueGeneratedNever()`: sem isso o EF Core tratava uma imagem/variante nova num produto já salvo como linha existente (UPDATE que não afetava nada).
+
 ```mermaid
 
 classDiagram
@@ -138,9 +148,16 @@ classDiagram
         <<interface>>
         +GetByIdAsync(Guid productId) Task~Product?~
         +GetBySkuAsync(string sku) Task~Product?~
-        +ListAsync(ListProductsFilter filter) Task~IReadOnlyList~Product~~
+        +GetBySlugAsync(Slug slug) Task~Product?~
+        +ListByIdsAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyList~Product~~
+        +ListAsync(ListProductsFilter filter) Task~ValueTuple~IReadOnlyList~Product~, int~~
         +AddAsync(Product product) Task
         +SaveChangesAsync() Task
+    }
+
+    class IStockAvailabilityProvider {
+        <<interface>>
+        +GetAvailabilityAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, StockAvailability~~
     }
 
     class ICategoryRepository {
@@ -172,17 +189,77 @@ classDiagram
         +Guid? CategoryId
         +bool? Active
         +string? SearchTerm
+        +bool? OnSale
+        +ProductSortOrder Sort
         +int Page
         +int PageSize
+    }
+
+    class ProductSortOrder {
+        <<enumeration>>
+        Name
+        PriceAsc
+        PriceDesc
+        Newest
+    }
+
+    class StockAvailability {
+        <<enumeration>>
+        InStock
+        LowStock
+        OutOfStock
     }
 
     class ProductOutput {
         +Guid Id
         +string Sku
+        +string Slug
         +string Name
+        +string? ShortDescription
+        +string? Description
+        +string? Brand
+        +Guid CategoryId
         +decimal CurrentPrice
         +decimal? CompareAtPrice
+        +string Currency
         +ProductStatus Status
+        +IReadOnlyList~ProductImageOutput~ Images
+        +IReadOnlyList~ProductVariantOutput~ Variants
+        +StockAvailability Availability
+        +From(Product product, StockAvailability availability)$ ProductOutput
+    }
+
+    class ProductImageOutput {
+        +Guid Id
+        +string Url
+        +string? AltText
+        +bool IsPrimary
+        +int DisplayOrder
+    }
+
+    class ProductVariantOutput {
+        +Guid Id
+        +string Sku
+        +string Name
+        +string AttributesJson
+        +decimal AdditionalPrice
+    }
+
+    class ProductSummaryOutput {
+        +Guid Id
+        +string Sku
+        +string Slug
+        +string Name
+        +string? ShortDescription
+        +string? Brand
+        +Guid CategoryId
+        +decimal CurrentPrice
+        +decimal? CompareAtPrice
+        +string Currency
+        +ProductStatus Status
+        +string? PrimaryImageUrl
+        +StockAvailability Availability
+        +From(Product product, StockAvailability availability)$ ProductSummaryOutput
     }
 
     class CreateCategoryCommand {
@@ -200,33 +277,46 @@ classDiagram
     %% OrderCore.Api.Modules.Catalog.Application.UseCases
     class CreateProductUseCase {
         -IProductRepository products
+        -IStockAvailabilityProvider availability
         -ICategoryRepository categories
         +ExecuteAsync(CreateProductCommand command) Task~ProductOutput~
+        -GenerateUniqueSlugAsync(string name, string sku) Task~Slug~
     }
 
     class UpdateProductUseCase {
         -IProductRepository products
+        -IStockAvailabilityProvider availability
         +ExecuteAsync(Guid productId, UpdateProductCommand command) Task~ProductOutput~
     }
 
     class ChangeProductPriceUseCase {
         -IProductRepository products
+        -IStockAvailabilityProvider availability
         +ExecuteAsync(Guid productId, decimal newPrice) Task~ProductOutput~
     }
 
     class PublishProductUseCase {
         -IProductRepository products
+        -IStockAvailabilityProvider availability
         +ExecuteAsync(Guid productId) Task~ProductOutput~
     }
 
     class GetProductByIdUseCase {
         -IProductRepository products
+        -IStockAvailabilityProvider availability
         +ExecuteAsync(Guid productId) Task~ProductOutput~
+    }
+
+    class GetProductBySlugUseCase {
+        -IProductRepository products
+        -IStockAvailabilityProvider availability
+        +ExecuteAsync(string slug) Task~ProductOutput~
     }
 
     class ListProductsUseCase {
         -IProductRepository products
-        +ExecuteAsync(ListProductsFilter filter) Task~IReadOnlyList~ProductOutput~~
+        -IStockAvailabilityProvider availability
+        +ExecuteAsync(ListProductsFilter filter) Task~PagedResult~ProductSummaryOutput~~
     }
 
     class CreateCategoryUseCase {
@@ -313,12 +403,26 @@ classDiagram
     }
 
 
+    %% OrderCore.Api.Modules.Catalog.Infrastructure.Adapters
+    class GetStockAvailabilityUseCase {
+        <<external>>
+    }
+
+    note for GetStockAvailabilityUseCase "Inventory module — ver 04-inventory.md"
+
+    class InventoryStockAvailabilityAdapter {
+        -GetStockAvailabilityUseCase getStockAvailability
+        +GetAvailabilityAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, StockAvailability~~
+    }
+
+
     %% OrderCore.Api.Modules.Catalog.Presentation
     class CatalogController {
         -CreateProductUseCase createProductUseCase
         -UpdateProductUseCase updateProductUseCase
         -PublishProductUseCase publishProductUseCase
         -GetProductByIdUseCase getProductByIdUseCase
+        -GetProductBySlugUseCase getProductBySlugUseCase
         -ListProductsUseCase listProductsUseCase
         -CreateCategoryUseCase createCategoryUseCase
         -ListCategoriesUseCase listCategoriesUseCase
@@ -326,7 +430,8 @@ classDiagram
         +UpdateProductAsync(Guid id, UpdateProductRequest request) Task~ActionResult~ProductResponse~~
         +PublishProductAsync(Guid id) Task~IActionResult~
         +GetProductByIdAsync(Guid id) Task~ActionResult~ProductResponse~~
-        +ListProductsAsync(ListProductsFilter filter) Task~ActionResult~IReadOnlyList~ProductResponse~~~
+        +GetProductBySlugAsync(string slug) Task~ActionResult~ProductResponse~~
+        +ListProductsAsync(ListProductsFilter filter) Task~ActionResult~PagedResponse~ProductSummaryResponse~~~
         +CreateCategoryAsync(CreateCategoryRequest request) Task~ActionResult~CategoryResponse~~
         +ListCategoriesAsync() Task~ActionResult~IReadOnlyList~CategoryResponse~~~
     }
@@ -352,11 +457,51 @@ classDiagram
     class ProductResponse {
         +Guid Id
         +string Sku
+        +string Slug
         +string Name
+        +string? ShortDescription
+        +string? Description
+        +string? Brand
+        +Guid CategoryId
         +decimal CurrentPrice
         +decimal? CompareAtPrice
+        +string Currency
         +string Status
-        +IReadOnlyList~string~ ImageUrls
+        +IReadOnlyList~ProductImageResponse~ Images
+        +IReadOnlyList~ProductVariantResponse~ Variants
+        +string Availability
+    }
+
+    class ProductImageResponse {
+        +Guid Id
+        +string Url
+        +string? AltText
+        +bool IsPrimary
+        +int DisplayOrder
+    }
+
+    class ProductVariantResponse {
+        +Guid Id
+        +string Sku
+        +string Name
+        +IReadOnlyDictionary~string, string~ Attributes
+        +decimal AdditionalPrice
+    }
+
+    class ProductSummaryResponse {
+        +Guid Id
+        +string Sku
+        +string Slug
+        +string Name
+        +string? ShortDescription
+        +string? Brand
+        +Guid CategoryId
+        +decimal CurrentPrice
+        +decimal? CompareAtPrice
+        +string Currency
+        +string Status
+        +string? PrimaryImageUrl
+        +string Availability
     }
 
     class CategoryResponse {
@@ -367,6 +512,8 @@ classDiagram
 
     class ProductPresenter {
         +ToResponse(ProductOutput output) ProductResponse
+        +ToResponse(ProductSummaryOutput output) ProductSummaryResponse
+        +ToResponse(PagedResult~ProductSummaryOutput~ output) PagedResponse~ProductSummaryResponse~
     }
 
     class CategoryPresenter {
@@ -393,7 +540,22 @@ classDiagram
     ChangeProductPriceUseCase --> IProductRepository
     PublishProductUseCase --> IProductRepository
     GetProductByIdUseCase --> IProductRepository
+    GetProductBySlugUseCase --> IProductRepository
     ListProductsUseCase --> IProductRepository
+    CreateProductUseCase --> IStockAvailabilityProvider
+    UpdateProductUseCase --> IStockAvailabilityProvider
+    ChangeProductPriceUseCase --> IStockAvailabilityProvider
+    PublishProductUseCase --> IStockAvailabilityProvider
+    GetProductByIdUseCase --> IStockAvailabilityProvider
+    GetProductBySlugUseCase --> IStockAvailabilityProvider
+    ListProductsUseCase --> IStockAvailabilityProvider
+    ListProductsFilter --> ProductSortOrder
+    ProductOutput --> StockAvailability
+    ProductSummaryOutput --> StockAvailability
+    ProductOutput "1" *-- "*" ProductImageOutput
+    ProductOutput "1" *-- "*" ProductVariantOutput
+    IStockAvailabilityProvider <|.. InventoryStockAvailabilityAdapter
+    InventoryStockAvailabilityAdapter --> GetStockAvailabilityUseCase : reads Inventory module
     CreateCategoryUseCase --> ICategoryRepository
     ListCategoriesUseCase --> ICategoryRepository
 
@@ -417,10 +579,14 @@ classDiagram
     CatalogController --> UpdateProductUseCase
     CatalogController --> PublishProductUseCase
     CatalogController --> ListProductsUseCase
+    CatalogController --> GetProductBySlugUseCase
     CatalogController --> CreateCategoryUseCase
     CatalogController --> ProductPresenter
     CatalogController --> CategoryPresenter
     ProductPresenter --> ProductResponse
+    ProductPresenter --> ProductSummaryResponse
+    ProductResponse "1" *-- "*" ProductImageResponse
+    ProductResponse "1" *-- "*" ProductVariantResponse
     CategoryPresenter --> CategoryResponse
 
 ```
@@ -437,5 +603,9 @@ O documento de modelagem de banco (seções 5.1-5.4) já especificava `height_cm
 
 ## Consumido por outros módulos
 
-- **Orders** lê produtos através de `IProductRepository` (chamado de dentro de um `ProductCatalogAdapter` que implementa o `IProductCatalog` do próprio módulo Orders) — ver [05-orders.md](05-orders.md).
+- **Orders** lê produtos através de `IProductRepository` (`GetByIdAsync`/`ListByIdsAsync`, chamados de dentro de um `ProductCatalogAdapter` que implementa o `IProductCatalog` do próprio módulo Orders e converte `Product` num `CatalogProductSnapshot` do Orders) — ver [05-orders.md](05-orders.md).
+
+## Consome outros módulos
+
+- **Inventory**, para a disponibilidade dos produtos: `IStockAvailabilityProvider` → `InventoryStockAvailabilityAdapter` → `GetStockAvailabilityUseCase` (só a camada Application do Inventory) — ver [04-inventory.md](04-inventory.md).
 - **Inventory** referencia produtos apenas pelo `ProductId` (sem depender de `Product`) — ver [04-inventory.md](04-inventory.md).

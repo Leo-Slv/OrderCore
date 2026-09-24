@@ -8,6 +8,8 @@ Diferente da maioria dos diagramas desta pasta, este módulo já está **impleme
 - `RegisterCustomerCommand`/`RegisterCustomerRequest` incluem `PasswordHash` (placeholder até existir um módulo de autenticação real com hashing no servidor) e `AddCustomerAddressCommand`/`AddCustomerAddressRequest` incluem todos os campos de `Address` (não só Street/City/State/PostalCode), já que `Address.Create` exige todos eles.
 - `Customer`, `CustomerAddress` e `CustomerPaymentMethod` ganharam um factory `internal static Rehydrate(...)`, distinto de `Create`, para que `CustomerMapper` reconstrua o agregado a partir do banco sem re-levantar `CustomerRegistered`.
 - `CustomerAddressPersistenceModel` guarda todos os campos de `Address` (não só Street/City/State/PostalCode) pelo mesmo motivo.
+- **Endereços no checkout** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, etapa 4): `CustomerAddressResponse` devolve o endereço completo (antes só `Label`/`City`/`IsDefaultShipping`), para o checkout poder mostrar e escolher um endereço salvo; `GetCustomerAddressUseCase` resolve um endereço de um cliente para o checkout do Orders — `customer_not_found`, `address_not_found` (também para o endereço de outro cliente) e `customer_inactive` para cliente desativado.
+- `CustomerAddressPersistenceModel.Id`/`CustomerPaymentMethodPersistenceModel.Id` usam `ValueGeneratedNever()`: o id vem do domínio, e sem isso o EF Core tratava um endereço novo num cliente já salvo como linha existente (UPDATE que não afetava nada, 409 na API).
 
 ```mermaid
 
@@ -157,6 +159,11 @@ classDiagram
         +ExecuteAsync(Guid customerId) Task~CustomerOutput~
     }
 
+    class GetCustomerAddressUseCase {
+        -ICustomerRepository customers
+        +ExecuteAsync(Guid customerId, Guid addressId) Task~CustomerAddress~
+    }
+
 
     %% OrderCore.Api.Modules.Customers
     class CustomersDependencyInjection {
@@ -255,8 +262,18 @@ classDiagram
     class CustomerAddressResponse {
         +Guid Id
         +string Label
+        +string RecipientName
+        +string? Phone
+        +string Street
+        +string Number
+        +string? Complement
+        +string Neighborhood
         +string City
+        +string State
+        +string PostalCode
+        +string Country
         +bool IsDefaultShipping
+        +bool IsDefaultBilling
     }
 
     class CustomerPresenter {
@@ -279,6 +296,7 @@ classDiagram
     AddCustomerAddressUseCase --> ICustomerRepository
     GetCustomerByIdUseCase --> ICustomerRepository
     ListCustomerAddressesUseCase --> ICustomerRepository
+    GetCustomerAddressUseCase --> ICustomerRepository
 
     ICustomerRepository <|.. EfCustomerRepository
     EfCustomerRepository --> CustomersDbContext
@@ -313,3 +331,4 @@ classDiagram
 ## Consumido por outros módulos
 
 - Nenhum outro módulo referencia `Customer` diretamente — `Order.CustomerId` guarda apenas o id (ver [05-orders.md](05-orders.md)), seguindo a mesma regra de isolamento que já existe entre Orders e Payments no código atual.
+- **Orders** chama `GetCustomerAddressUseCase` de dentro de um `CustomerDirectoryAdapter` (implementa o `ICustomerDirectory` do Orders) no checkout; só o value object `Address` (shared kernel) atravessa a fronteira — ver [05-orders.md](05-orders.md).

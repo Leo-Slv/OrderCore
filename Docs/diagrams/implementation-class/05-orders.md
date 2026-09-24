@@ -12,6 +12,15 @@ Diferenças entre este diagrama e o código, todas documentadas nos comentários
 - `RequestOrderPaymentUseCase.ExecuteAsync` retorna `CreateOrderResult`, não `Order`/`void` — reaproveita o mesmo DTO de `CreateOrderHandler` já que ambos só precisam devolver id/total/status.
 - `OrdersController.RequestPaymentAsync` devolve `Task<IActionResult>` (202 Accepted, sem corpo), como já estava no diagrama: confirmar ou falhar o pedido acontece depois, de forma assíncrona (ver `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler`), então um corpo `OrderResponse` aqui seria enganoso de qualquer forma — `CreateOrderResult` não carrega dados suficientes para montar um.
 
+Adicionado pelo MVP do storefront (`Docs/specs/storefront/storefront-api-mvp.md`, etapas 6–7):
+
+- **Checkout em um passo** — `CheckoutUseCase` faz, num único caso de uso, o que antes o cliente encadeava (`POST orders` → `PUT addresses` → `POST request-payment`, que continuam existindo para fluxos manuais/admin): resolve os endereços salvos via `ICustomerDirectory` (novo contrato, adaptado por `CustomerDirectoryAdapter` sobre `GetCustomerAddressUseCase` de Customers), valida produtos compráveis e moeda única, confere `ExpectedTotal` opcional (`price_changed`), reserva estoque **antes** de salvar o pedido, salva uma vez já em `PendingPayment` (liberando as reservas se o save falhar) e só então solicita o pagamento com o método escolhido. É uma sequência com compensação, não uma transação: Orders, Inventory e Payments têm `DbContext`s separados.
+- **Idempotência** — `Order.CheckoutIdempotencyKey` (header `Idempotency-Key`, único por cliente via índice `(CustomerId, CheckoutIdempotencyKey)`): repetir o checkout devolve o mesmo pedido e, se o pagamento nunca chegou a começar, solicita-o de novo; uma requisição concorrente com a mesma chave recebe o pedido da vencedora. `Order.Create` ganhou o parâmetro opcional `checkoutIdempotencyKey`.
+- **Cotação do carrinho** — `QuoteCartUseCase` (somente leitura) devolve, por linha, preço atual e no máximo um problema (`NotFound` > `Unavailable` > `InsufficientStock` > `PriceChanged`).
+- **Contratos só com tipos do Orders** — `IProductCatalog` devolve `CatalogProductSnapshot` (antes devolvia a entidade `Product` do Catalog; uma regra de arquitetura agora proíbe a camada Application do Orders de depender do Domain/Infrastructure de outro módulo); `IPaymentGateway` recebe `PaymentMethodChoice` e expõe `GetPaymentSummaryAsync`; `IInventoryService` expõe `GetAvailableQuantitiesAsync` (sobre `GetStockAvailabilityUseCase` de Inventory). `InventoryServiceAdapter.TryReserveOrderItemsAsync` confere disponibilidade antes de reservar (produto sem registro de estoque é "estoque insuficiente", não 404) e libera reservas parciais em qualquer falha.
+- **Acompanhamento** — `RequestPayment` passou a disparar `OrderPaymentRequested`, para o histórico registrar `Created → PendingPayment`; `order_status_history` ganhou `Sequence` (identity) para manter a ordem de transições gravadas no mesmo save com o mesmo horário; `IOrderStatusHistoryReader`/`EfOrderStatusHistoryReader` expõem esse histórico. `GetOrderDetailsUseCase` junta o pedido ao resumo do pagamento; `ListCustomerOrdersUseCase` e `IOrderRepository.ListByCustomerIdAsync` ficaram paginados (mais novo primeiro).
+- `OrderPresenter.ToResponse(CreateOrderResult)` foi removido (não era usado por nenhum endpoint).
+
 ```mermaid
 
 classDiagram
@@ -52,7 +61,19 @@ classDiagram
         <<interface>>
     }
 
+    class GetStockAvailabilityUseCase {
+        <<external>>
+    }
+
+    class GetCustomerAddressUseCase {
+        <<external>>
+    }
+
     class CreatePaymentUseCase {
+        <<external>>
+    }
+
+    class GetPaymentByOrderIdUseCase {
         <<external>>
     }
 
@@ -69,7 +90,10 @@ classDiagram
     note for ReleaseReservationUseCase "Inventory module — ver 04-inventory.md"
     note for ConsumeReservationUseCase "Inventory module — ver 04-inventory.md"
     note for IInventoryReservationRepository "Inventory module — ver 04-inventory.md"
+    note for GetStockAvailabilityUseCase "Inventory module — ver 04-inventory.md"
+    note for GetCustomerAddressUseCase "Customers module — ver 02-customers.md"
     note for CreatePaymentUseCase "Payments module — ver 06-payments.md"
+    note for GetPaymentByOrderIdUseCase "Payments module — ver 06-payments.md"
     note for PaymentAuthorized "Payments module — ver 06-payments.md"
     note for PaymentFailed "Payments module — ver 06-payments.md"
 
@@ -88,14 +112,16 @@ classDiagram
         +Address? ShippingAddress
         +Address? BillingAddress
         +string? CustomerNotes
+        +int MaxCheckoutIdempotencyKeyLength$
         +string? InternalNotes
+        +string? CheckoutIdempotencyKey
         +DateTimeOffset CreatedAt
         +DateTimeOffset UpdatedAt
         +DateTimeOffset? ConfirmedAt
         +DateTimeOffset? CancelledAt
         +DateTimeOffset? ShippedAt
         +DateTimeOffset? DeliveredAt
-        +Create(Guid customerId, string currency, string orderNumber, DateTimeOffset now, string? customerNotes)$ Order
+        +Create(Guid customerId, string currency, string orderNumber, DateTimeOffset now, string? customerNotes, string? checkoutIdempotencyKey)$ Order
         +AddItem(Guid productId, Guid? productVariantId, string productSku, string productName, string? productImageUrl, decimal unitPrice, int quantity) void
         +RemoveItem(Guid productId) void
         +DecreaseItemQuantity(Guid productId, int quantity) void
@@ -152,6 +178,12 @@ classDiagram
         +Guid CustomerId
     }
 
+    class OrderPaymentRequested {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid OrderId
+    }
+
     class OrderConfirmed {
         +Guid EventId
         +DateTimeOffset OccurredAt
@@ -177,26 +209,40 @@ classDiagram
     class IOrderRepository {
         <<interface>>
         +GetByIdAsync(Guid orderId) Task~Order?~
-        +ListByCustomerIdAsync(Guid customerId) Task~IReadOnlyList~Order~~
+        +ListByCustomerIdAsync(Guid customerId, int page, int pageSize) Task~ValueTuple~IReadOnlyList~Order~, int~~
+        +FindByCheckoutIdempotencyKeyAsync(Guid customerId, string idempotencyKey) Task~Order?~
         +AddAsync(Order order) Task
         +SaveChangesAsync() Task
     }
 
     class IProductCatalog {
         <<interface>>
-        +GetAsync(Guid productId) Task~Product?~
+        +GetAsync(Guid productId) Task~CatalogProductSnapshot?~
+        +GetManyAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, CatalogProductSnapshot~~
     }
 
     class IInventoryService {
         <<interface>>
         +TryReserveOrderItemsAsync(Order order) Task~bool~
+        +GetAvailableQuantitiesAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, int~~
         +ReleaseReservationsAsync(Guid orderId) Task
         +ConsumeReservationsAsync(Guid orderId) Task
     }
 
     class IPaymentGateway {
         <<interface>>
-        +RequestPaymentAsync(Guid orderId, decimal amount, string currency, string idempotencyKey) Task~Guid~
+        +RequestPaymentAsync(Guid orderId, decimal amount, string currency, PaymentMethodChoice method, string idempotencyKey) Task~Guid~
+        +GetPaymentSummaryAsync(Guid orderId) Task~OrderPaymentSummary?~
+    }
+
+    class ICustomerDirectory {
+        <<interface>>
+        +GetAddressAsync(Guid customerId, Guid addressId) Task~Address~
+    }
+
+    class IOrderStatusHistoryReader {
+        <<interface>>
+        +ListAsync(Guid orderId) Task~IReadOnlyList~OrderStatusHistoryEntry~~
     }
 
     class IOrderNumberGenerator {
@@ -234,14 +280,146 @@ classDiagram
         +string Reason
     }
 
+    class CatalogProductSnapshot {
+        +Guid Id
+        +string Sku
+        +string Slug
+        +string Name
+        +string? PrimaryImageUrl
+        +decimal CurrentPrice
+        +string Currency
+        +bool IsPurchasable
+    }
+
+    class PaymentMethodChoice {
+        <<enumeration>>
+        Card
+        Pix
+    }
+
+    class OrderPaymentSummary {
+        +Guid PaymentId
+        +string Status
+        +PaymentMethodChoice Method
+        +string? FailureReason
+    }
+
+    class OrderDetailsOutput {
+        +Order Order
+        +OrderPaymentSummary? Payment
+    }
+
+    class OrderSummaryOutput {
+        +Guid Id
+        +string OrderNumber
+        +OrderStatus Status
+        +DateTimeOffset CreatedAt
+        +decimal TotalAmount
+        +string Currency
+        +int ItemCount
+    }
+
+    class OrderStatusHistoryEntry {
+        +string? FromStatus
+        +string ToStatus
+        +string? Reason
+        +DateTimeOffset ChangedAt
+    }
+
+    class ListCustomerOrdersInput {
+        +Guid CustomerId
+        +int Page
+        +int PageSize
+    }
+
+    class CheckoutItem {
+        +Guid ProductId
+        +int Quantity
+    }
+
+    class CheckoutCommand {
+        +Guid CustomerId
+        +IReadOnlyList~CheckoutItem~ Items
+        +Guid ShippingAddressId
+        +Guid BillingAddressId
+        +PaymentMethodChoice PaymentMethod
+        +string IdempotencyKey
+        +string? CustomerNotes
+        +decimal? ExpectedTotal
+    }
+
+    class QuoteCartLine {
+        +Guid ProductId
+        +int Quantity
+        +decimal? ExpectedUnitPrice
+    }
+
+    class CartLineIssue {
+        <<enumeration>>
+        NotFound
+        Unavailable
+        InsufficientStock
+        PriceChanged
+    }
+
+    class CartQuoteLine {
+        +Guid ProductId
+        +string? ProductName
+        +string? Slug
+        +string? ImageUrl
+        +decimal? UnitPrice
+        +int Quantity
+        +decimal LineTotal
+        +CartLineIssue? Issue
+        +decimal? PreviousUnitPrice
+    }
+
+    class CartQuote {
+        +string? Currency
+        +decimal Total
+        +bool IsValid
+        +IReadOnlyList~CartQuoteLine~ Lines
+    }
+
 
     %% OrderCore.Api.Modules.Orders.Application.UseCases
     class CreateOrderHandler {
         -IOrderRepository orderRepository
         -IProductCatalog productCatalog
         -IOrderNumberGenerator orderNumbers
+        -IAuditLogService auditLog
         -TimeProvider timeProvider
         +HandleAsync(CreateOrderCommand command) Task~CreateOrderResult~
+    }
+
+    class CheckoutUseCase {
+        -IOrderRepository orderRepository
+        -IProductCatalog productCatalog
+        -ICustomerDirectory customerDirectory
+        -IInventoryService inventoryService
+        -IPaymentGateway paymentGateway
+        -IOrderNumberGenerator orderNumbers
+        -IAuditLogService auditLog
+        -TimeProvider timeProvider
+        +ExecuteAsync(CheckoutCommand command) Task~Guid~
+    }
+
+    class QuoteCartUseCase {
+        -IProductCatalog productCatalog
+        -IInventoryService inventoryService
+        +ExecuteAsync(IReadOnlyList~QuoteCartLine~ lines) Task~CartQuote~
+    }
+
+    class GetOrderDetailsUseCase {
+        -IOrderRepository orderRepository
+        -IPaymentGateway paymentGateway
+        +ExecuteAsync(Guid orderId) Task~OrderDetailsOutput~
+    }
+
+    class GetOrderStatusHistoryUseCase {
+        -IOrderRepository orderRepository
+        -IOrderStatusHistoryReader history
+        +ExecuteAsync(Guid orderId) Task~IReadOnlyList~OrderStatusHistoryEntry~~
     }
 
     class SetOrderAddressesUseCase {
@@ -254,7 +432,7 @@ classDiagram
         -IInventoryService inventoryService
         -IPaymentGateway paymentGateway
         -TimeProvider timeProvider
-        +ExecuteAsync(Guid orderId) Task~CreateOrderResult~
+        +ExecuteAsync(Guid orderId, PaymentMethodChoice paymentMethod) Task~CreateOrderResult~
     }
 
     class ConfirmOrderUseCase {
@@ -285,7 +463,7 @@ classDiagram
 
     class ListCustomerOrdersUseCase {
         -IOrderRepository orderRepository
-        +ExecuteAsync(Guid customerId) Task~IReadOnlyList~Order~~
+        +ExecuteAsync(ListCustomerOrdersInput input) Task~PagedResult~OrderSummaryOutput~~
     }
 
 
@@ -306,6 +484,7 @@ classDiagram
         +decimal ShippingAmount
         +decimal TaxAmount
         +string Currency
+        +string? CheckoutIdempotencyKey
         +int Version
         +ICollection~OrderItemPersistenceModel~ Items
     }
@@ -323,6 +502,7 @@ classDiagram
     class OrderStatusHistoryPersistenceModel {
         +Guid Id
         +Guid OrderId
+        +long Sequence
         +string FromStatus
         +string ToStatus
         +string? Reason
@@ -352,26 +532,41 @@ classDiagram
         +NextAsync() Task~string~
     }
 
+    class EfOrderStatusHistoryReader {
+        -OrdersDbContext dbContext
+        +ListAsync(Guid orderId) Task~IReadOnlyList~OrderStatusHistoryEntry~~
+    }
+
 
     %% OrderCore.Api.Modules.Orders.Infrastructure.Adapters
     class ProductCatalogAdapter {
         -IProductRepository catalogProducts
-        +GetAsync(Guid productId) Task~Product?~
+        +GetAsync(Guid productId) Task~CatalogProductSnapshot?~
+        +GetManyAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, CatalogProductSnapshot~~
     }
 
     class InventoryServiceAdapter {
         -ReserveStockUseCase reserveStock
         -ReleaseReservationUseCase releaseReservation
         -ConsumeReservationUseCase consumeReservation
+        -GetStockAvailabilityUseCase getStockAvailability
         -IInventoryReservationRepository reservations
         +TryReserveOrderItemsAsync(Order order) Task~bool~
+        +GetAvailableQuantitiesAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, int~~
         +ReleaseReservationsAsync(Guid orderId) Task
         +ConsumeReservationsAsync(Guid orderId) Task
     }
 
     class PaymentGatewayAdapter {
         -CreatePaymentUseCase createPayment
-        +RequestPaymentAsync(Guid orderId, decimal amount, string currency, string idempotencyKey) Task~Guid~
+        -GetPaymentByOrderIdUseCase getPaymentByOrderId
+        +RequestPaymentAsync(Guid orderId, decimal amount, string currency, PaymentMethodChoice method, string idempotencyKey) Task~Guid~
+        +GetPaymentSummaryAsync(Guid orderId) Task~OrderPaymentSummary?~
+    }
+
+    class CustomerDirectoryAdapter {
+        -GetCustomerAddressUseCase getCustomerAddress
+        +GetAddressAsync(Guid customerId, Guid addressId) Task~Address~
     }
 
 
@@ -379,6 +574,7 @@ classDiagram
     class OrderStatusHistoryProjector {
         -OrdersDbContext dbContext
         +HandleAsync(OrderCreated domainEvent) Task
+        +HandleAsync(OrderPaymentRequested domainEvent) Task
         +HandleAsync(OrderConfirmed domainEvent) Task
         +HandleAsync(OrderCancelled domainEvent) Task
         +HandleAsync(OrderPaymentFailed domainEvent) Task
@@ -403,14 +599,50 @@ classDiagram
         -SetOrderAddressesUseCase setOrderAddressesUseCase
         -RequestOrderPaymentUseCase requestOrderPaymentUseCase
         -GetOrderByIdUseCase getOrderByIdUseCase
+        -GetOrderDetailsUseCase getOrderDetailsUseCase
+        -GetOrderStatusHistoryUseCase getOrderStatusHistoryUseCase
         -ListCustomerOrdersUseCase listCustomerOrdersUseCase
         -CancelOrderUseCase cancelOrderUseCase
+        -CheckoutUseCase checkoutUseCase
+        -QuoteCartUseCase quoteCartUseCase
+        +QuoteCartAsync(QuoteCartRequest request) Task~ActionResult~CartQuoteResponse~~
+        +CheckoutAsync(CheckoutRequest request, string idempotencyKey) Task~ActionResult~OrderResponse~~
         +CreateOrderAsync(CreateOrderRequest request) Task~ActionResult~OrderResponse~~
         +SetAddressesAsync(Guid id, SetOrderAddressesRequest request) Task~IActionResult~
-        +RequestPaymentAsync(Guid id) Task~IActionResult~
+        +RequestPaymentAsync(Guid id, RequestOrderPaymentRequest request) Task~IActionResult~
         +GetByIdAsync(Guid id) Task~ActionResult~OrderResponse~~
-        +ListByCustomerAsync(Guid customerId) Task~ActionResult~IReadOnlyList~OrderResponse~~~
+        +GetStatusHistoryAsync(Guid id) Task~ActionResult~IReadOnlyList~OrderStatusHistoryEntryResponse~~~
+        +ListByCustomerAsync(Guid customerId, int page, int pageSize) Task~ActionResult~PagedResponse~OrderSummaryResponse~~~
         +CancelAsync(Guid id, CancelOrderRequest request) Task~IActionResult~
+    }
+
+    class CheckoutItemRequest {
+        +Guid ProductId
+        +int Quantity
+    }
+
+    class CheckoutRequest {
+        +Guid CustomerId
+        +IReadOnlyList~CheckoutItemRequest~ Items
+        +Guid ShippingAddressId
+        +Guid BillingAddressId
+        +PaymentMethodChoice? PaymentMethod
+        +string? CustomerNotes
+        +decimal? ExpectedTotal
+    }
+
+    class QuoteCartLineRequest {
+        +Guid ProductId
+        +int Quantity
+        +decimal? ExpectedUnitPrice
+    }
+
+    class QuoteCartRequest {
+        +IReadOnlyList~QuoteCartLineRequest~ Items
+    }
+
+    class RequestOrderPaymentRequest {
+        +PaymentMethodChoice? PaymentMethod
     }
 
     class CreateOrderItemRequest {
@@ -437,24 +669,98 @@ classDiagram
 
     class OrderItemResponse {
         +Guid ProductId
+        +string ProductSku
         +string ProductName
+        +string? ProductImageUrl
         +decimal UnitPrice
         +int Quantity
         +decimal Total
+    }
+
+    class OrderAddressResponse {
+        +string Street
+        +string Number
+        +string? Complement
+        +string Neighborhood
+        +string City
+        +string State
+        +string PostalCode
+        +string Country
+    }
+
+    class OrderPaymentResponse {
+        +Guid PaymentId
+        +string Status
+        +string Method
+        +string? FailureReason
     }
 
     class OrderResponse {
         +Guid Id
         +string OrderNumber
         +string Status
+        +DateTimeOffset CreatedAt
+        +DateTimeOffset? ConfirmedAt
+        +DateTimeOffset? CancelledAt
+        +DateTimeOffset? ShippedAt
+        +DateTimeOffset? DeliveredAt
+        +decimal SubtotalAmount
+        +decimal DiscountAmount
+        +decimal ShippingAmount
+        +decimal TaxAmount
         +decimal TotalAmount
         +string Currency
+        +OrderAddressResponse? ShippingAddress
+        +OrderAddressResponse? BillingAddress
+        +string? CustomerNotes
         +IReadOnlyList~OrderItemResponse~ Items
+        +OrderPaymentResponse? Payment
+    }
+
+    class OrderSummaryResponse {
+        +Guid Id
+        +string OrderNumber
+        +string Status
+        +DateTimeOffset CreatedAt
+        +decimal TotalAmount
+        +string Currency
+        +int ItemCount
+    }
+
+    class OrderStatusHistoryEntryResponse {
+        +string? FromStatus
+        +string ToStatus
+        +string? Reason
+        +DateTimeOffset ChangedAt
+    }
+
+    class CartQuoteLineResponse {
+        +Guid ProductId
+        +string? ProductName
+        +string? Slug
+        +string? ImageUrl
+        +decimal? UnitPrice
+        +int Quantity
+        +decimal LineTotal
+        +string? Issue
+        +decimal? PreviousUnitPrice
+    }
+
+    class CartQuoteResponse {
+        +string? Currency
+        +decimal Total
+        +bool IsValid
+        +IReadOnlyList~CartQuoteLineResponse~ Lines
     }
 
     class OrderPresenter {
+        +ToCommand(CheckoutRequest request, string idempotencyKey) CheckoutCommand
+        +ToLines(QuoteCartRequest request) IReadOnlyList~QuoteCartLine~
+        +ToResponse(OrderDetailsOutput details) OrderResponse
         +ToResponse(Order order) OrderResponse
-        +ToResponse(CreateOrderResult result) OrderResponse
+        +ToResponse(PagedResult~OrderSummaryOutput~ output) PagedResponse~OrderSummaryResponse~
+        +ToResponse(IReadOnlyList~OrderStatusHistoryEntry~ history) IReadOnlyList~OrderStatusHistoryEntryResponse~
+        +ToResponse(CartQuote quote) CartQuoteResponse
     }
 
 
@@ -463,6 +769,7 @@ classDiagram
     Order --> OrderStatus
     Order --> Address : ShippingAddress/BillingAddress
     Order ..> OrderCreated : raises
+    Order ..> OrderPaymentRequested : raises
     Order ..> OrderConfirmed : raises
     Order ..> OrderCancelled : raises
     Order ..> OrderPaymentFailed : raises
@@ -484,6 +791,27 @@ classDiagram
     GetOrderByIdUseCase --> IOrderRepository
     ListCustomerOrdersUseCase --> IOrderRepository
     CreateOrderCommand "1" *-- "1..*" CreateOrderItem
+    CheckoutUseCase --> IOrderRepository
+    CheckoutUseCase --> IProductCatalog
+    CheckoutUseCase --> ICustomerDirectory
+    CheckoutUseCase --> IInventoryService
+    CheckoutUseCase --> IPaymentGateway
+    CheckoutUseCase --> IOrderNumberGenerator
+    CheckoutUseCase ..> Order : creates
+    CheckoutCommand "1" *-- "1..*" CheckoutItem
+    QuoteCartUseCase --> IProductCatalog
+    QuoteCartUseCase --> IInventoryService
+    QuoteCartUseCase ..> CartQuote : returns
+    CartQuote "1" *-- "*" CartQuoteLine
+    CartQuoteLine --> CartLineIssue
+    GetOrderDetailsUseCase --> IOrderRepository
+    GetOrderDetailsUseCase --> IPaymentGateway
+    GetOrderDetailsUseCase ..> OrderDetailsOutput : returns
+    OrderDetailsOutput --> OrderPaymentSummary
+    OrderPaymentSummary --> PaymentMethodChoice
+    GetOrderStatusHistoryUseCase --> IOrderRepository
+    GetOrderStatusHistoryUseCase --> IOrderStatusHistoryReader
+    IProductCatalog ..> CatalogProductSnapshot : returns
 
     IOrderRepository <|.. EfOrderRepository
     EfOrderRepository --> OrdersDbContext
@@ -503,8 +831,14 @@ classDiagram
     InventoryServiceAdapter --> ReleaseReservationUseCase
     InventoryServiceAdapter --> ConsumeReservationUseCase
     InventoryServiceAdapter --> IInventoryReservationRepository
+    InventoryServiceAdapter --> GetStockAvailabilityUseCase
     IPaymentGateway <|.. PaymentGatewayAdapter
     PaymentGatewayAdapter --> CreatePaymentUseCase
+    PaymentGatewayAdapter --> GetPaymentByOrderIdUseCase
+    ICustomerDirectory <|.. CustomerDirectoryAdapter
+    CustomerDirectoryAdapter --> GetCustomerAddressUseCase
+    IOrderStatusHistoryReader <|.. EfOrderStatusHistoryReader
+    EfOrderStatusHistoryReader --> OrdersDbContext
 
     OrderStatusHistoryProjector --> OrdersDbContext
     PaymentAuthorizedIntegrationEventHandler --> ConfirmOrderUseCase
@@ -520,8 +854,18 @@ classDiagram
     OrdersController --> GetOrderByIdUseCase
     OrdersController --> ListCustomerOrdersUseCase
     OrdersController --> CancelOrderUseCase
+    OrdersController --> CheckoutUseCase
+    OrdersController --> QuoteCartUseCase
+    OrdersController --> GetOrderDetailsUseCase
+    OrdersController --> GetOrderStatusHistoryUseCase
     OrdersController --> OrderPresenter
     OrderPresenter --> OrderResponse
+    OrderPresenter --> OrderSummaryResponse
+    OrderPresenter --> CartQuoteResponse
+    OrderPresenter --> OrderStatusHistoryEntryResponse
+    OrderResponse --> OrderAddressResponse
+    OrderResponse --> OrderPaymentResponse
+    CartQuoteResponse "1" *-- "*" CartQuoteLineResponse
 
 ```
 
@@ -538,3 +882,12 @@ O documento de modelagem de banco já especificava `internal_notes` e `updated_a
 ## Fluxo de checkout (leitura sugerida)
 
 `CreateOrderHandler` → `RequestOrderPaymentUseCase` (reserva estoque via `InventoryServiceAdapter`, depois solicita pagamento via `PaymentGatewayAdapter`) → `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler` (recebem o resultado assíncrono do módulo Payments — ver [06-payments.md](06-payments.md) — e chamam `ConfirmOrderUseCase`/`MarkOrderPaymentFailedUseCase`).
+
+## Fluxo do storefront
+
+O caminho que o front usa, em vez de encadear os passos acima:
+
+1. `POST orders/cart/quote` → `QuoteCartUseCase` reprecifica o carrinho (sem reservar nada).
+2. `POST orders/checkout` (header `Idempotency-Key`) → `CheckoutUseCase`: endereços (`CustomerDirectoryAdapter`) → produtos (`ProductCatalogAdapter.GetManyAsync`) → reserva (`InventoryServiceAdapter`) → salva o pedido já `PendingPayment` → `PaymentGatewayAdapter.RequestPaymentAsync`. Responde 202 com o pedido.
+3. O outbox de Payments publica `PaymentAuthorized`/`PaymentFailed` (a cada 5 s) → os mesmos integration event handlers confirmam ou falham o pedido.
+4. O front faz polling de `GET orders/{id}` (`GetOrderDetailsUseCase`, com o resumo do pagamento) e desenha a timeline com `GET orders/{id}/status-history`.

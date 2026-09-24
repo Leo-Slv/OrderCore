@@ -10,6 +10,8 @@ Comece por [implementation-class/00-overview.md](implementation-class/00-overvie
 4. [Inventory](implementation-class/04-inventory.md)
 5. [Orders](implementation-class/05-orders.md)
 6. [Payments](implementation-class/06-payments.md)
-7. [AuditLogs](implementation-class/07-auditlogs.md) — módulo técnico/transversal, já implementado (os demais são blueprint).
+7. [AuditLogs](implementation-class/07-auditlogs.md) — módulo técnico/transversal.
+
+Todos os módulos já estão implementados; cada diagrama reflete o código atual e lista, no topo, onde ele difere do desenho original (incluindo o que o MVP do storefront acrescentou — ver `Docs/specs/storefront/storefront-api-mvp.md`).
 
 Quando um módulo depende de classes de outro (ex.: o `ProductCatalogAdapter` do Orders chamando `IProductRepository` do Catalog), essas classes aparecem como um "stub" `<<external>>` só com a assinatura relevante — o detalhe completo mora no arquivo do módulo dono, referenciado logo abaixo do diagrama.

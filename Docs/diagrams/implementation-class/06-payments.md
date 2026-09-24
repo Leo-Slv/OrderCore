@@ -13,6 +13,8 @@ Diferenças entre este diagrama e o código, todas documentadas nos comentários
 - `RequestRefundUseCase` só chama `Payment.Refund()` quando a soma dos reembolsos `Completed` atinge o valor total do pagamento — não existe status `PartiallyRefunded` (decisão registrada no spec), então marcar o pagamento inteiro como `Refunded` num primeiro reembolso parcial bloquearia qualquer reembolso seguinte (`RequestRefund` exige `Status == Captured`).
 - `CreatePaymentUseCase` autoriza de forma síncrona, na mesma chamada que cria o pagamento (não fica com `Status = Pending` aguardando um passo separado) — decisão registrada no spec, já que o `FakePaymentProvider` não tem nenhuma etapa assíncrona real a esperar.
 - `PaymentWebhookHandler` não tem rota de controller — fica pronto para quando existir um provedor real de webhook (Stripe), sem uma rota HTTP hoje para receber nada.
+- **Forma de pagamento** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, decisão 1): `PaymentMethod` (`Card`/`Pix`) é gravado no `Payment` por `Create` e é diferente de `Provider` (quem processa) — os dois métodos passam hoje pelo mesmo `FakePaymentProvider`. A migração `AddPaymentMethod` preenche `Card` nos pagamentos já existentes. `CreatePaymentRequest.Method` é obrigatório (sem ele, 400, em vez de assumir o primeiro valor do enum); `PaymentResponse` ganhou `Method`, `Currency`, `FailureReason`, `CreatedAt` e `AuthorizedAt`.
+- `RefundPersistenceModel.Id` é configurado com `ValueGeneratedNever()`: o id vem do domínio, e sem isso o EF Core tratava um reembolso novo num pagamento já salvo como linha existente (UPDATE que não afetava nada).
 
 ```mermaid
 
@@ -39,6 +41,7 @@ classDiagram
         +Guid? CustomerPaymentMethodId
         +decimal Amount
         +string Currency
+        +PaymentMethod Method
         +PaymentStatus Status
         +string IdempotencyKey
         +string Provider
@@ -49,7 +52,7 @@ classDiagram
         +DateTimeOffset? AuthorizedAt
         +DateTimeOffset? CapturedAt
         +IReadOnlyCollection~Refund~ Refunds
-        +Create(Guid orderId, decimal amount, string currency, string idempotencyKey, string provider, Guid? customerPaymentMethodId, DateTimeOffset now)$ Payment
+        +Create(Guid orderId, decimal amount, string currency, PaymentMethod method, string idempotencyKey, string provider, Guid? customerPaymentMethodId, DateTimeOffset now)$ Payment
         +MarkProcessing() void
         +Authorize(string providerReference, DateTimeOffset now) void
         +Capture(DateTimeOffset now) void
@@ -85,6 +88,12 @@ classDiagram
         Pending
         Completed
         Failed
+    }
+
+    class PaymentMethod {
+        <<enumeration>>
+        Card
+        Pix
     }
 
 
@@ -128,6 +137,7 @@ classDiagram
         +Guid OrderId
         +decimal Amount
         +string Currency
+        +PaymentMethod Method
         +string IdempotencyKey
     }
 
@@ -231,6 +241,7 @@ classDiagram
         +Guid OrderId
         +decimal Amount
         +string Currency
+        +string Method
         +string Status
         +string IdempotencyKey
         +string? ProviderReference
@@ -336,6 +347,7 @@ classDiagram
         +Guid OrderId
         +decimal Amount
         +string Currency
+        +PaymentMethod? Method
         +string IdempotencyKey
     }
 
@@ -348,7 +360,12 @@ classDiagram
         +Guid Id
         +Guid OrderId
         +decimal Amount
+        +string Currency
+        +string Method
         +string Status
+        +string? FailureReason
+        +DateTimeOffset CreatedAt
+        +DateTimeOffset? AuthorizedAt
     }
 
     class RefundResponse {
@@ -366,6 +383,7 @@ classDiagram
     AggregateRoot~TId~ <|-- Payment
     Payment "1" *-- "0..*" Refund
     Payment --> PaymentStatus
+    Payment --> PaymentMethod
     Refund --> RefundStatus
     IDomainEvent <|.. IntegrationEvent : temporary outbox bridge
     IntegrationEvent <|-- PaymentRequested
@@ -436,4 +454,4 @@ O documento de modelagem de banco já especificava `customer_payment_method_id`,
 
 ## Consumido por outros módulos
 
-- **Orders** chama `CreatePaymentUseCase` de dentro de um `PaymentGatewayAdapter` (implementa o `IPaymentGateway` do próprio Orders) e reage a `PaymentAuthorized`/`PaymentFailed` publicados pelo `OutboxPublisherBackgroundService` — ver [05-orders.md](05-orders.md). `Payment.OrderId` guarda apenas o id, nunca uma referência a `Order`.
+- **Orders** chama `CreatePaymentUseCase` (com a forma de pagamento escolhida no checkout, mapeada de `PaymentMethodChoice` do Orders) e `GetPaymentByOrderIdUseCase` (para o resumo do pagamento na tela do pedido) de dentro de um `PaymentGatewayAdapter` (implementa o `IPaymentGateway` do próprio Orders) e reage a `PaymentAuthorized`/`PaymentFailed` publicados pelo `OutboxPublisherBackgroundService` — ver [05-orders.md](05-orders.md). `Payment.OrderId` guarda apenas o id, nunca uma referência a `Order`.

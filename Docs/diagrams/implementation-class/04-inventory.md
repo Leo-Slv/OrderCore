@@ -5,6 +5,8 @@ Saldo de estoque (`StockItem`) e reserva explícita por item de pedido (`Invento
 Como [02-customers.md](02-customers.md) e [03-catalog.md](03-catalog.md), este módulo já está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core e Presentation) — não é mais um blueprint futuro. Ver `Docs/specs/inventory/stock-and-reservations.md` para o spec completo e as decisões em aberto resolvidas antes da implementação. Diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
 
 - `StockItem.Create` recebe um `now` explícito (como `Customer.Create`), já que `UpdatedAt` precisa de um valor.
+- **Disponibilidade para outros módulos** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, etapa 2): `GetStockAvailabilityUseCase` devolve, numa só consulta (`IStockItemRepository.ListByProductIdsAsync`, sem rastreamento do EF para não interferir na unidade de trabalho), a quantidade disponível e `StockItem.IsLowStock` (`0 < disponível <= ReorderLevel`) de vários produtos; produto sem registro de estoque sai como 0 disponível. É o único ponto de entrada que Catalog e Orders usam para saber de estoque. Como nada define `ReorderLevel` ainda (fica 0), `IsLowStock` hoje é sempre `false`.
+- `StockConcurrencyConflictException` passou a herdar de `ConflictException` (shared kernel), com código `concurrency_conflict`: esgotadas as tentativas de `ReserveStockUseCase`, chega ao cliente como 409.
 - `IStockItemRepository`/`IInventoryReservationRepository` **não têm** `SaveChangesAsync`: toda operação que muda estado mexe nos dois agregados (`StockItem` e `InventoryReservation`) na mesma chamada, e dois `SaveChangesAsync` separados seriam duas transações SQL diferentes, não uma unidade atômica. Introduzido `IUnitOfWork` (novo, não estava no diagrama) — ver a seção Transactions do `claude.md`.
 - `ExpireReservationUseCase` também depende de `IStockItemRepository`: o diagrama original só listava `IInventoryReservationRepository`, o que deixaria a quantidade reservada presa no `StockItem` para sempre depois de uma reserva expirar.
 - `StockItemPersistenceModel`/`InventoryReservationPersistenceModel` guardam todos os campos das respectivas entidades de domínio (`ProductVariantId`/`UpdatedAt`/`Version` no primeiro; `ReservedAt`/`ReleasedAt`/`ConsumedAt`/`Version` no segundo), não só o subconjunto abreviado do diagrama — mesma razão de `CustomerAddressPersistenceModel`.
@@ -43,6 +45,7 @@ classDiagram
         +int QuantityReserved
         +int QuantityAvailable
         +int ReorderLevel
+        +bool IsLowStock
         +DateTimeOffset UpdatedAt
         +Create(Guid productId, int initialQuantity, Guid? productVariantId, DateTimeOffset now)$ StockItem
         +Receive(int quantity) void
@@ -105,6 +108,7 @@ classDiagram
     class IStockItemRepository {
         <<interface>>
         +GetByProductIdAsync(Guid productId) Task~StockItem?~
+        +ListByProductIdsAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyList~StockItem~~
         +AddAsync(StockItem stockItem) Task
     }
 
@@ -122,7 +126,14 @@ classDiagram
 
     class StockConcurrencyConflictException {
         <<exception>>
+        +string ErrorCode$
     }
+
+    class ConflictException {
+        <<external>>
+    }
+
+    note for ConflictException "Shared kernel — ver 01-shared-kernel.md"
 
 
     %% OrderCore.Api.Modules.Inventory.Application.DTOs
@@ -142,6 +153,12 @@ classDiagram
         +Guid ProductId
         +int QuantityOnHand
         +int QuantityAvailable
+    }
+
+    class StockAvailabilityOutput {
+        +Guid ProductId
+        +int QuantityAvailable
+        +bool IsLowStock
     }
 
 
@@ -183,6 +200,11 @@ classDiagram
     class GetStockByProductIdUseCase {
         -IStockItemRepository stockItems
         +ExecuteAsync(Guid productId) Task~StockItemOutput~
+    }
+
+    class GetStockAvailabilityUseCase {
+        -IStockItemRepository stockItems
+        +ExecuteAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyList~StockAvailabilityOutput~~
     }
 
 
@@ -325,7 +347,10 @@ classDiagram
     AdjustStockUseCase --> IStockItemRepository
     AdjustStockUseCase --> IUnitOfWork
     GetStockByProductIdUseCase --> IStockItemRepository
+    GetStockAvailabilityUseCase --> IStockItemRepository
+    GetStockAvailabilityUseCase ..> StockAvailabilityOutput : returns
     IUnitOfWork ..> StockConcurrencyConflictException : throws on conflict
+    ConflictException <|-- StockConcurrencyConflictException
 
     IStockItemRepository <|.. EfStockItemRepository
     IInventoryReservationRepository <|.. EfInventoryReservationRepository
@@ -355,4 +380,5 @@ O documento de modelagem de banco já especificava `product_variant_id` em `STOC
 
 ## Consumido por outros módulos
 
-- **Orders** aciona `ReserveStockUseCase`, `ReleaseReservationUseCase` e `ConsumeReservationUseCase` de dentro de um `InventoryServiceAdapter` que implementa o `IInventoryService` do próprio módulo Orders — ver [05-orders.md](05-orders.md). `InventoryReservation.OrderId`/`OrderItemId` guardam apenas os ids, sem referenciar `Order`/`OrderItem` diretamente.
+- **Orders** aciona `ReserveStockUseCase`, `ReleaseReservationUseCase`, `ConsumeReservationUseCase` e `GetStockAvailabilityUseCase` de dentro de um `InventoryServiceAdapter` que implementa o `IInventoryService` do próprio módulo Orders — ver [05-orders.md](05-orders.md).
+- **Catalog** chama `GetStockAvailabilityUseCase` de dentro de um `InventoryStockAvailabilityAdapter` (implementa o `IStockAvailabilityProvider` do Catalog) e converte a quantidade em estado (`InStock`/`LowStock`/`OutOfStock`) — ver [03-catalog.md](03-catalog.md). `InventoryReservation.OrderId`/`OrderItemId` guardam apenas os ids, sem referenciar `Order`/`OrderItem` diretamente.
