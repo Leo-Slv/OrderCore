@@ -23,6 +23,23 @@ public sealed class StockItemTests
     }
 
     [Fact]
+    public void IsLowStock_is_false_with_the_default_reorder_level()
+    {
+        var stockItem = CreateStockItem(3);
+
+        stockItem.IsLowStock.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsLowStock_is_false_when_nothing_is_available()
+    {
+        var stockItem = CreateStockItem(1);
+        stockItem.TryReserve(1);
+
+        stockItem.IsLowStock.Should().BeFalse();
+    }
+
+    [Fact]
     public void TryReserve_succeeds_when_enough_is_available()
     {
         var stockItem = CreateStockItem(1);

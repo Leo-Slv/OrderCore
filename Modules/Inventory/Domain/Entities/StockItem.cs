@@ -30,6 +30,13 @@ public sealed class StockItem : AggregateRoot<Guid>
     /// </summary>
     public int ReorderLevel { get; private set; }
 
+    /// <summary>
+    /// Some units are still available but no more than <see cref="ReorderLevel"/>.
+    /// An empty item is out of stock, not low, so it is excluded. With the
+    /// default <see cref="ReorderLevel"/> of 0 this is always <c>false</c>.
+    /// </summary>
+    public bool IsLowStock => QuantityAvailable > 0 && QuantityAvailable <= ReorderLevel;
+
     public DateTimeOffset UpdatedAt { get; private set; }
 
     private StockItem()

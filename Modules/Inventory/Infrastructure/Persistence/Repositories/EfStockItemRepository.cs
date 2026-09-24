@@ -44,6 +44,22 @@ public sealed class EfStockItemRepository : IStockItemRepository, IPendingChange
         return domain;
     }
 
+    /// <summary>
+    /// <c>AsNoTracking</c> and never added to <c>_tracked</c>: this is a read
+    /// path, and it must not change which instance a later
+    /// <see cref="GetByProductIdAsync"/> in the same unit of work gets back.
+    /// </summary>
+    public async Task<IReadOnlyList<StockItem>> ListByProductIdsAsync(
+        IReadOnlyCollection<Guid> productIds, CancellationToken cancellationToken)
+    {
+        var models = await _dbContext.StockItems
+            .AsNoTracking()
+            .Where(s => productIds.Contains(s.ProductId))
+            .ToListAsync(cancellationToken);
+
+        return models.Select(StockItemMapper.ToDomain).ToList();
+    }
+
     public async Task AddAsync(StockItem stockItem, CancellationToken cancellationToken)
     {
         var model = StockItemMapper.ToPersistence(stockItem);

@@ -39,6 +39,7 @@ public static class InventoryDependencyInjection
         services.AddScoped<ExpireReservationUseCase>();
         services.AddScoped<AdjustStockUseCase>();
         services.AddScoped<GetStockByProductIdUseCase>();
+        services.AddScoped<GetStockAvailabilityUseCase>();
 
         return services;
     }

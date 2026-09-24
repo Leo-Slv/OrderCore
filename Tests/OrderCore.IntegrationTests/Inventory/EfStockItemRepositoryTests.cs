@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Inventory.Application.DTOs;
 using OrderCore.Api.Modules.Inventory.Application.UseCases;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
+using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Models;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Domain;
@@ -93,6 +94,47 @@ public sealed class EfStockItemRepositoryTests : IAsyncLifetime
             reloaded!.QuantityOnHand.Should().Be(10);
         }
     }
+
+    [Fact]
+    public async Task ListByProductIdsAsync_returns_only_the_requested_products_with_low_stock_flag()
+    {
+        var lowStockProductId = Guid.NewGuid();
+        var plentyProductId = Guid.NewGuid();
+        var otherProductId = Guid.NewGuid();
+
+        // Written as persistence models directly: nothing in the domain can
+        // set ReorderLevel yet, and this is exactly the shape a row with one
+        // would have once a reorder-level feature exists.
+        await using (var dbContext = CreateDbContext())
+        {
+            dbContext.StockItems.AddRange(
+                StockRow(lowStockProductId, quantityOnHand: 3, reorderLevel: 5),
+                StockRow(plentyProductId, quantityOnHand: 50, reorderLevel: 5),
+                StockRow(otherProductId, quantityOnHand: 1, reorderLevel: 0));
+            await dbContext.SaveChangesAsync();
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var result = await new EfStockItemRepository(dbContext)
+                .ListByProductIdsAsync([lowStockProductId, plentyProductId, Guid.NewGuid()], CancellationToken.None);
+
+            result.Should().HaveCount(2);
+            result.Single(s => s.ProductId == lowStockProductId).IsLowStock.Should().BeTrue();
+            result.Single(s => s.ProductId == plentyProductId).IsLowStock.Should().BeFalse();
+            dbContext.ChangeTracker.Entries().Should().BeEmpty();
+        }
+    }
+
+    private static StockItemPersistenceModel StockRow(Guid productId, int quantityOnHand, int reorderLevel) => new()
+    {
+        Id = Guid.NewGuid(),
+        ProductId = productId,
+        QuantityOnHand = quantityOnHand,
+        ReorderLevel = reorderLevel,
+        UpdatedAt = DateTimeOffset.UtcNow,
+        Version = 1,
+    };
 
     [Fact]
     public async Task Stock_of_one_under_concurrent_reservation_requests_lets_exactly_one_succeed()
