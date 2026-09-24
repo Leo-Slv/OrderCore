@@ -19,8 +19,16 @@ public interface IOrderRepository
     /// <c>ListCustomerOrdersUseCase</c> depends on this interface and has
     /// nothing else to query by; same class of gap as
     /// <c>IInventoryReservationRepository.ListByOrderIdAsync</c>.
+    /// One page, newest order first, plus the customer's total order count.
     /// </summary>
-    Task<IReadOnlyList<Order>> ListByCustomerIdAsync(Guid customerId, CancellationToken cancellationToken);
+    Task<(IReadOnlyList<Order> Items, int TotalCount)> ListByCustomerIdAsync(
+        Guid customerId, int page, int pageSize, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The order a previous checkout with this key created for this
+    /// customer, if any. See <c>CheckoutUseCase</c>.
+    /// </summary>
+    Task<Order?> FindByCheckoutIdempotencyKeyAsync(Guid customerId, string idempotencyKey, CancellationToken cancellationToken);
 
     Task AddAsync(Order order, CancellationToken cancellationToken);
 

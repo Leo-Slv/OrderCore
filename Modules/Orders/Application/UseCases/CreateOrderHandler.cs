@@ -54,9 +54,8 @@ public sealed class CreateOrderHandler
             var product = await _productCatalog.GetAsync(item.ProductId, cancellationToken)
                 ?? throw new NotFoundException("product_not_found", $"Product '{item.ProductId}' was not found.");
 
-            var primaryImageUrl = product.Images.FirstOrDefault(i => i.IsPrimary)?.Url ?? product.Images.FirstOrDefault()?.Url;
-
-            order.AddItem(product.Id, productVariantId: null, product.Sku, product.Name, primaryImageUrl, product.CurrentPrice, item.Quantity);
+            order.AddItem(
+                product.Id, productVariantId: null, product.Sku, product.Name, product.PrimaryImageUrl, product.CurrentPrice, item.Quantity);
         }
 
         await _orderRepository.AddAsync(order, cancellationToken);

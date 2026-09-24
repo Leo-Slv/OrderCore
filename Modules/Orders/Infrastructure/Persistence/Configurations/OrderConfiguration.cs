@@ -40,6 +40,11 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<OrderPersisten
         builder.HasIndex(o => o.CustomerId);
         builder.HasIndex(o => o.OrderNumber).IsUnique();
 
+        // Postgres treats NULLs as distinct, so any number of orders without
+        // a key (created outside checkout) can coexist under this index.
+        builder.Property(o => o.CheckoutIdempotencyKey).HasMaxLength(100);
+        builder.HasIndex(o => new { o.CustomerId, o.CheckoutIdempotencyKey }).IsUnique();
+
         builder.Property(o => o.Version).IsConcurrencyToken();
 
         builder.HasMany(o => o.Items)

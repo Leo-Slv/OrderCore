@@ -130,6 +130,39 @@ public sealed class OrderTests
     }
 
     [Fact]
+    public void RequestPayment_raises_OrderPaymentRequested()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var order = CreateOrder(now);
+        AddWidget(order);
+        order.ClearDomainEvents();
+
+        order.RequestPayment(now);
+
+        order.DomainEvents.Should().ContainSingle(e => e is OrderCore.Api.Modules.Orders.Domain.Events.OrderPaymentRequested);
+    }
+
+    [Fact]
+    public void Create_keeps_the_checkout_idempotency_key()
+    {
+        var order = Order.Create(CustomerId, "BRL", "ORD-2026-000001", DateTimeOffset.UtcNow, checkoutIdempotencyKey: "checkout-1");
+
+        order.CheckoutIdempotencyKey.Should().Be("checkout-1");
+    }
+
+    [Theory]
+    [InlineData(" ")]
+    [InlineData(null)]
+    public void Create_rejects_a_blank_or_too_long_checkout_idempotency_key(string? prefix)
+    {
+        var key = prefix ?? new string('k', Order.MaxCheckoutIdempotencyKeyLength + 1);
+
+        var act = () => Order.Create(CustomerId, "BRL", "ORD-2026-000001", DateTimeOffset.UtcNow, checkoutIdempotencyKey: key);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
     public void ApplyDiscount_rejects_more_than_the_subtotal()
     {
         var order = CreateOrder(DateTimeOffset.UtcNow);

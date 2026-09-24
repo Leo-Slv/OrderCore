@@ -13,6 +13,8 @@ namespace OrderCore.Api.Modules.Orders.Domain.Entities;
 /// </summary>
 public sealed class Order : AggregateRoot<Guid>
 {
+    public const int MaxCheckoutIdempotencyKeyLength = 100;
+
     private readonly List<OrderItem> _items = new();
 
     public string OrderNumber { get; private set; } = string.Empty;
@@ -42,6 +44,13 @@ public sealed class Order : AggregateRoot<Guid>
     public string? CustomerNotes { get; private set; }
 
     public string? InternalNotes { get; private set; }
+
+    /// <summary>
+    /// Client-supplied key of the checkout request that created this order,
+    /// unique per customer. Replaying the same checkout returns this order
+    /// instead of creating another. Null for orders created any other way.
+    /// </summary>
+    public string? CheckoutIdempotencyKey { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
 
@@ -76,7 +85,13 @@ public sealed class Order : AggregateRoot<Guid>
     /// either — same class of gap as <c>Category.Create</c> gaining
     /// `description`.
     /// </summary>
-    public static Order Create(Guid customerId, string currency, string orderNumber, DateTimeOffset now, string? customerNotes = null)
+    public static Order Create(
+        Guid customerId,
+        string currency,
+        string orderNumber,
+        DateTimeOffset now,
+        string? customerNotes = null,
+        string? checkoutIdempotencyKey = null)
     {
         if (customerId == Guid.Empty)
         {
@@ -93,7 +108,19 @@ public sealed class Order : AggregateRoot<Guid>
             throw new ArgumentException("Order number is required.", nameof(orderNumber));
         }
 
-        var order = new Order(Guid.NewGuid(), customerId, currency, orderNumber, now) { CustomerNotes = customerNotes };
+        if (checkoutIdempotencyKey is not null
+            && (string.IsNullOrWhiteSpace(checkoutIdempotencyKey) || checkoutIdempotencyKey.Length > MaxCheckoutIdempotencyKeyLength))
+        {
+            throw new ArgumentException(
+                $"A checkout idempotency key must be non-blank and at most {MaxCheckoutIdempotencyKeyLength} characters.",
+                nameof(checkoutIdempotencyKey));
+        }
+
+        var order = new Order(Guid.NewGuid(), customerId, currency, orderNumber, now)
+        {
+            CustomerNotes = customerNotes,
+            CheckoutIdempotencyKey = checkoutIdempotencyKey,
+        };
         order.IncrementVersion();
         order.Raise(new OrderCreated(Guid.NewGuid(), now, order.Id, customerId));
         return order;
@@ -234,6 +261,7 @@ public sealed class Order : AggregateRoot<Guid>
 
         Status = OrderStatus.PendingPayment;
         IncrementVersion();
+        Raise(new OrderPaymentRequested(Guid.NewGuid(), now, Id));
     }
 
     public void Confirm(DateTimeOffset now)
@@ -326,6 +354,7 @@ public sealed class Order : AggregateRoot<Guid>
         Address? billingAddress,
         string? customerNotes,
         string? internalNotes,
+        string? checkoutIdempotencyKey,
         DateTimeOffset createdAt,
         DateTimeOffset updatedAt,
         DateTimeOffset? confirmedAt,
@@ -344,6 +373,7 @@ public sealed class Order : AggregateRoot<Guid>
             BillingAddress = billingAddress,
             CustomerNotes = customerNotes,
             InternalNotes = internalNotes,
+            CheckoutIdempotencyKey = checkoutIdempotencyKey,
             UpdatedAt = updatedAt,
             Status = status,
             ConfirmedAt = confirmedAt,

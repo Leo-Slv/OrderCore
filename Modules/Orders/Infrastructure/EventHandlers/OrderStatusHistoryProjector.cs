@@ -17,12 +17,14 @@ namespace OrderCore.Api.Modules.Orders.Infrastructure.EventHandlers;
 /// <see cref="OrderCancelled"/>/<see cref="OrderPaymentFailed"/> can each
 /// be reached from more than one prior status (`Cancel` accepts anything
 /// short of Shipped/Delivered/Cancelled), so `FromStatus` is only filled
-/// in where the state machine makes it unambiguous (`OrderConfirmed`/
-/// `OrderPaymentFailed` only ever transition from `PendingPayment`) and
+/// in where the state machine makes it unambiguous (`OrderPaymentRequested`
+/// only ever transitions from `Created`, `OrderConfirmed`/
+/// `OrderPaymentFailed` only from `PendingPayment`) and
 /// left null otherwise, rather than guessed or looked up separately.
 /// </summary>
 public sealed class OrderStatusHistoryProjector :
     IDomainEventHandler<OrderCreated>,
+    IDomainEventHandler<OrderPaymentRequested>,
     IDomainEventHandler<OrderConfirmed>,
     IDomainEventHandler<OrderCancelled>,
     IDomainEventHandler<OrderPaymentFailed>
@@ -36,6 +38,10 @@ public sealed class OrderStatusHistoryProjector :
 
     public Task HandleAsync(OrderCreated domainEvent, CancellationToken cancellationToken) =>
         RecordAsync(domainEvent.OrderId, fromStatus: null, toStatus: "Created", reason: null, domainEvent.OccurredAt, cancellationToken);
+
+    public Task HandleAsync(OrderPaymentRequested domainEvent, CancellationToken cancellationToken) =>
+        RecordAsync(
+            domainEvent.OrderId, fromStatus: "Created", toStatus: "PendingPayment", reason: null, domainEvent.OccurredAt, cancellationToken);
 
     public Task HandleAsync(OrderConfirmed domainEvent, CancellationToken cancellationToken) =>
         RecordAsync(

@@ -23,3 +23,11 @@ public sealed record OrderCancelled(Guid EventId, DateTimeOffset OccurredAt, Gui
 
 public sealed record OrderPaymentFailed(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId, string Reason)
     : IDomainEvent;
+
+/// <summary>
+/// Stock was reserved and the order moved from Created to PendingPayment.
+/// Raised so the status history records this transition too; it is the
+/// "Processando pagamento…" step of the tracking timeline.
+/// </summary>
+public sealed record OrderPaymentRequested(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)
+    : IDomainEvent;

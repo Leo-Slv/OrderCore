@@ -25,39 +25,71 @@ public sealed class InventoryServiceAdapter : IInventoryService
     private readonly ReserveStockUseCase _reserveStock;
     private readonly ReleaseReservationUseCase _releaseReservation;
     private readonly ConsumeReservationUseCase _consumeReservation;
+    private readonly GetStockAvailabilityUseCase _getStockAvailability;
     private readonly IInventoryReservationRepository _reservations;
 
     public InventoryServiceAdapter(
         ReserveStockUseCase reserveStock,
         ReleaseReservationUseCase releaseReservation,
         ConsumeReservationUseCase consumeReservation,
+        GetStockAvailabilityUseCase getStockAvailability,
         IInventoryReservationRepository reservations)
     {
         _reserveStock = reserveStock;
         _releaseReservation = releaseReservation;
         _consumeReservation = consumeReservation;
+        _getStockAvailability = getStockAvailability;
         _reservations = reservations;
     }
 
+    /// <summary>
+    /// Checks availability for every item first, so a product with too little
+    /// stock (or no stock record at all, which <see cref="ReserveStockUseCase"/>
+    /// would reject as "not found") fails before anything is reserved. The
+    /// reservation loop can still lose a race with a concurrent buyer, or
+    /// throw after exhausting its concurrency retries. In both cases what was
+    /// already reserved is released first.
+    /// </summary>
     public async Task<bool> TryReserveOrderItemsAsync(Order order, CancellationToken cancellationToken)
     {
-        foreach (var item in order.Items)
+        var available = await GetAvailableQuantitiesAsync(order.Items.Select(i => i.ProductId).ToList(), cancellationToken);
+        if (order.Items.Any(i => available[i.ProductId] < i.Quantity))
         {
-            var command = new ReserveStockCommand(item.ProductId, order.Id, Guid.NewGuid(), item.Quantity);
-            var result = await _reserveStock.ExecuteAsync(command, cancellationToken);
+            return false;
+        }
 
-            if (!result.Succeeded)
+        try
+        {
+            foreach (var item in order.Items)
             {
-                // Compensate: release whatever this attempt already
-                // reserved before reporting overall failure, so a partial
-                // reservation never lingers for an order that didn't make
-                // it to PendingPayment.
-                await ReleaseReservationsAsync(order.Id, cancellationToken);
-                return false;
+                var command = new ReserveStockCommand(item.ProductId, order.Id, Guid.NewGuid(), item.Quantity);
+                var result = await _reserveStock.ExecuteAsync(command, cancellationToken);
+
+                if (!result.Succeeded)
+                {
+                    // Compensate: release whatever this attempt already
+                    // reserved before reporting overall failure, so a partial
+                    // reservation never lingers for an order that didn't make
+                    // it to PendingPayment.
+                    await ReleaseReservationsAsync(order.Id, cancellationToken);
+                    return false;
+                }
             }
+        }
+        catch
+        {
+            await ReleaseReservationsAsync(order.Id, cancellationToken);
+            throw;
         }
 
         return true;
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, int>> GetAvailableQuantitiesAsync(
+        IReadOnlyCollection<Guid> productIds, CancellationToken cancellationToken)
+    {
+        var availability = await _getStockAvailability.ExecuteAsync(productIds, cancellationToken);
+        return availability.ToDictionary(a => a.ProductId, a => a.QuantityAvailable);
     }
 
     public async Task ReleaseReservationsAsync(Guid orderId, CancellationToken cancellationToken)

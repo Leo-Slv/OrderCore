@@ -6,6 +6,13 @@ public sealed class OrderStatusHistoryPersistenceModel
 
     public Guid OrderId { get; set; }
 
+    /// <summary>
+    /// Database-assigned, increasing in insert order. Orders the timeline:
+    /// events raised in the same save (e.g. OrderCreated and
+    /// OrderPaymentRequested at checkout) can share a <see cref="ChangedAt"/>.
+    /// </summary>
+    public long Sequence { get; set; }
+
     public string? FromStatus { get; set; }
 
     public string ToStatus { get; set; } = string.Empty;

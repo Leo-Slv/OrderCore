@@ -10,6 +10,7 @@ using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
+using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Domain.Enums;
 using OrderCore.Api.Modules.Orders.Domain.Events;
@@ -129,6 +130,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
                     stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
                 new Api.Modules.Inventory.Application.UseCases.ConsumeReservationUseCase(
                     stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
+                new Api.Modules.Inventory.Application.UseCases.GetStockAvailabilityUseCase(stockRepository),
                 reservationRepository);
 
             var orderRepository = new EfOrderRepository(ordersDb, OrdersDispatcher(ordersDb));
@@ -142,10 +144,11 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
             orderId = order.OrderId;
 
             await using var paymentsDb = new PaymentsDbContext(PaymentsOptions());
-            var paymentGateway = new PaymentGatewayAdapter(CreatePaymentUseCase(paymentsDb));
+            var paymentGateway = new PaymentGatewayAdapter(
+                CreatePaymentUseCase(paymentsDb), new GetPaymentByOrderIdUseCase(new EfPaymentRepository(paymentsDb)));
             var requestPayment = new RequestOrderPaymentUseCase(orderRepository, inventoryService, paymentGateway, TimeProvider.System);
 
-            await requestPayment.ExecuteAsync(orderId, CancellationToken.None);
+            await requestPayment.ExecuteAsync(orderId, PaymentMethodChoice.Card, CancellationToken.None);
         }
 
         // Assert, intermediate: order is PendingPayment, stock is reserved,
@@ -236,12 +239,14 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
                 stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
             new Api.Modules.Inventory.Application.UseCases.ConsumeReservationUseCase(
                 stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
+            new Api.Modules.Inventory.Application.UseCases.GetStockAvailabilityUseCase(stockRepository),
             reservationRepository);
 
         var services = new ServiceCollection();
         services.AddSingleton(ordersDb);
         services.AddSingleton<OrderStatusHistoryProjector>();
         services.AddSingleton<IDomainEventHandler<OrderCreated>>(sp => sp.GetRequiredService<OrderStatusHistoryProjector>());
+        services.AddSingleton<IDomainEventHandler<OrderPaymentRequested>>(sp => sp.GetRequiredService<OrderStatusHistoryProjector>());
         services.AddSingleton<IDomainEventHandler<OrderConfirmed>>(sp => sp.GetRequiredService<OrderStatusHistoryProjector>());
         services.AddSingleton<IDomainEventHandler<OrderCancelled>>(sp => sp.GetRequiredService<OrderStatusHistoryProjector>());
         services.AddSingleton<IDomainEventHandler<OrderPaymentFailed>>(sp => sp.GetRequiredService<OrderStatusHistoryProjector>());

@@ -12,6 +12,8 @@ public sealed class OrderStatusHistoryConfiguration : IEntityTypeConfiguration<O
 
         builder.HasKey(h => h.Id);
 
+        builder.Property(h => h.Sequence).UseIdentityByDefaultColumn();
+
         builder.Property(h => h.FromStatus).HasMaxLength(20);
         builder.Property(h => h.ToStatus).HasMaxLength(20).IsRequired();
 

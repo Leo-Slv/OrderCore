@@ -35,10 +35,29 @@ public sealed class EfOrderRepository : IOrderRepository
         return model is null ? null : Track(model);
     }
 
-    public async Task<IReadOnlyList<Order>> ListByCustomerIdAsync(Guid customerId, CancellationToken cancellationToken)
+    public async Task<(IReadOnlyList<Order> Items, int TotalCount)> ListByCustomerIdAsync(
+        Guid customerId, int page, int pageSize, CancellationToken cancellationToken)
     {
-        var models = await Query().Where(o => o.CustomerId == customerId).ToListAsync(cancellationToken);
-        return models.Select(Track).ToList();
+        var query = _dbContext.Orders.Where(o => o.CustomerId == customerId);
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var models = await query
+            .OrderByDescending(o => o.CreatedAt)
+            .ThenBy(o => o.Id)
+            .Include(o => o.Items)
+            .AsSplitQuery()
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (models.Select(Track).ToList(), totalCount);
+    }
+
+    public async Task<Order?> FindByCheckoutIdempotencyKeyAsync(Guid customerId, string idempotencyKey, CancellationToken cancellationToken)
+    {
+        var model = await Query().FirstOrDefaultAsync(
+            o => o.CustomerId == customerId && o.CheckoutIdempotencyKey == idempotencyKey, cancellationToken);
+        return model is null ? null : Track(model);
     }
 
     public async Task AddAsync(Order order, CancellationToken cancellationToken)

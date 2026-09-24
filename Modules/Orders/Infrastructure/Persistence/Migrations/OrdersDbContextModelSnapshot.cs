@@ -106,6 +106,10 @@ namespace OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("CancelledAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("CheckoutIdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<DateTimeOffset?>("ConfirmedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -200,6 +204,9 @@ namespace OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Migrations
                     b.HasIndex("OrderNumber")
                         .IsUnique();
 
+                    b.HasIndex("CustomerId", "CheckoutIdempotencyKey")
+                        .IsUnique();
+
                     b.ToTable("orders", (string)null);
                 });
 
@@ -221,6 +228,12 @@ namespace OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Reason")
                         .HasColumnType("text");
+
+                    b.Property<long>("Sequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Sequence"));
 
                     b.Property<string>("ToStatus")
                         .IsRequired()

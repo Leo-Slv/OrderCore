@@ -30,7 +30,7 @@ public sealed class RequestOrderPaymentUseCase
         _timeProvider = timeProvider;
     }
 
-    public async Task<CreateOrderResult> ExecuteAsync(Guid orderId, CancellationToken cancellationToken)
+    public async Task<CreateOrderResult> ExecuteAsync(Guid orderId, PaymentMethodChoice paymentMethod, CancellationToken cancellationToken)
     {
         var order = await _orderRepository.GetByIdAsync(orderId, cancellationToken)
             ?? throw new NotFoundException("order_not_found", $"Order '{orderId}' was not found.");
@@ -47,7 +47,8 @@ public sealed class RequestOrderPaymentUseCase
         // OrderId doubles as the idempotency key: PaymentPersistenceModel
         // enforces a unique index on it, so retrying this use case for the
         // same order can never create two payments.
-        await _paymentGateway.RequestPaymentAsync(order.Id, order.TotalAmount, order.Currency, order.Id.ToString(), cancellationToken);
+        await _paymentGateway.RequestPaymentAsync(
+            order.Id, order.TotalAmount, order.Currency, paymentMethod, order.Id.ToString(), cancellationToken);
 
         await _orderRepository.SaveChangesAsync(cancellationToken);
 

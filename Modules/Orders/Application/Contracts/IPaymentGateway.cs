@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.Orders.Application.DTOs;
+
 namespace OrderCore.Api.Modules.Orders.Application.Contracts;
 
 /// <summary>
@@ -8,5 +10,14 @@ namespace OrderCore.Api.Modules.Orders.Application.Contracts;
 /// </summary>
 public interface IPaymentGateway
 {
-    Task<Guid> RequestPaymentAsync(Guid orderId, decimal amount, string currency, string idempotencyKey, CancellationToken cancellationToken);
+    Task<Guid> RequestPaymentAsync(
+        Guid orderId,
+        decimal amount,
+        string currency,
+        PaymentMethodChoice method,
+        string idempotencyKey,
+        CancellationToken cancellationToken);
+
+    /// <summary>Null when no payment has been requested for the order yet.</summary>
+    Task<OrderPaymentSummary?> GetPaymentSummaryAsync(Guid orderId, CancellationToken cancellationToken);
 }

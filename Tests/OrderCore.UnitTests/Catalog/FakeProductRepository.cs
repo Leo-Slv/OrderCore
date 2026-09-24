@@ -23,6 +23,9 @@ internal sealed class FakeProductRepository : IProductRepository
     public Task<Product?> GetBySlugAsync(Slug slug, CancellationToken cancellationToken) =>
         Task.FromResult(_products.Values.FirstOrDefault(p => p.Slug == slug));
 
+    public Task<IReadOnlyList<Product>> ListByIdsAsync(IReadOnlyCollection<Guid> productIds, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Product>>(_products.Values.Where(p => productIds.Contains(p.Id)).ToList());
+
     /// <summary>
     /// Ignores filtering and sorting, which are covered by the EF
     /// repository's integration tests; only paging is applied.

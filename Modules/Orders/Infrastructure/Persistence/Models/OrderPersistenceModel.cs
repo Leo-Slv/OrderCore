@@ -62,6 +62,8 @@ public sealed class OrderPersistenceModel
 
     public string? InternalNotes { get; set; }
 
+    public string? CheckoutIdempotencyKey { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

@@ -42,6 +42,12 @@ public sealed class EfProductRepository : IProductRepository
         return model is null ? null : Track(model);
     }
 
+    public async Task<IReadOnlyList<Product>> ListByIdsAsync(IReadOnlyCollection<Guid> productIds, CancellationToken cancellationToken)
+    {
+        var models = await Query().AsSplitQuery().Where(p => productIds.Contains(p.Id)).ToListAsync(cancellationToken);
+        return models.Select(Track).ToList();
+    }
+
     public async Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken)
     {
         IQueryable<ProductPersistenceModel> query = _dbContext.Products;

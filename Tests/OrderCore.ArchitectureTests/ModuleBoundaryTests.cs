@@ -112,6 +112,31 @@ public sealed class ModuleBoundaryTests
         result.IsSuccessful.Should().BeTrue(BuildFailureMessage("Orders", result));
     }
 
+    [Fact]
+    public void Orders_application_does_not_depend_on_another_modules_domain_or_infrastructure()
+    {
+        // Orders' contracts (IProductCatalog, IPaymentGateway, ...) speak
+        // Orders' own DTOs; mapping from another module's types happens in
+        // Orders' Infrastructure adapters. IProductCatalog used to return
+        // Catalog's Product entity, which this rule now rules out.
+        var result = Types.InAssembly(ApiAssembly)
+            .That()
+            .ResideInNamespace("OrderCore.Api.Modules.Orders.Application")
+            .ShouldNot()
+            .HaveDependencyOnAny(
+                "OrderCore.Api.Modules.Catalog.Domain",
+                "OrderCore.Api.Modules.Catalog.Infrastructure",
+                "OrderCore.Api.Modules.Customers.Domain",
+                "OrderCore.Api.Modules.Customers.Infrastructure",
+                "OrderCore.Api.Modules.Inventory.Domain",
+                "OrderCore.Api.Modules.Inventory.Infrastructure",
+                "OrderCore.Api.Modules.Payments.Domain",
+                "OrderCore.Api.Modules.Payments.Infrastructure")
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(BuildFailureMessage("Orders", result));
+    }
+
     private static string BuildFailureMessage(string module, TestResult result) =>
         result.FailingTypes is null
             ? $"Architecture rule violated in module '{module}'."

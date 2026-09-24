@@ -18,6 +18,9 @@ public interface IProductRepository
 
     Task<Product?> GetBySlugAsync(Slug slug, CancellationToken cancellationToken);
 
+    /// <summary>Products that don't exist are simply absent from the result.</summary>
+    Task<IReadOnlyList<Product>> ListByIdsAsync(IReadOnlyCollection<Guid> productIds, CancellationToken cancellationToken);
+
     /// <summary>
     /// One page of the filtered products, in <see cref="ListProductsFilter.Sort"/>
     /// order, plus the total number of matches across all pages. Same

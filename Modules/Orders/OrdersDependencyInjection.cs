@@ -31,8 +31,11 @@ public static class OrdersDependencyInjection
         services.AddScoped<IProductCatalog, ProductCatalogAdapter>();
         services.AddScoped<IInventoryService, InventoryServiceAdapter>();
         services.AddScoped<IPaymentGateway, PaymentGatewayAdapter>();
+        services.AddScoped<ICustomerDirectory, CustomerDirectoryAdapter>();
+        services.AddScoped<IOrderStatusHistoryReader, EfOrderStatusHistoryReader>();
 
         services.AddScoped<IDomainEventHandler<OrderCreated>, OrderStatusHistoryProjector>();
+        services.AddScoped<IDomainEventHandler<OrderPaymentRequested>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderConfirmed>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderCancelled>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderPaymentFailed>, OrderStatusHistoryProjector>();
@@ -48,6 +51,10 @@ public static class OrdersDependencyInjection
         services.AddScoped<CancelOrderUseCase>();
         services.AddScoped<GetOrderByIdUseCase>();
         services.AddScoped<ListCustomerOrdersUseCase>();
+        services.AddScoped<CheckoutUseCase>();
+        services.AddScoped<QuoteCartUseCase>();
+        services.AddScoped<GetOrderDetailsUseCase>();
+        services.AddScoped<GetOrderStatusHistoryUseCase>();
 
         return services;
     }
