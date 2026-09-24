@@ -1,3 +1,6 @@
+using System.Globalization;
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
 using OrderCore.Api.Modules.Inventory.Application.DTOs;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
@@ -19,14 +22,20 @@ public sealed class ReserveStockUseCase
     private readonly IStockItemRepository _stockItems;
     private readonly IInventoryReservationRepository _reservations;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
     public ReserveStockUseCase(
-        IStockItemRepository stockItems, IInventoryReservationRepository reservations, IUnitOfWork unitOfWork, TimeProvider timeProvider)
+        IStockItemRepository stockItems,
+        IInventoryReservationRepository reservations,
+        IUnitOfWork unitOfWork,
+        IAuditLogService auditLog,
+        TimeProvider timeProvider)
     {
         _stockItems = stockItems;
         _reservations = reservations;
         _unitOfWork = unitOfWork;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -49,6 +58,19 @@ public sealed class ReserveStockUseCase
             try
             {
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                await _auditLog.RecordAsync(
+                    AuditLogActionNames.InventoryReserved,
+                    "InventoryReservation",
+                    reservation.Id,
+                    new Dictionary<string, string?>
+                    {
+                        ["productId"] = command.ProductId.ToString(),
+                        ["quantity"] = command.Quantity.ToString(CultureInfo.InvariantCulture),
+                    },
+                    userId: null,
+                    cancellationToken);
+
                 return new ReserveStockResult(reservation.Id, true);
             }
             catch (StockConcurrencyConflictException) when (attempt < MaxAttempts)

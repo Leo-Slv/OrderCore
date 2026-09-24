@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
 
 namespace OrderCore.Api.Modules.Inventory.Application.UseCases;
@@ -14,12 +16,15 @@ public sealed class ExpireReservationUseCase
     private readonly IInventoryReservationRepository _reservations;
     private readonly IStockItemRepository _stockItems;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAuditLogService _auditLog;
 
-    public ExpireReservationUseCase(IInventoryReservationRepository reservations, IStockItemRepository stockItems, IUnitOfWork unitOfWork)
+    public ExpireReservationUseCase(
+        IInventoryReservationRepository reservations, IStockItemRepository stockItems, IUnitOfWork unitOfWork, IAuditLogService auditLog)
     {
         _reservations = reservations;
         _stockItems = stockItems;
         _unitOfWork = unitOfWork;
+        _auditLog = auditLog;
     }
 
     public async Task ExecuteAsync(Guid reservationId, CancellationToken cancellationToken)
@@ -34,5 +39,8 @@ public sealed class ExpireReservationUseCase
         stockItem.Release(reservation.Quantity);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await _auditLog.RecordAsync(
+            AuditLogActionNames.InventoryExpired, "InventoryReservation", reservationId, metadata: null, userId: null, cancellationToken);
     }
 }

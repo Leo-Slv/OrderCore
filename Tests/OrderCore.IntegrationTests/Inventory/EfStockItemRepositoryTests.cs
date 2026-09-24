@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Inventory.Application.DTOs;
 using OrderCore.Api.Modules.Inventory.Application.UseCases;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
@@ -48,13 +49,24 @@ public sealed class EfStockItemRepositoryTests : IAsyncLifetime
         public Task DispatchAsync(IReadOnlyCollection<IDomainEvent> events, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
+    private sealed class NoOpAuditLogService : IAuditLogService
+    {
+        public Task RecordAsync(
+            string action,
+            string entityName,
+            Guid? entityId,
+            IReadOnlyDictionary<string, string?>? metadata,
+            Guid? userId,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     private static ReserveStockUseCase CreateReserveStockUseCase(InventoryDbContext dbContext)
     {
         var stockItemRepository = new EfStockItemRepository(dbContext);
         var reservationRepository = new EfInventoryReservationRepository(dbContext);
         var unitOfWork = new InventoryUnitOfWork(dbContext, stockItemRepository, reservationRepository, new NoOpDomainEventDispatcher());
 
-        return new ReserveStockUseCase(stockItemRepository, reservationRepository, unitOfWork, TimeProvider.System);
+        return new ReserveStockUseCase(stockItemRepository, reservationRepository, unitOfWork, new NoOpAuditLogService(), TimeProvider.System);
     }
 
     [Fact]

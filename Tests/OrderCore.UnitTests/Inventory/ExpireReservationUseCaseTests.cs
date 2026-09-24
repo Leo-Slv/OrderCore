@@ -19,7 +19,7 @@ public sealed class ExpireReservationUseCaseTests
         var reservation = InventoryReservation.Create(stockItem.ProductId, Guid.NewGuid(), Guid.NewGuid(), 2, DateTimeOffset.UtcNow);
         await reservations.AddAsync(reservation, CancellationToken.None);
 
-        var useCase = new ExpireReservationUseCase(reservations, products, new FakeUnitOfWork());
+        var useCase = new ExpireReservationUseCase(reservations, products, new FakeUnitOfWork(), new FakeAuditLogService());
         await useCase.ExecuteAsync(reservation.Id, CancellationToken.None);
 
         stockItem.QuantityReserved.Should().Be(0);

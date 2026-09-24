@@ -19,7 +19,7 @@ public sealed class ReserveStockUseCaseTests
         var stockItem = StockItem.Create(Guid.NewGuid(), 1, null, DateTimeOffset.UtcNow);
         await products.AddAsync(stockItem, CancellationToken.None);
         var useCase = new ReserveStockUseCase(
-            products, new FakeInventoryReservationRepository(), new FakeUnitOfWork(), TimeProvider.System);
+            products, new FakeInventoryReservationRepository(), new FakeUnitOfWork(), new FakeAuditLogService(), TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(stockItem.ProductId), CancellationToken.None);
 
@@ -34,7 +34,7 @@ public sealed class ReserveStockUseCaseTests
         var stockItem = StockItem.Create(Guid.NewGuid(), 0, null, DateTimeOffset.UtcNow);
         await products.AddAsync(stockItem, CancellationToken.None);
         var unitOfWork = new FakeUnitOfWork();
-        var useCase = new ReserveStockUseCase(products, new FakeInventoryReservationRepository(), unitOfWork, TimeProvider.System);
+        var useCase = new ReserveStockUseCase(products, new FakeInventoryReservationRepository(), unitOfWork, new FakeAuditLogService(), TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(stockItem.ProductId), CancellationToken.None);
 
@@ -49,7 +49,7 @@ public sealed class ReserveStockUseCaseTests
         var stockItem = StockItem.Create(Guid.NewGuid(), 5, null, DateTimeOffset.UtcNow);
         await products.AddAsync(stockItem, CancellationToken.None);
         var unitOfWork = FakeUnitOfWork.ThatConflictsThenSucceeds(conflictCount: 2);
-        var useCase = new ReserveStockUseCase(products, new FakeInventoryReservationRepository(), unitOfWork, TimeProvider.System);
+        var useCase = new ReserveStockUseCase(products, new FakeInventoryReservationRepository(), unitOfWork, new FakeAuditLogService(), TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(stockItem.ProductId), CancellationToken.None);
 
@@ -64,7 +64,7 @@ public sealed class ReserveStockUseCaseTests
         var stockItem = StockItem.Create(Guid.NewGuid(), 5, null, DateTimeOffset.UtcNow);
         await products.AddAsync(stockItem, CancellationToken.None);
         var unitOfWork = FakeUnitOfWork.ThatConflictsThenSucceeds(conflictCount: 3);
-        var useCase = new ReserveStockUseCase(products, new FakeInventoryReservationRepository(), unitOfWork, TimeProvider.System);
+        var useCase = new ReserveStockUseCase(products, new FakeInventoryReservationRepository(), unitOfWork, new FakeAuditLogService(), TimeProvider.System);
 
         var act = () => useCase.ExecuteAsync(Command(stockItem.ProductId), CancellationToken.None);
 
