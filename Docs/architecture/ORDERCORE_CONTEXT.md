@@ -1549,25 +1549,32 @@ Não criar tabelas simplesmente para representar cada classe.
 
 O modelo relacional deve representar as necessidades de persistência do domínio.
 
-`Customers`, `Catalog`, `Orders` (persistência apenas — o restante de
-05-orders.md continua blueprint) e `Inventory` têm EF Core de fato
-implementado até agora (os demais módulos ainda são scaffolding).
-`Customers` (`Modules/Customers/Infrastructure/Persistence`) cria
-`customers`, `customer_addresses` e `customer_payment_methods` via
+`Customers`, `Catalog`, `Orders`, `Inventory` e `Payments` têm EF Core de
+fato implementado — todos os módulos de negócio previstos (seção 4) estão
+completos de ponta a ponta (`AuditLogs`, o módulo técnico/transversal,
+ainda é scaffolding). `Customers` (`Modules/Customers/Infrastructure/Persistence`)
+cria `customers`, `customer_addresses` e `customer_payment_methods` via
 `InitialCustomersSchema`; `Catalog` (`Modules/Catalog/Infrastructure/Persistence`)
 cria `products`, `product_images`, `product_variants` e `categories` via
 `InitialCatalogSchema`; `Orders` (`Modules/Orders/Infrastructure/Persistence`)
-cria `orders` e `order_items` via `InitialOrdersSchema` — `order_items` é
-chaveado por `(OrderId, ProductId)`, não um id substituto, porque
+cria `orders`, `order_items` e `order_status_history` via
+`ExpandOrdersSchema` (sobre a `InitialOrdersSchema` original) — `order_items`
+é chaveado por `(OrderId, ProductId)`, não um id substituto, porque
 `OrderItem` não tem identidade própria no domínio; `Inventory`
 (`Modules/Inventory/Infrastructure/Persistence`) cria `stock_items`,
-`inventory_reservations` e `stock_movements` via `InitialInventorySchema`.
+`inventory_reservations` e `stock_movements` via `InitialInventorySchema`;
+`Payments` (`Modules/Payments/Infrastructure/Persistence`) cria `payments`,
+`refunds` e `outbox_messages` via `InitialPaymentsSchema`.
 `IProductCatalog` (contrato do próprio Orders) também ganhou sua
 implementação real, `ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`),
 que lê de `IProductRepository` do Catalog — a indireção de "Application
-Contract" da seção 7. O padrão estabelecido em `Customers` e replicado em
-`Catalog`, `Orders` e `Inventory`, a ser seguido pelos demais módulos ao
-ganharem persistência real:
+Contract" da seção 7. `IInventoryService` e `IPaymentGateway` (também
+contratos do próprio Orders) seguem o mesmo padrão: `InventoryServiceAdapter`
+envolve os use cases de reserva/liberação/consumo de `Inventory`, e
+`PaymentGatewayAdapter` envolve `CreatePaymentUseCase` de `Payments` — ver
+[05-orders.md](../diagrams/implementation-class/05-orders.md). O padrão
+estabelecido em `Customers` e replicado em `Catalog`, `Orders`, `Inventory`
+e `Payments`:
 
 - Um `<Módulo>DbContext` por módulo (não um `ApplicationDbContext` único),
   cada um só enxergando as tabelas do próprio módulo — preserva o
@@ -1612,7 +1619,23 @@ ganharem persistência real:
   acontece depois que o save do EF Core já teve sucesso, sobre os eventos
   de domínio combinados de todos os agregados rastreados pelos
   repositórios envolvidos. `StockMovementRecorder` é o primeiro
-  `IDomainEventHandler<T>` real do projeto.
+  `IDomainEventHandler<T>` real do projeto; `OrderStatusHistoryProjector`
+  (Orders) é o segundo, despachado por `EfOrderRepository.SaveChangesAsync`
+  sem precisar de `IUnitOfWork` — toda operação de Orders mexe em um único
+  agregado raiz por vez.
+- `Payments` publica seus `IntegrationEvent` (seção 19) através da mesma
+  infraestrutura de domain events, não de um message broker de verdade:
+  `IntegrationEvent` passou a implementar `IDomainEvent`, e
+  `OutboxPublisherBackgroundService` (`Modules/Payments/Infrastructure/Outbox`)
+  lê periodicamente as linhas pendentes de `outbox_messages` e chama
+  `IDomainEventDispatcher.DispatchAsync` diretamente sobre elas. É uma ponte
+  deliberada e temporária até o RabbitMQ (seção 21) existir — o outbox
+  garante a escrita atômica evento+agregado na mesma transação (a
+  necessidade real do padrão), e o dispatcher in-process cobre a "entrega"
+  até existir um transporte de verdade. `Orders` reage a esses eventos
+  (`PaymentAuthorized`/`PaymentFailed`) como qualquer outro
+  `IDomainEventHandler<T>` — ver
+  [06-payments.md](../diagrams/implementation-class/06-payments.md).
 
 ---
 

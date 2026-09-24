@@ -162,16 +162,11 @@ to a module.
 
 ## Persistence
 
-The project targets PostgreSQL via Entity Framework Core.
-`Modules/Customers/Infrastructure/Persistence`,
-`Modules/Catalog/Infrastructure/Persistence`,
-`Modules/Orders/Infrastructure/Persistence` (Orders' Presentation/other use
-cases from 05-orders.md are still blueprint — only its persistence and
-`IProductCatalog` implementation exist) and
-`Modules/Inventory/Infrastructure/Persistence` are implemented so far —
-every other module's `Infrastructure/Persistence` folder is still
-scaffolding only. Follow their shape when implementing persistence for
-another module:
+The project targets PostgreSQL via Entity Framework Core. All five business
+modules (Customers, Catalog, Orders, Inventory, Payments) have
+`Infrastructure/Persistence` implemented end to end — `AuditLogs` (the
+cross-cutting/technical module) is still scaffolding only. Follow their
+shape when implementing persistence for another module:
 
 Domain Entity
     ↕ Mapper

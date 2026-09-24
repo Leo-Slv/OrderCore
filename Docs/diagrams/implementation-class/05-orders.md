@@ -1,6 +1,16 @@
 # Módulo Orders
 
-Agregado principal do sistema (já parcialmente implementado). Este diagrama inclui os *adapters* que o próprio módulo Orders usa para falar com Catalog, Inventory e Payments sem depender do Domain/Infrastructure interno deles — só das classes externas marcadas `<<external>>` (o detalhe completo de cada uma está no arquivo do módulo dono). Base: [Shared kernel](01-shared-kernel.md).
+Agregado principal do sistema. Como [02-customers.md](02-customers.md), [03-catalog.md](03-catalog.md) e [04-inventory.md](04-inventory.md), este módulo está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core e Presentation), incluindo o fluxo completo de checkout (seção "Fluxo de checkout" abaixo) — não é mais um blueprint futuro. Ver `Docs/specs/orders/checkout-aggregate.md` para o spec completo, incluindo a decisão de implementar o módulo Payments (ver [06-payments.md](06-payments.md)) antes de fechar este módulo, já que `RequestOrderPaymentUseCase`/`PaymentGatewayAdapter`/os dois integration event handlers dependem dele. Este diagrama inclui os *adapters* que o próprio módulo Orders usa para falar com Catalog, Inventory e Payments sem depender do Domain/Infrastructure interno deles — só das classes externas marcadas `<<external>>` (o detalhe completo de cada uma está no arquivo do módulo dono). Base: [Shared kernel](01-shared-kernel.md).
+
+Diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
+
+- `Order.Create` recebe também um `customerNotes` opcional (`string? customerNotes = null`) — nada mais no agregado tinha como definir esse campo.
+- `IOrderRepository` ganhou `ListByCustomerIdAsync(Guid customerId)`, não listado no diagrama original — `ListCustomerOrdersUseCase` depende dessa interface e não tinha por onde consultar, mesma classe de lacuna de `IInventoryReservationRepository.ListByOrderIdAsync` em Inventory.
+- `Order` ganhou dois métodos de passagem não listados no diagrama: `DecreaseItemQuantity(Guid productId, int quantity)` e `ApplyItemDiscount(Guid productId, decimal amount)`, delegando para `OrderItem.DecreaseQuantity`/`ApplyDiscount` — como esses dois métodos do item são `internal` (ver "Comportamento de OrderItem" abaixo), só o agregado (`Order`) pode chamá-los; sem esses dois métodos de passagem nada fora do assembly conseguiria disparar essa mudança.
+- `EfOrderRepository.SaveChangesAsync` despacha os domain events do agregado via `IDomainEventDispatcher` logo após o save, igual ao padrão de `InventoryUnitOfWork` — só que aqui sem `IUnitOfWork`, porque toda operação de Orders mexe em um único agregado raiz (`Order`) por vez (ver a seção Transactions do `claude.md`).
+- `IPaymentGateway`/`PaymentGatewayAdapter` (envolvendo `CreatePaymentUseCase` de Payments) e os dois `IDomainEventHandler` de `PaymentAuthorized`/`PaymentFailed` só existem porque `IntegrationEvent` (Payments) passou a implementar `IDomainEvent` — ver a nota em [06-payments.md](06-payments.md) sobre a ponte do outbox antes de existir RabbitMQ.
+- `RequestOrderPaymentUseCase.ExecuteAsync` retorna `CreateOrderResult`, não `Order`/`void` — reaproveita o mesmo DTO de `CreateOrderHandler` já que ambos só precisam devolver id/total/status.
+- `OrdersController.RequestPaymentAsync` devolve `Task<IActionResult>` (202 Accepted, sem corpo), como já estava no diagrama: confirmar ou falhar o pedido acontece depois, de forma assíncrona (ver `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler`), então um corpo `OrderResponse` aqui seria enganoso de qualquer forma — `CreateOrderResult` não carrega dados suficientes para montar um.
 
 ```mermaid
 
@@ -85,9 +95,11 @@ classDiagram
         +DateTimeOffset? CancelledAt
         +DateTimeOffset? ShippedAt
         +DateTimeOffset? DeliveredAt
-        +Create(Guid customerId, string currency, string orderNumber, DateTimeOffset now)$ Order
+        +Create(Guid customerId, string currency, string orderNumber, DateTimeOffset now, string? customerNotes)$ Order
         +AddItem(Guid productId, Guid? productVariantId, string productSku, string productName, string? productImageUrl, decimal unitPrice, int quantity) void
         +RemoveItem(Guid productId) void
+        +DecreaseItemQuantity(Guid productId, int quantity) void
+        +ApplyItemDiscount(Guid productId, decimal amount) void
         +SetAddresses(Address shippingAddress, Address billingAddress) void
         +SetInternalNotes(string? notes) void
         +ApplyDiscount(decimal amount) void
@@ -165,6 +177,7 @@ classDiagram
     class IOrderRepository {
         <<interface>>
         +GetByIdAsync(Guid orderId) Task~Order?~
+        +ListByCustomerIdAsync(Guid customerId) Task~IReadOnlyList~Order~~
         +AddAsync(Order order) Task
         +SaveChangesAsync() Task
     }

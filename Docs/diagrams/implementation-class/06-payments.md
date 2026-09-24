@@ -1,6 +1,18 @@
 # Módulo Payments
 
-Pagamento, estorno e a fila de saída (outbox) que finalmente publica os `IntegrationEvents` hoje presentes no código só como placeholders. Mantido isolado de Order/Customer/Product por design (referenciados apenas por id), para permitir extração futura para um serviço PayCore. Base: [Shared kernel](01-shared-kernel.md).
+Pagamento, estorno e a fila de saída (outbox) que finalmente publica os `IntegrationEvents`. Como [02-customers.md](02-customers.md), [03-catalog.md](03-catalog.md), [04-inventory.md](04-inventory.md) e [05-orders.md](05-orders.md), este módulo está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core, outbox e Presentation) — os `IntegrationEvents` não são mais placeholders. Mantido isolado de Order/Customer/Product por design (referenciados apenas por id), para permitir extração futura para um serviço PayCore. Ver `Docs/specs/payments/payment-processing.md` para o spec completo e as decisões resolvidas antes da implementação. Base: [Shared kernel](01-shared-kernel.md).
+
+Diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
+
+- `IntegrationEvent` passou a implementar `IDomainEvent` (não estava no diagrama) — é a ponte deliberada e temporária que permite a `OutboxPublisherBackgroundService` reutilizar o `IDomainEventDispatcher` já existente do shared kernel para "publicar" antes do RabbitMQ existir (seção 21 ainda é fase futura). Ver "How publish works before RabbitMQ exists" no spec.
+- `IOutboxWriter` mora em `Application/Contracts`, não em `Infrastructure/Outbox` como o diagrama original indicava — a Application depende dele (`CreatePaymentUseCase` etc.) e Application não pode depender de Infrastructure (regra validada por `OrderCore.ArchitectureTests`). Só a implementação concreta (`OutboxWriter`) e `OutboxMessage`/`OutboxPublisherBackgroundService` continuam em `Infrastructure/Outbox`.
+- `PaymentsDbContext` expõe `DbSet<OutboxMessage> OutboxMessages`, não `DbSet<PaymentEventPersistenceModel> PaymentEvents` como no diagrama — nada no código escreve um `PaymentEventPersistenceModel`; tratado como inconsistência do diagrama e consolidado no `OutboxMessage`, que é o que `OutboxWriter`/`OutboxPublisherBackgroundService` de fato leem e escrevem.
+- `Payment` tem, ao mesmo tempo, um método `Refund()` (sem parâmetros, marca o pagamento inteiro como `Refunded`) e precisa referenciar o tipo `Refund` (retorno de `RequestRefund`, chamada estática `Refund.Create(...)`) — colisão de nomes que o próprio diagrama já tinha. Resolvido qualificando o tipo com `global::OrderCore.Api.Modules.Payments.Domain.Entities.Refund` nesses dois pontos (coleções como `IReadOnlyCollection<Refund>` compilam normalmente sem qualificação).
+- `Payment.Fail(string reason)` não recebe `now` (ao contrário de `Authorize`/`Capture`) — não existe um campo de timestamp para "quando falhou" no diagrama nem no documento de modelagem. `Refund.Complete`/`Fail`, por sua vez, recebem `now` (o diagrama original não mostrava o parâmetro), já que `ProcessedAt` precisa de um valor.
+- `RequestRefundUseCase.ExecuteAsync` retorna `Task<Refund>`, não `Task` como no diagrama — `PaymentsController.RequestRefundAsync` não tem outro jeito de montar um `RefundResponse` depois, já que nenhum outro use case do módulo busca um refund pelo próprio id.
+- `RequestRefundUseCase` só chama `Payment.Refund()` quando a soma dos reembolsos `Completed` atinge o valor total do pagamento — não existe status `PartiallyRefunded` (decisão registrada no spec), então marcar o pagamento inteiro como `Refunded` num primeiro reembolso parcial bloquearia qualquer reembolso seguinte (`RequestRefund` exige `Status == Captured`).
+- `CreatePaymentUseCase` autoriza de forma síncrona, na mesma chamada que cria o pagamento (não fica com `Status = Pending` aguardando um passo separado) — decisão registrada no spec, já que o `FakePaymentProvider` não tem nenhuma etapa assíncrona real a esperar.
+- `PaymentWebhookHandler` não tem rota de controller — fica pronto para quando existir um provedor real de webhook (Stripe), sem uma rota HTTP hoje para receber nada.
 
 ```mermaid
 
@@ -12,6 +24,11 @@ classDiagram
     }
 
     class IDomainEventDispatcher {
+        <<external>>
+        <<interface>>
+    }
+
+    class IDomainEvent {
         <<external>>
         <<interface>>
     }
@@ -38,7 +55,7 @@ classDiagram
         +Capture(DateTimeOffset now) void
         +Fail(string reason) void
         +Refund() void
-        +RequestRefund(decimal amount, string reason) Refund
+        +RequestRefund(decimal amount, string reason, DateTimeOffset now) Refund
     }
 
     class Refund {
@@ -47,8 +64,8 @@ classDiagram
         +RefundStatus Status
         +DateTimeOffset RequestedAt
         +DateTimeOffset? ProcessedAt
-        +Complete() void
-        +Fail(string reason) void
+        +Complete(DateTimeOffset now) void
+        +Fail(string reason, DateTimeOffset now) void
     }
 
 
@@ -157,7 +174,7 @@ classDiagram
         -IPaymentRepository payments
         -IPaymentProvider provider
         -IOutboxWriter outbox
-        +ExecuteAsync(RequestRefundCommand command) Task
+        +ExecuteAsync(RequestRefundCommand command) Task~Refund~
     }
 
     class GetPaymentByOrderIdUseCase {
@@ -229,14 +246,6 @@ classDiagram
         +DateTimeOffset RequestedAt
     }
 
-    class PaymentEventPersistenceModel {
-        +Guid Id
-        +Guid PaymentId
-        +string EventType
-        +string PayloadJson
-        +DateTimeOffset OccurredAt
-    }
-
     class PaymentMapper {
         +ToDomain(PaymentPersistenceModel model) Payment
         +ToPersistence(Payment domain) PaymentPersistenceModel
@@ -246,7 +255,7 @@ classDiagram
     class PaymentsDbContext {
         +DbSet~PaymentPersistenceModel~ Payments
         +DbSet~RefundPersistenceModel~ Refunds
-        +DbSet~PaymentEventPersistenceModel~ PaymentEvents
+        +DbSet~OutboxMessage~ OutboxMessages
         +SaveChangesAsync() Task~int~
     }
 
@@ -358,6 +367,7 @@ classDiagram
     Payment "1" *-- "0..*" Refund
     Payment --> PaymentStatus
     Refund --> RefundStatus
+    IDomainEvent <|.. IntegrationEvent : temporary outbox bridge
     IntegrationEvent <|-- PaymentRequested
     IntegrationEvent <|-- PaymentAuthorized
     IntegrationEvent <|-- PaymentFailed
@@ -385,7 +395,7 @@ classDiagram
     PaymentMapper --> Payment
     PaymentsDbContext --> PaymentPersistenceModel
     PaymentsDbContext --> RefundPersistenceModel
-    PaymentsDbContext --> PaymentEventPersistenceModel
+    PaymentsDbContext --> OutboxMessage
 
     IPaymentProvider <|.. FakePaymentProvider
     FakePaymentProvider --> FakePaymentProviderOptions
