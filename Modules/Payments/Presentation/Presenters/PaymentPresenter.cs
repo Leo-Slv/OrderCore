@@ -10,7 +10,12 @@ public static class PaymentPresenter
         Id = payment.Id,
         OrderId = payment.OrderId,
         Amount = payment.Amount,
+        Currency = payment.Currency,
+        Method = payment.Method.ToString(),
         Status = payment.Status.ToString(),
+        FailureReason = payment.FailureReason,
+        CreatedAt = payment.CreatedAt,
+        AuthorizedAt = payment.AuthorizedAt,
     };
 
     public static RefundResponse ToResponse(Refund refund) => new()

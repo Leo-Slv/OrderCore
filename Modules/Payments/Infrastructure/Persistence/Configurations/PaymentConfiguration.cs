@@ -13,6 +13,7 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentPersi
         builder.HasKey(p => p.Id);
 
         builder.Property(p => p.Currency).HasMaxLength(3).IsRequired();
+        builder.Property(p => p.Method).HasMaxLength(20).IsRequired();
         builder.Property(p => p.Status).HasMaxLength(20).IsRequired();
         builder.Property(p => p.IdempotencyKey).HasMaxLength(200).IsRequired();
         builder.Property(p => p.Provider).HasMaxLength(50).IsRequired();

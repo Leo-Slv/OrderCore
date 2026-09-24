@@ -9,7 +9,8 @@ namespace OrderCore.UnitTests.Payments;
 
 public sealed class CreatePaymentUseCaseTests
 {
-    private static CreatePaymentCommand Command() => new(Guid.NewGuid(), 100m, "BRL", "idem-1");
+    private static CreatePaymentCommand Command(PaymentMethod method = PaymentMethod.Card) =>
+        new(Guid.NewGuid(), 100m, "BRL", method, "idem-1");
 
     [Fact]
     public async Task ExecuteAsync_authorizes_and_enqueues_PaymentAuthorized_when_the_provider_succeeds()
@@ -33,5 +34,18 @@ public sealed class CreatePaymentUseCaseTests
 
         result.Status.Should().Be(PaymentStatus.Failed.ToString());
         outbox.Enqueued.Should().ContainSingle().Which.Should().BeOfType<PaymentFailed>();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_records_the_chosen_payment_method()
+    {
+        var payments = new FakePaymentRepository();
+        var useCase = new CreatePaymentUseCase(payments, new StubPaymentProvider(succeeds: true), new FakeOutboxWriter(), new FakeAuditLogService(), TimeProvider.System);
+        var command = Command(PaymentMethod.Pix);
+
+        await useCase.ExecuteAsync(command, CancellationToken.None);
+
+        var payment = await payments.GetByOrderIdAsync(command.OrderId, CancellationToken.None);
+        payment!.Method.Should().Be(PaymentMethod.Pix);
     }
 }

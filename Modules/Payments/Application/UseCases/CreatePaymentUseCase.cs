@@ -48,7 +48,7 @@ public sealed class CreatePaymentUseCase
     {
         var now = _timeProvider.GetUtcNow();
         var payment = Payment.Create(
-            command.OrderId, command.Amount, command.Currency, command.IdempotencyKey, Provider, customerPaymentMethodId: null, now);
+            command.OrderId, command.Amount, command.Currency, command.Method, command.IdempotencyKey, Provider, customerPaymentMethodId: null, now);
 
         await _payments.AddAsync(payment, cancellationToken);
 

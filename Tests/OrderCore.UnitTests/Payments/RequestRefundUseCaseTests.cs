@@ -12,7 +12,7 @@ public sealed class RequestRefundUseCaseTests
     private static async Task<(FakePaymentRepository Payments, Payment Payment)> SetupCapturedPaymentAsync(decimal amount = 100m)
     {
         var payments = new FakePaymentRepository();
-        var payment = Payment.Create(Guid.NewGuid(), amount, "BRL", "idem-1", "Fake", null, DateTimeOffset.UtcNow);
+        var payment = Payment.Create(Guid.NewGuid(), amount, "BRL", PaymentMethod.Card, "idem-1", "Fake", null, DateTimeOffset.UtcNow);
         payment.MarkProcessing();
         payment.Authorize("ref", DateTimeOffset.UtcNow);
         payment.Capture(DateTimeOffset.UtcNow);

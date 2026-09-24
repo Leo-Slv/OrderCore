@@ -19,6 +19,8 @@ public sealed class PaymentPersistenceModel
 
     public string Currency { get; set; } = string.Empty;
 
+    public string Method { get; set; } = string.Empty;
+
     public string Status { get; set; } = string.Empty;
 
     public string IdempotencyKey { get; set; } = string.Empty;

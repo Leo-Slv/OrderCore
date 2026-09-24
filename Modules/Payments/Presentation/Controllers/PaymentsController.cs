@@ -35,7 +35,8 @@ public sealed class PaymentsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PaymentResponse>> CreateAsync([FromBody] CreatePaymentRequest request, CancellationToken cancellationToken)
     {
-        var command = new CreatePaymentCommand(request.OrderId, request.Amount, request.Currency, request.IdempotencyKey);
+        var command = new CreatePaymentCommand(
+            request.OrderId, request.Amount, request.Currency, request.Method!.Value, request.IdempotencyKey);
         await _createPaymentUseCase.ExecuteAsync(command, cancellationToken);
 
         // Re-read rather than building the response from CreatePaymentResult

@@ -11,7 +11,7 @@ public sealed class PaymentTests
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
     private static Payment CreatePayment(decimal amount = 100m) =>
-        Payment.Create(Guid.NewGuid(), amount, "BRL", "idem-key-1", "Fake", customerPaymentMethodId: null, Now);
+        Payment.Create(Guid.NewGuid(), amount, "BRL", PaymentMethod.Card, "idem-key-1", "Fake", customerPaymentMethodId: null, Now);
 
     private static Payment CreateCapturedPayment(decimal amount = 100m)
     {
@@ -20,6 +20,22 @@ public sealed class PaymentTests
         payment.Authorize("provider-ref", Now);
         payment.Capture(Now);
         return payment;
+    }
+
+    [Fact]
+    public void Create_records_the_payment_method()
+    {
+        var payment = Payment.Create(Guid.NewGuid(), 100m, "BRL", PaymentMethod.Pix, "idem-key-1", "Fake", customerPaymentMethodId: null, Now);
+
+        payment.Method.Should().Be(PaymentMethod.Pix);
+    }
+
+    [Fact]
+    public void Create_rejects_an_undefined_payment_method()
+    {
+        var act = () => Payment.Create(Guid.NewGuid(), 100m, "BRL", (PaymentMethod)99, "idem-key-1", "Fake", customerPaymentMethodId: null, Now);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]

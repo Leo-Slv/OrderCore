@@ -12,7 +12,7 @@ public sealed class RefundTests
 
     private static Payment CreateCapturedPayment(decimal amount = 100m)
     {
-        var payment = Payment.Create(Guid.NewGuid(), amount, "BRL", "idem-key-1", "Fake", customerPaymentMethodId: null, Now);
+        var payment = Payment.Create(Guid.NewGuid(), amount, "BRL", PaymentMethod.Card, "idem-key-1", "Fake", customerPaymentMethodId: null, Now);
         payment.MarkProcessing();
         payment.Authorize("provider-ref", Now);
         payment.Capture(Now);

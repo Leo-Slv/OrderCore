@@ -26,6 +26,8 @@ public sealed class Payment : AggregateRoot<Guid>
 
     public string Currency { get; private set; } = "BRL";
 
+    public PaymentMethod Method { get; private set; }
+
     public PaymentStatus Status { get; private set; }
 
     /// <summary>
@@ -55,13 +57,14 @@ public sealed class Payment : AggregateRoot<Guid>
     }
 
     private Payment(
-        Guid id, Guid orderId, decimal amount, string currency, string idempotencyKey, string provider, Guid? customerPaymentMethodId,
-        DateTimeOffset now)
+        Guid id, Guid orderId, decimal amount, string currency, PaymentMethod method, string idempotencyKey, string provider,
+        Guid? customerPaymentMethodId, DateTimeOffset now)
         : base(id)
     {
         OrderId = orderId;
         Amount = amount;
         Currency = currency;
+        Method = method;
         IdempotencyKey = idempotencyKey;
         Provider = provider;
         CustomerPaymentMethodId = customerPaymentMethodId;
@@ -71,9 +74,14 @@ public sealed class Payment : AggregateRoot<Guid>
     }
 
     public static Payment Create(
-        Guid orderId, decimal amount, string currency, string idempotencyKey, string provider, Guid? customerPaymentMethodId,
-        DateTimeOffset now)
+        Guid orderId, decimal amount, string currency, PaymentMethod method, string idempotencyKey, string provider,
+        Guid? customerPaymentMethodId, DateTimeOffset now)
     {
+        if (!Enum.IsDefined(method))
+        {
+            throw new ArgumentOutOfRangeException(nameof(method), "Unknown payment method.");
+        }
+
         if (amount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(amount), "Amount must be greater than zero.");
@@ -89,7 +97,7 @@ public sealed class Payment : AggregateRoot<Guid>
             throw new ArgumentException("A provider is required.", nameof(provider));
         }
 
-        var payment = new Payment(Guid.NewGuid(), orderId, amount, currency, idempotencyKey, provider, customerPaymentMethodId, now);
+        var payment = new Payment(Guid.NewGuid(), orderId, amount, currency, method, idempotencyKey, provider, customerPaymentMethodId, now);
         payment.IncrementVersion();
         return payment;
     }
@@ -186,6 +194,7 @@ public sealed class Payment : AggregateRoot<Guid>
         Guid? customerPaymentMethodId,
         decimal amount,
         string currency,
+        PaymentMethod method,
         PaymentStatus status,
         string idempotencyKey,
         string provider,
@@ -198,7 +207,7 @@ public sealed class Payment : AggregateRoot<Guid>
         int version,
         IEnumerable<Refund> refunds)
     {
-        var payment = new Payment(id, orderId, amount, currency, idempotencyKey, provider, customerPaymentMethodId, createdAt)
+        var payment = new Payment(id, orderId, amount, currency, method, idempotencyKey, provider, customerPaymentMethodId, createdAt)
         {
             Status = status,
             ProviderReference = providerReference,

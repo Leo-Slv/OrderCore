@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
@@ -45,7 +47,7 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var repository = new EfPaymentRepository(dbContext);
-            var payment = Payment.Create(orderId, 100m, "BRL", "idem-1", "Fake", null, DateTimeOffset.UtcNow);
+            var payment = Payment.Create(orderId, 100m, "BRL", PaymentMethod.Pix, "idem-1", "Fake", null, DateTimeOffset.UtcNow);
             payment.MarkProcessing();
             payment.Authorize("provider-ref", DateTimeOffset.UtcNow);
             payment.Capture(DateTimeOffset.UtcNow);
@@ -62,6 +64,7 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
 
             reloaded.Should().NotBeNull();
             reloaded!.Status.Should().Be(PaymentStatus.Captured);
+            reloaded.Method.Should().Be(PaymentMethod.Pix);
             reloaded.Refunds.Should().ContainSingle(r => r.Amount == 30m);
         }
     }
@@ -76,7 +79,7 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
         {
             var repository = new EfPaymentRepository(dbContext);
             var outbox = new OutboxWriter(dbContext);
-            var payment = Payment.Create(orderId, 50m, "BRL", "idem-2", "Fake", null, DateTimeOffset.UtcNow);
+            var payment = Payment.Create(orderId, 50m, "BRL", PaymentMethod.Card, "idem-2", "Fake", null, DateTimeOffset.UtcNow);
             payment.MarkProcessing();
             payment.Authorize("provider-ref", DateTimeOffset.UtcNow);
             paymentId = payment.Id;
@@ -115,7 +118,7 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var repository = new EfPaymentRepository(dbContext);
-            var payment = Payment.Create(orderId, 20m, "BRL", "idem-3", "Fake", null, DateTimeOffset.UtcNow);
+            var payment = Payment.Create(orderId, 20m, "BRL", PaymentMethod.Card, "idem-3", "Fake", null, DateTimeOffset.UtcNow);
             payment.MarkProcessing();
             payment.Authorize("provider-ref", DateTimeOffset.UtcNow);
             await repository.AddAsync(payment, CancellationToken.None);
@@ -136,6 +139,34 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
             var reloaded = await repository.GetByOrderIdAsync(orderId, CancellationToken.None);
 
             reloaded!.CapturedAt.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task Payment_method_migration_treats_existing_payments_as_card()
+    {
+        var orderId = Guid.NewGuid();
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var migrator = dbContext.GetService<IMigrator>();
+            await migrator.MigrateAsync("20260924120041_InitialPaymentsSchema");
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO payments ("Id", "OrderId", "Amount", "Currency", "Status", "IdempotencyKey", "Provider", "CreatedAt", "UpdatedAt", "Version")
+                VALUES ({0}, {1}, 100, 'BRL', 'Authorized', 'idem-legacy', 'Fake', now(), now(), 1);
+                """,
+                Guid.NewGuid(), orderId);
+
+            await migrator.MigrateAsync();
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var reloaded = await new EfPaymentRepository(dbContext).GetByOrderIdAsync(orderId, CancellationToken.None);
+
+            reloaded!.Method.Should().Be(PaymentMethod.Card);
         }
     }
 }

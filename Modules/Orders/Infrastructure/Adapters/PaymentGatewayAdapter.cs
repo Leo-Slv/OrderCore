@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
+using OrderCore.Api.Modules.Payments.Domain.Enums;
 
 namespace OrderCore.Api.Modules.Orders.Infrastructure.Adapters;
 
@@ -22,7 +23,11 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
 
     public async Task<Guid> RequestPaymentAsync(Guid orderId, decimal amount, string currency, string idempotencyKey, CancellationToken cancellationToken)
     {
-        var command = new CreatePaymentCommand(orderId, amount, currency, idempotencyKey);
+        // IPaymentGateway doesn't carry the buyer's choice yet: the checkout
+        // that collects it (Docs/specs/storefront, Stage 6) adds it to the
+        // contract. Until then every order payment is recorded as Card, which
+        // was the only method before PaymentMethod existed.
+        var command = new CreatePaymentCommand(orderId, amount, currency, PaymentMethod.Card, idempotencyKey);
         var result = await _createPayment.ExecuteAsync(command, cancellationToken);
         return result.PaymentId;
     }
