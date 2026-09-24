@@ -208,7 +208,6 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         {
             name = "Jane Doe",
             email = $"jane-{Guid.NewGuid():N}@example.com",
-            passwordHash = "hashed-password",
         });
         customerResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         var customerId = (await customerResponse.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();

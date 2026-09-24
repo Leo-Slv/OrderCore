@@ -9,7 +9,7 @@ namespace OrderCore.UnitTests.Customers;
 public sealed class RegisterCustomerUseCaseTests
 {
     private static RegisterCustomerCommand Command(string email = "jane@example.com") =>
-        new("Jane Doe", email, Phone: null, DocumentNumber: null, PasswordHash: "hashed-password");
+        new("Jane Doe", email, Phone: null, DocumentNumber: null);
 
     [Fact]
     public async Task ExecuteAsync_registers_a_new_customer()

@@ -11,7 +11,7 @@ public sealed class CustomerTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-    private static Customer CreateCustomer() => Customer.Create("Jane Doe", "jane@example.com", "hashed-password", Now);
+    private static Customer CreateCustomer() => Customer.Create("Jane Doe", "jane@example.com", Now);
 
     private static Address CreateAddress() => Address.Create(
         "Main St", "123", null, "Downtown", "Springfield", "IL", "62701", "USA");

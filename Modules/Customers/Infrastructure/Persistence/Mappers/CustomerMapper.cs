@@ -25,7 +25,6 @@ public static class CustomerMapper
             model.Email,
             model.Phone,
             model.DocumentNumber,
-            model.PasswordHash,
             model.Active,
             model.EmailVerifiedAt,
             model.CreatedAt,
@@ -42,7 +41,6 @@ public static class CustomerMapper
         Email = domain.Email,
         Phone = domain.Phone,
         DocumentNumber = domain.DocumentNumber,
-        PasswordHash = domain.PasswordHash,
         Active = domain.Active,
         EmailVerifiedAt = domain.EmailVerifiedAt,
         CreatedAt = domain.CreatedAt,
@@ -64,7 +62,6 @@ public static class CustomerMapper
         model.Email = domain.Email;
         model.Phone = domain.Phone;
         model.DocumentNumber = domain.DocumentNumber;
-        model.PasswordHash = domain.PasswordHash;
         model.Active = domain.Active;
         model.EmailVerifiedAt = domain.EmailVerifiedAt;
         model.UpdatedAt = domain.UpdatedAt;

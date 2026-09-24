@@ -1,14 +1,12 @@
 namespace OrderCore.Api.Modules.Customers.Application.DTOs;
 
 /// <summary>
-/// <see cref="PasswordHash"/> is not in 02-customers.md's command shape,
-/// but <c>Customer.Create</c> requires one and OrderCore has no auth module
-/// yet to source it from elsewhere (section 32) — the caller is expected to
-/// hash the raw password before it reaches this command.
+/// No password: credentials are the Identity module's concern
+/// (<c>UserAccount</c>), which creates the customer through
+/// <c>RegisterCustomerUseCase</c> during sign-up and links to it by id.
 /// </summary>
 public sealed record RegisterCustomerCommand(
     string Name,
     string Email,
     string? Phone,
-    string? DocumentNumber,
-    string PasswordHash);
+    string? DocumentNumber);

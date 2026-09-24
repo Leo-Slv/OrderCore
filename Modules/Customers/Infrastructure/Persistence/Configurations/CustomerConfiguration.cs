@@ -16,7 +16,6 @@ public sealed class CustomerConfiguration : IEntityTypeConfiguration<CustomerPer
         builder.Property(c => c.Email).HasMaxLength(320).IsRequired();
         builder.Property(c => c.Phone).HasMaxLength(30);
         builder.Property(c => c.DocumentNumber).HasMaxLength(30);
-        builder.Property(c => c.PasswordHash).IsRequired();
 
         builder.HasIndex(c => c.Email).IsUnique();
 

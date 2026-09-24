@@ -50,7 +50,7 @@ public sealed class EfCustomerRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var repository = new EfCustomerRepository(dbContext);
-            var customer = Customer.Create("Jane Doe", "jane@example.com", "hashed-password", DateTimeOffset.UtcNow);
+            var customer = Customer.Create("Jane Doe", "jane@example.com", DateTimeOffset.UtcNow);
             var address = CustomerAddress.Create("Home", "Jane Doe", null, SomeAddress(), DateTimeOffset.UtcNow);
             customer.AddAddress(address);
 
@@ -79,7 +79,7 @@ public sealed class EfCustomerRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var repository = new EfCustomerRepository(dbContext);
-            var customer = Customer.Create("Jane Doe", "jane2@example.com", "hashed-password", DateTimeOffset.UtcNow);
+            var customer = Customer.Create("Jane Doe", "jane2@example.com", DateTimeOffset.UtcNow);
             await repository.AddAsync(customer, CancellationToken.None);
             await repository.SaveChangesAsync(CancellationToken.None);
             customerId = customer.Id;
@@ -122,7 +122,7 @@ public sealed class EfCustomerRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var repository = new EfCustomerRepository(dbContext);
-            var customer = Customer.Create("Jane Doe", "jane@example.com", "hashed-password", DateTimeOffset.UtcNow);
+            var customer = Customer.Create("Jane Doe", "jane@example.com", DateTimeOffset.UtcNow);
             await repository.AddAsync(customer, CancellationToken.None);
             await repository.SaveChangesAsync(CancellationToken.None);
             customerId = customer.Id;

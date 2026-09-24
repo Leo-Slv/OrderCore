@@ -19,8 +19,6 @@ public sealed class CustomerPersistenceModel
 
     public string? DocumentNumber { get; set; }
 
-    public string PasswordHash { get; set; } = string.Empty;
-
     public bool Active { get; set; }
 
     public DateTimeOffset? EmailVerifiedAt { get; set; }

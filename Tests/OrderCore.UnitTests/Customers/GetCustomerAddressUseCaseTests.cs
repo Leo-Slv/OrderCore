@@ -16,7 +16,7 @@ public sealed class GetCustomerAddressUseCaseTests
         string email = "jane@example.com")
     {
         var repository = new FakeCustomerRepository();
-        var customer = Customer.Create("Jane Doe", email, "hashed-password", Now);
+        var customer = Customer.Create("Jane Doe", email, Now);
         var address = CustomerAddress.Create(
             "Home", "Jane Doe", "+55 11 99999-0000",
             Address.Create("Main St", "123", "Apt 4", "Downtown", "Springfield", "IL", "62701", "USA"), Now);
@@ -59,7 +59,7 @@ public sealed class GetCustomerAddressUseCaseTests
     public async Task ExecuteAsync_does_not_hand_out_another_customers_address()
     {
         var (repository, _, someoneElsesAddress) = await SetupAsync();
-        var other = Customer.Create("John Roe", "john@example.com", "hashed-password", Now);
+        var other = Customer.Create("John Roe", "john@example.com", Now);
         await repository.AddAsync(other, CancellationToken.None);
 
         var act = () => new GetCustomerAddressUseCase(repository).ExecuteAsync(other.Id, someoneElsesAddress.Id, CancellationToken.None);

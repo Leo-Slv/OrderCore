@@ -29,7 +29,7 @@ public sealed class RegisterCustomerUseCase
         }
 
         var now = _timeProvider.GetUtcNow();
-        var customer = Customer.Create(command.Name, command.Email, command.PasswordHash, now);
+        var customer = Customer.Create(command.Name, command.Email, now);
         customer.UpdateProfile(command.Name, command.Phone, command.DocumentNumber);
 
         await _customers.AddAsync(customer, cancellationToken);

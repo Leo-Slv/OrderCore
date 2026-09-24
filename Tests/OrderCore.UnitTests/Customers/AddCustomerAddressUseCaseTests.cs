@@ -17,7 +17,7 @@ public sealed class AddCustomerAddressUseCaseTests
     public async Task ExecuteAsync_adds_an_address_to_an_existing_customer()
     {
         var repository = new FakeCustomerRepository();
-        var customer = Customer.Create("Jane Doe", "jane@example.com", "hashed-password", DateTimeOffset.UtcNow);
+        var customer = Customer.Create("Jane Doe", "jane@example.com", DateTimeOffset.UtcNow);
         await repository.AddAsync(customer, CancellationToken.None);
         var useCase = new AddCustomerAddressUseCase(repository, TimeProvider.System);
 

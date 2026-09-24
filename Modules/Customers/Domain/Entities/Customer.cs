@@ -25,8 +25,6 @@ public sealed class Customer : AggregateRoot<Guid>
 
     public string? DocumentNumber { get; private set; }
 
-    public string PasswordHash { get; private set; } = string.Empty;
-
     public bool Active { get; private set; }
 
     public DateTimeOffset? EmailVerifiedAt { get; private set; }
@@ -43,11 +41,10 @@ public sealed class Customer : AggregateRoot<Guid>
     {
     }
 
-    private Customer(Guid id, string name, string email, string passwordHash, DateTimeOffset now) : base(id)
+    private Customer(Guid id, string name, string email, DateTimeOffset now) : base(id)
     {
         Name = name;
         Email = email;
-        PasswordHash = passwordHash;
         Active = true;
         CreatedAt = now;
         UpdatedAt = now;
@@ -58,9 +55,11 @@ public sealed class Customer : AggregateRoot<Guid>
     /// signature, but is required the same way <c>Order.Create</c> takes it
     /// (section 9): <see cref="CreatedAt"/>/<see cref="UpdatedAt"/> need a
     /// value from somewhere, and the domain must stay deterministic/testable
-    /// rather than reading the clock itself.
+    /// rather than reading the clock itself. No password: credentials belong
+    /// to the Identity module's <c>UserAccount</c>, which links to this
+    /// customer by id.
     /// </summary>
-    public static Customer Create(string name, string email, string passwordHash, DateTimeOffset now)
+    public static Customer Create(string name, string email, DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -72,12 +71,7 @@ public sealed class Customer : AggregateRoot<Guid>
             throw new ArgumentException("Email is required.", nameof(email));
         }
 
-        if (string.IsNullOrWhiteSpace(passwordHash))
-        {
-            throw new ArgumentException("Password hash is required.", nameof(passwordHash));
-        }
-
-        var customer = new Customer(Guid.NewGuid(), name, email, passwordHash, now);
+        var customer = new Customer(Guid.NewGuid(), name, email, now);
         customer.IncrementVersion();
         customer.Raise(new CustomerRegistered(Guid.NewGuid(), now, customer.Id, email));
         return customer;
@@ -189,7 +183,6 @@ public sealed class Customer : AggregateRoot<Guid>
         string email,
         string? phone,
         string? documentNumber,
-        string passwordHash,
         bool active,
         DateTimeOffset? emailVerifiedAt,
         DateTimeOffset createdAt,
@@ -198,7 +191,7 @@ public sealed class Customer : AggregateRoot<Guid>
         IEnumerable<CustomerAddress> addresses,
         IEnumerable<CustomerPaymentMethod> paymentMethods)
     {
-        var customer = new Customer(id, name, email, passwordHash, createdAt)
+        var customer = new Customer(id, name, email, createdAt)
         {
             Phone = phone,
             DocumentNumber = documentNumber,
