@@ -356,10 +356,25 @@ Na prática (seção 5.1), isso significa: `Orders` nunca importa
 `Orders` precisa de algo do módulo `Catalog`, por exemplo, a dependência é
 uma interface em `Modules/Orders/Application/Contracts/` (ex.:
 `IProductCatalog`), nunca uma referência direta a
-`Modules/Catalog/Domain/Entities/Product.cs` fora do tipo de retorno
-estritamente necessário. `OrderCore.ArchitectureTests` valida isso
-diretamente sobre o namespace `OrderCore.Api.Modules.Orders.Domain`
-(seção 33).
+`Modules/Catalog/Domain/Entities/Product.cs`. Os contratos falam só os
+tipos do próprio módulo consumidor (ex.: `IProductCatalog` devolve um
+`CatalogProductSnapshot` do Orders, não a entidade `Product` do Catalog);
+a tradução entre os tipos de um módulo e do outro acontece no adapter,
+em `Infrastructure/Adapters/`, que chama a camada Application do módulo
+dono. `OrderCore.ArchitectureTests` valida isso sobre os namespaces
+`OrderCore.Api.Modules.Orders.Domain` e
+`OrderCore.Api.Modules.Orders.Application` (seção 33).
+
+Contratos entre módulos existentes hoje:
+
+| Consumidor → dono | Contrato (no consumidor) | Adapter → o que chama no dono |
+|---|---|---|
+| Orders → Catalog | `IProductCatalog` | `ProductCatalogAdapter` → `IProductRepository` |
+| Orders → Inventory | `IInventoryService` | `InventoryServiceAdapter` → `Reserve`/`Release`/`ConsumeReservationUseCase`, `GetStockAvailabilityUseCase` |
+| Orders → Payments | `IPaymentGateway` | `PaymentGatewayAdapter` → `CreatePaymentUseCase`, `GetPaymentByOrderIdUseCase` |
+| Orders → Customers | `ICustomerDirectory` | `CustomerDirectoryAdapter` → `GetCustomerAddressUseCase` |
+| Catalog → Inventory | `IStockAvailabilityProvider` | `InventoryStockAvailabilityAdapter` → `GetStockAvailabilityUseCase` |
+| Payments → Orders | eventos de integração via outbox | `PaymentAuthorized`/`PaymentFailed` → handlers do Orders |
 
 ---
 
@@ -783,6 +798,17 @@ abc123
 o sistema não deve criar dois pagamentos nem realizar duas cobranças.
 
 Deve existir mecanismo para identificar operações já processadas.
+
+Na prática, hoje há duas camadas:
+
+- **Checkout** (`POST /api/orders/checkout`): o cliente envia o header
+  `Idempotency-Key`; o pedido guarda a chave (`Order.CheckoutIdempotencyKey`,
+  única por cliente). Repetir o checkout devolve o mesmo pedido — e, se o
+  pagamento nunca chegou a ser solicitado, solicita-o de novo — em vez de
+  criar outro.
+- **Pagamento**: `Payment.IdempotencyKey` é único; o Orders usa o id do
+  pedido como chave, então um mesmo pedido nunca tem dois pagamentos,
+  mesmo que o checkout seja repetido.
 
 ---
 
@@ -1513,7 +1539,27 @@ GET    /api/customers/{id}
 
 Endpoints administrativos podem ser adicionados posteriormente.
 
+A lista acima era o ponto de partida. O contrato real é o documento
+OpenAPI gerado (`/openapi/v1.json`, UI em `/scalar/v1`, só em
+Development). O primeiro consumidor é um front de e-commerce (Next.js);
+os endpoints que ele usa no MVP estão descritos em
+`Docs/specs/storefront/storefront-api-mvp.md`: listagem paginada e
+produto por slug no Catalog, cotação do carrinho, checkout em um passo e
+acompanhamento do pedido no Orders.
+
 Os endpoints devem permanecer finos e delegar os casos de uso para a Application Layer.
+
+**Erros.** Casos de uso e agregados não devolvem códigos HTTP nem usam
+try/catch por endpoint: lançam exceções tipadas do shared kernel
+(`DomainRuleViolationException`, `NotFoundException`, `ConflictException`),
+cada uma com um código estável, e o `ApiExceptionHandler` as converte em
+`ProblemDetails` (400/404/409, com a extensão `code`) — ver
+`Docs/diagrams/implementation-class/01-shared-kernel.md`. O cliente
+decide o que mostrar a partir do `code` (ex.: `insufficient_stock`,
+`price_changed`), não da mensagem.
+
+**CORS.** Só as origens listadas em `Cors:AllowedOrigins` podem chamar a
+API do navegador.
 
 Quando implementados como controllers (em vez de minimal API), cada
 controller vive em `OrderCore.Api/Modules/{Módulo}/Presentation/Controllers/`
@@ -1565,6 +1611,14 @@ cria `orders`, `order_items` e `order_status_history` via
 `inventory_reservations` e `stock_movements` via `InitialInventorySchema`;
 `Payments` (`Modules/Payments/Infrastructure/Persistence`) cria `payments`,
 `refunds` e `outbox_messages` via `InitialPaymentsSchema`.
+O MVP do storefront acrescentou três migrações: `AddProductSlugUniqueIndex`
+(Catalog — índice único em `products.Slug`, renomeando duplicatas
+antigas antes), `AddPaymentMethod` (Payments — coluna `Method`, `Card`
+para os pagamentos existentes) e `AddCheckoutIdempotencyKeyAndHistorySequence`
+(Orders — `orders.CheckoutIdempotencyKey` com índice único
+`(CustomerId, CheckoutIdempotencyKey)` e `order_status_history.Sequence`
+identity, para a timeline manter a ordem de transições com o mesmo
+horário).
 `IProductCatalog` (contrato do próprio Orders) também ganhou sua
 implementação real, `ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`),
 que lê de `IProductRepository` do Catalog — a indireção de "Application

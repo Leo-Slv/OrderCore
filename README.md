@@ -100,6 +100,35 @@ Payment Authorized  →  Confirm Order  →  Processing → Shipped → Delivere
 Payment Failed      →  Release Inventory → Cancel Order
 ```
 
+## API para o storefront
+
+O primeiro consumidor da API é um front de e-commerce (Next.js). O que
+ele usa no MVP está especificado em
+[`Docs/specs/storefront/storefront-api-mvp.md`](Docs/specs/storefront/storefront-api-mvp.md);
+o contrato exato de cada endpoint está no documento OpenAPI (`/scalar/v1`
+em Development).
+
+| Tela | Endpoint |
+|---|---|
+| Home / listagem | `GET /api/catalog/products?active=true&sort=PriceAsc&onSale=true&page=1&pageSize=20` → paginado, com slug, imagem principal e disponibilidade (`InStock`/`LowStock`/`OutOfStock`, nunca a quantidade) |
+| Produto | `GET /api/catalog/products/by-slug/{slug}` → só produtos publicados |
+| Carrinho | `POST /api/orders/cart/quote` → preço atual e problemas por linha (`PriceChanged`, `InsufficientStock`, `Unavailable`, `NotFound`), sem reservar nada |
+| Checkout | `GET /api/customers/{id}/addresses`, depois `POST /api/orders/checkout` com header `Idempotency-Key` → 202 com o pedido já em `PendingPayment` |
+| Acompanhamento | `GET /api/orders/{id}` (polling até `Confirmed`/`PaymentFailed`) e `GET /api/orders/{id}/status-history` (timeline) |
+| Meus pedidos | `GET /api/orders/customers/{customerId}?page=1&pageSize=20` |
+
+O checkout valida, reserva estoque e inicia o pagamento num único caso
+de uso: o front pede "quero criar este pedido" e o OrderCore decide se
+ele é válido. Repetir a requisição com a mesma `Idempotency-Key` devolve
+o mesmo pedido, nunca um segundo.
+
+Erros de negócio chegam como `ProblemDetails` (RFC 7807) com um `code`
+estável para o front decidir o que mostrar — por exemplo
+`409 insufficient_stock`, `409 price_changed`, `404 address_not_found`.
+A API só aceita chamadas de navegador das origens em `Cors:AllowedOrigins`
+(`http://localhost:3000` por padrão). Autenticação ainda não existe:
+por enquanto o cliente é identificado pelo id na requisição.
+
 ## Fluxo de pagamento
 
 O `Payment` tem sua própria máquina de estados, independente da do
@@ -223,7 +252,15 @@ sob concorrência (`Stock = 1`, N requisições concorrentes, exatamente 1
 reserva bem-sucedida) também está implementado e validado contra Postgres
 real — ver a seção acima.
 
-A integração com RabbitMQ de verdade (o outbox hoje despacha in-process)
+O caminho do storefront (catálogo → cotação do carrinho → checkout em um
+passo → confirmação pelo outbox → acompanhamento) é testado pela API
+HTTP real contra PostgreSQL, com o `OutboxPublisherBackgroundService` do
+próprio host confirmando (ou falhando, com o provedor em modo `Declined`)
+o pedido: `Tests/OrderCore.IntegrationTests/Orders/StorefrontCheckoutTests.cs`.
+
+Autenticação/autorização, os endpoints de backoffice (listagem global de
+pedidos e transições de envio, estoque, pagamentos, dashboard), a
+integração com RabbitMQ de verdade (o outbox hoje despacha in-process)
 e a extração opcional de `Payments` para `PayCore` ainda não foram
 implementadas — entram conforme as fases descritas em
 [Arquitetura](#arquitetura), com ADR próprio quando a decisão for tomada.

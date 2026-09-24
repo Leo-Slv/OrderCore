@@ -342,3 +342,27 @@ One per stage, Conventional Commits, e.g.
 `feat(orders): enriched order views and status history`,
 `docs: document storefront MVP API` — plus this spec/plan as its own
 `docs(storefront): ...` commit before Stage 1.
+
+## Execution notes (what differed from this plan)
+
+- **Stages 6 and 7 landed together.** Changing Orders' contracts forced
+  their adapters, the repository and the migration to change in the same
+  step, so the split between "Domain + Application" and "Infrastructure +
+  Presentation" couldn't produce compiling commits on its own.
+- **Repository paging shape.** `IProductRepository.ListAsync` and
+  `IOrderRepository.ListByCustomerIdAsync` return `(Items, TotalCount)`,
+  following the existing `IAuditLogRepository.ListPagedAsync`, instead of
+  a `PagedResult<T>`; the use cases build the `PagedResult<T>`.
+- **Slugs made unique (Stage 3).** Lookup by slug exposed that slugs were
+  generated from the name alone with no unique index. Added the index
+  (migration renames old duplicates) and a SKU suffix on collision.
+- **Status history ordering (Stage 6).** `order_status_history` gained an
+  identity `Sequence`: `OrderCreated` and the new `OrderPaymentRequested`
+  are recorded in the same save and can share a timestamp.
+- **Two existing bugs fixed along the way**, both caught by the new
+  HTTP-level storefront test, each in its own commit:
+  every `CreatedAtAction(nameof(XAsync))` failed (Async suffix
+  suppression), making all create endpoints answer 500; and new child
+  entities (addresses, refunds, product images/variants) added to an
+  already-saved aggregate were UPDATEd instead of INSERTed (missing
+  `ValueGeneratedNever`).

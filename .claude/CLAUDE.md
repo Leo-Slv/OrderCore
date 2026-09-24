@@ -147,6 +147,17 @@ Avoid introducing dependencies between modules when an existing contract
 must never reach directly into another module's Domain or Infrastructure
 namespace.
 
+A cross-module contract lives in the **consuming** module's
+`Application/Contracts` and speaks only that module's own types (e.g.
+`IProductCatalog` returns Orders' `CatalogProductSnapshot`, not Catalog's
+`Product`). Its implementation is an adapter in the consumer's
+`Infrastructure/Adapters` that calls the owning module's Application layer
+(preferably a use case, e.g. `GetStockAvailabilityUseCase`) and does the
+type translation. `ModuleBoundaryTests` enforces that Orders' Application
+layer never depends on another module's Domain/Infrastructure. The
+current contracts are listed in `Docs/architecture/ORDERCORE_CONTEXT.md`
+section 7.
+
 ## Dependency Injection
 
 Each module owns its dependency registration through its own
@@ -192,6 +203,15 @@ Database
 - child-collection add/update/remove reconciliation lives in
   `Shared/Infrastructure/Persistence/ChildCollectionReconciler`, reused by
   every `<Entity>Mapper.ApplyChanges` — do not re-implement it per module;
+- **a child entity whose id is assigned by the domain must be configured
+  with `builder.Property(x => x.Id).ValueGeneratedNever()`.** Otherwise
+  EF Core treats a new child that already has a key, found through its
+  parent's navigation, as an existing row and issues an UPDATE that hits
+  nothing (`DbUpdateConcurrencyException`). This silently broke adding an
+  address to an existing customer, and a refund or image to an existing
+  payment or product, until the storefront end-to-end test caught it.
+  Test a child add against an **already-saved** aggregate, not only
+  before its first save;
 - **`ApplyChanges` must set `model.Version = domain.Version`.** A real bug
   slipped into all four existing mappers before Inventory's concurrency
   test caught it: `Version` was only ever set in `ToPersistence` (insert
@@ -241,11 +261,13 @@ Cross-cutting concerns shared across multiple business modules belong under
 `Shared/Application`, `Shared/Presentation`):
 
 - `Shared/Domain` — the domain kernel: `AggregateRoot`, `Entity`,
-  `IDomainEvent`.
+  `IDomainEvent`, value objects (`Address`, `Slug`), and
+  `Exceptions/DomainRuleViolationException`.
 - `Shared/Application` — technical DTOs used by more than one module, e.g.
-  `PagedResult<T>`.
+  `PagedResult<T>`, and `Exceptions/NotFoundException`/`ConflictException`.
 - `Shared/Presentation` — technical response shapes used by more than one
-  module, e.g. `PagedResponse<T>`.
+  module, e.g. `PagedResponse<T>`; `ExceptionHandling/ApiExceptionHandler`;
+  `Cors/CorsExtensions`; `Conventions/ApiRoutePrefixConvention`.
 
 Do not move module-specific business logic into `Shared/` merely for reuse.
 
@@ -265,9 +287,42 @@ via `AddControllers(options => options.Conventions.Add(...))` in
 segment (e.g. `[Route("orders")]`), never `[Route("api/orders")]`; the
 convention combines it into `api/orders` automatically.
 
-Do not add local try/catch blocks for normal application/domain errors once
-a shared exception-handling convention exists — introduce and reuse one
-instead of ad hoc handling per endpoint.
+Controllers keep the action's `Async` suffix
+(`SuppressAsyncSuffixInActionNames = false` in `Program.cs`), so
+`CreatedAtAction(nameof(GetByIdAsync), ...)` resolves. Don't turn it
+back on: with the framework default, every create endpoint saved and
+then answered 500 because link generation couldn't find the action.
+
+### Errors (ProblemDetails)
+
+Do not add local try/catch blocks for normal application/domain errors,
+and do not return error status codes by hand from use cases. Throw the
+shared typed exceptions, each with a stable snake_case `code`:
+
+- `DomainRuleViolationException` (`Shared/Domain/Exceptions`) — an
+  invariant or state-machine rule was broken (e.g. `invalid_order_state`) → 400;
+- `NotFoundException` (`Shared/Application/Exceptions`) — the resource the
+  use case was asked to act on doesn't exist (e.g. `order_not_found`) → 404;
+- `ConflictException` (`Shared/Application/Exceptions`) — valid request that
+  conflicts with current state (e.g. `insufficient_stock`,
+  `sku_already_exists`) → 409. It is not sealed: a module may derive its
+  own (Inventory's `StockConcurrencyConflictException`).
+
+`ApiExceptionHandler` (`Shared/Presentation/ExceptionHandling`) maps them to
+RFC 7807 `ProblemDetails` with a `code` extension. It also maps
+`ArgumentException` (what `Create`/value-object factories throw) to 400
+`validation_error`, EF's `DbUpdateConcurrencyException` to 409
+`concurrency_conflict`, and anything else to 500 `internal_error` with no
+detail outside Development. A leftover `InvalidOperationException` is a
+bug, not a business error. Error `[ProducesResponseType]`s declare
+`typeof(ProblemDetails)`. Clients branch on `code`, so treat codes as part
+of the public contract: don't rename them casually.
+
+### CORS
+
+Browser clients are allowed only from the origins in `Cors:AllowedOrigins`
+(`Shared/Presentation/Cors/CorsExtensions`, named policy `Storefront`).
+Don't widen it to "any origin".
 
 ### API Documentation (OpenAPI/Scalar)
 
