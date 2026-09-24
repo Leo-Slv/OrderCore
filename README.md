@@ -188,6 +188,13 @@ dotnet test
 
 A API expõe `GET /health` para health check e `GET /` como smoke test.
 
+Em ambiente de Development, a API expõe documentação interativa via
+[Scalar](https://scalar.com/) em `/scalar/v1`, gerada a partir do documento
+OpenAPI padrão do .NET (`Microsoft.AspNetCore.OpenApi`) servido em
+`/openapi/v1.json` — sem Swashbuckle/SwaggerUI. Ambos ficam disponíveis
+apenas em Development (`app.Environment.IsDevelopment()`), nunca expostos
+por padrão fora do ambiente local.
+
 ## Estado atual do scaffold
 
 `Customers`, `Catalog`, `Orders`, `Inventory` e `Payments` — todos os

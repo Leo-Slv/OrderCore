@@ -262,6 +262,35 @@ Do not add local try/catch blocks for normal application/domain errors once
 a shared exception-handling convention exists — introduce and reuse one
 instead of ad hoc handling per endpoint.
 
+### API Documentation (OpenAPI/Scalar)
+
+The API is documented via the built-in `Microsoft.AspNetCore.OpenApi`
+generator (`builder.Services.AddOpenApi()` / `app.MapOpenApi()`) plus
+`Scalar.AspNetCore` for the interactive UI (`app.MapScalarApiReference()`)
+— no Swashbuckle/SwaggerUI. Both are mapped only when
+`app.Environment.IsDevelopment()` (`Program.cs`); the API surface is not
+exposed unauthenticated by default outside local development. Reachable
+locally at `/openapi/v1.json` (the document) and `/scalar/v1` (the UI).
+
+From now on, every new or changed endpoint must stay accurately documented
+through this pipeline, not as a follow-up:
+
+- Every action must carry `[ProducesResponseType]` for each status code it
+  can actually return (success and error paths alike) — this is what the
+  OpenAPI generator turns into Scalar's response schema/examples, and every
+  existing controller in this project already follows it.
+- Route parameters, request/response DTOs (`Presentation/Requests`,
+  `Presentation/Responses`) must have names that read clearly on their own
+  in the generated docs — Scalar shows the wire shape verbatim, with no
+  separate description layer to compensate for a bad name.
+- Do not hand-maintain a separate API reference document (e.g. a markdown
+  endpoint list) — the generated OpenAPI document is the single source of
+  truth for the wire contract; keep `Docs/` diagrams describing the
+  Application/Domain model instead (see the Documentation section above).
+- A smoke test verifying `/openapi/v1.json` and `/scalar/v1` are served
+  lives at `Tests/OrderCore.IntegrationTests/Orders/OpenApiTests.cs` — keep
+  it passing the same way `HealthCheckTests` is kept passing.
+
 ## Testing
 
 Tests are located under:
