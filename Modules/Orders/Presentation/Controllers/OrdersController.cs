@@ -1,11 +1,14 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Presentation.Presenters;
 using OrderCore.Api.Modules.Orders.Presentation.Requests;
 using OrderCore.Api.Modules.Orders.Presentation.Responses;
+using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
+using OrderCore.Api.Shared.Presentation.Authentication;
 using OrderCore.Api.Shared.Presentation.Responses;
 
 namespace OrderCore.Api.Modules.Orders.Presentation.Controllers;
@@ -34,6 +37,7 @@ public sealed class OrdersController : ControllerBase
     private readonly CancelOrderUseCase _cancelOrderUseCase;
     private readonly CheckoutUseCase _checkoutUseCase;
     private readonly QuoteCartUseCase _quoteCartUseCase;
+    private readonly ICurrentUser _currentUser;
 
     public OrdersController(
         CreateOrderHandler createOrderHandler,
@@ -45,7 +49,8 @@ public sealed class OrdersController : ControllerBase
         ListCustomerOrdersUseCase listCustomerOrdersUseCase,
         CancelOrderUseCase cancelOrderUseCase,
         CheckoutUseCase checkoutUseCase,
-        QuoteCartUseCase quoteCartUseCase)
+        QuoteCartUseCase quoteCartUseCase,
+        ICurrentUser currentUser)
     {
         _createOrderHandler = createOrderHandler;
         _setOrderAddressesUseCase = setOrderAddressesUseCase;
@@ -57,6 +62,7 @@ public sealed class OrdersController : ControllerBase
         _cancelOrderUseCase = cancelOrderUseCase;
         _checkoutUseCase = checkoutUseCase;
         _quoteCartUseCase = quoteCartUseCase;
+        _currentUser = currentUser;
     }
 
     /// <summary>
@@ -64,6 +70,7 @@ public sealed class OrdersController : ControllerBase
     /// Read-only: nothing is reserved.
     /// </summary>
     [HttpPost("cart/quote")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(CartQuoteResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<CartQuoteResponse>> QuoteCartAsync([FromBody] QuoteCartRequest request, CancellationToken cancellationToken)
@@ -81,6 +88,7 @@ public sealed class OrdersController : ControllerBase
     /// same order and never creates a second one.
     /// </summary>
     [HttpPost("checkout")]
+    [Authorize(Policy = AuthorizationPolicies.Customer)]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -90,13 +98,16 @@ public sealed class OrdersController : ControllerBase
         [FromHeader(Name = "Idempotency-Key"), Required, MaxLength(100)] string idempotencyKey,
         CancellationToken cancellationToken)
     {
-        var orderId = await _checkoutUseCase.ExecuteAsync(OrderPresenter.ToCommand(request, idempotencyKey), cancellationToken);
+        // The Customer policy guarantees a customer_id claim.
+        var command = OrderPresenter.ToCommand(request, _currentUser.CustomerId!.Value, idempotencyKey);
+        var orderId = await _checkoutUseCase.ExecuteAsync(command, cancellationToken);
         var details = await _getOrderDetailsUseCase.ExecuteAsync(orderId, cancellationToken);
 
         return AcceptedAtAction(nameof(GetByIdAsync), new { id = orderId }, OrderPresenter.ToResponse(details));
     }
 
     [HttpPost]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -117,6 +128,7 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpPut("{id:guid}/addresses")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -144,6 +156,7 @@ public sealed class OrdersController : ControllerBase
     /// here would be misleading.
     /// </summary>
     [HttpPost("{id:guid}/request-payment")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -161,6 +174,7 @@ public sealed class OrdersController : ControllerBase
     /// while the payment outcome is on its way.
     /// </summary>
     [HttpGet("{id:guid}")]
+    [Authorize]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OrderResponse>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
@@ -172,6 +186,7 @@ public sealed class OrdersController : ControllerBase
 
     /// <summary>Recorded status transitions, oldest first: the tracking timeline.</summary>
     [HttpGet("{id:guid}/status-history")]
+    [Authorize]
     [ProducesResponseType(typeof(IReadOnlyList<OrderStatusHistoryEntryResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<OrderStatusHistoryEntryResponse>>> GetStatusHistoryAsync(
@@ -184,6 +199,7 @@ public sealed class OrdersController : ControllerBase
 
     /// <summary>A customer's orders, newest first.</summary>
     [HttpGet("customers/{customerId:guid}")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(typeof(PagedResponse<OrderSummaryResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResponse<OrderSummaryResponse>>> ListByCustomerAsync(
@@ -199,6 +215,7 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpPost("{id:guid}/cancel")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

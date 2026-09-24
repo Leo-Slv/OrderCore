@@ -18,13 +18,13 @@ namespace OrderCore.IntegrationTests.Shared;
 /// for an empty in-memory stub, so a lookup fails the same way it would
 /// against PostgreSQL with no matching row.
 /// </summary>
-public sealed class ErrorContractAndCorsTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ErrorContractAndCorsTests : IClassFixture<OrderCoreApiFactory>
 {
     private const string AllowedOrigin = "http://localhost:3000";
 
     private readonly WebApplicationFactory<Program> _factory;
 
-    public ErrorContractAndCorsTests(WebApplicationFactory<Program> factory)
+    public ErrorContractAndCorsTests(OrderCoreApiFactory factory)
     {
         _factory = factory.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services => services.AddScoped<ICustomerRepository, EmptyCustomerRepository>()));
@@ -33,7 +33,7 @@ public sealed class ErrorContractAndCorsTests : IClassFixture<WebApplicationFact
     [Fact]
     public async Task Unknown_resource_returns_404_problem_details_with_error_code()
     {
-        var client = _factory.CreateClient();
+        var client = _factory.CreateAdminClient();
 
         var response = await client.GetAsync($"/api/customers/{Guid.NewGuid()}");
 
@@ -46,15 +46,45 @@ public sealed class ErrorContractAndCorsTests : IClassFixture<WebApplicationFact
     }
 
     [Fact]
-    public async Task Unknown_route_returns_404_problem_details_with_a_default_code()
+    public async Task Anonymous_call_to_a_protected_endpoint_returns_401_problem_details()
     {
-        var client = _factory.CreateClient();
+        var response = await _factory.CreateClient().GetAsync($"/api/customers/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString().Should().Be("unauthenticated");
+    }
+
+    [Fact]
+    public async Task Customer_call_to_an_admin_endpoint_returns_403_problem_details()
+    {
+        var response = await _factory.CreateCustomerClient().GetAsync($"/api/customers/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString().Should().Be("forbidden");
+    }
+
+    [Fact]
+    public async Task Unknown_route_returns_404_problem_details_with_a_default_code_to_a_signed_in_caller()
+    {
+        var client = _factory.CreateCustomerClient();
 
         var response = await client.GetAsync("/api/does-not-exist");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         body.GetProperty("code").GetString().Should().Be("not_found");
+    }
+
+    /// <summary>
+    /// Deny by default covers requests that match no endpoint too, so an
+    /// anonymous caller can't probe which routes exist.
+    /// </summary>
+    [Fact]
+    public async Task Unknown_route_returns_401_to_an_anonymous_caller()
+    {
+        var response = await _factory.CreateClient().GetAsync("/api/does-not-exist");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]

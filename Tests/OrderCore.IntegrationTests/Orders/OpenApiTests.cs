@@ -10,11 +10,11 @@ namespace OrderCore.IntegrationTests.Orders;
 /// gated to that environment. <see cref="WebApplicationFactory{TEntryPoint}"/>
 /// defaults to the Development environment, same as <see cref="HealthCheckTests"/>.
 /// </summary>
-public sealed class OpenApiTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class OpenApiTests : IClassFixture<OrderCoreApiFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public OpenApiTests(WebApplicationFactory<Program> factory)
+    public OpenApiTests(OrderCoreApiFactory factory)
     {
         _factory = factory;
     }
@@ -39,5 +39,22 @@ public sealed class OpenApiTests : IClassFixture<WebApplicationFactory<Program>>
         var response = await client.GetAsync("/scalar/v1");
 
         response.IsSuccessStatusCode.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task OpenApi_document_declares_the_bearer_scheme_and_marks_protected_operations()
+    {
+        var body = await _factory.CreateClient().GetStringAsync("/openapi/v1.json");
+
+        using var document = System.Text.Json.JsonDocument.Parse(body);
+        var root = document.RootElement;
+        root.GetProperty("components").GetProperty("securitySchemes").TryGetProperty("Bearer", out _).Should().BeTrue();
+
+        var checkout = root.GetProperty("paths").GetProperty("/api/orders/checkout").GetProperty("post");
+        checkout.TryGetProperty("security", out _).Should().BeTrue();
+        checkout.GetProperty("responses").TryGetProperty("401", out _).Should().BeTrue();
+
+        var quote = root.GetProperty("paths").GetProperty("/api/orders/cart/quote").GetProperty("post");
+        quote.TryGetProperty("security", out _).Should().BeFalse("the cart quote is public");
     }
 }

@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OrderCore.Api.Modules.Inventory.Application.UseCases;
 using OrderCore.Api.Modules.Inventory.Presentation.Presenters;
 using OrderCore.Api.Modules.Inventory.Presentation.Requests;
 using OrderCore.Api.Modules.Inventory.Presentation.Responses;
+using OrderCore.Api.Shared.Presentation.Authentication;
 
 namespace OrderCore.Api.Modules.Inventory.Presentation.Controllers;
 
@@ -16,6 +18,7 @@ namespace OrderCore.Api.Modules.Inventory.Presentation.Controllers;
 /// ChangeProductPriceUseCase in Catalog.
 /// </summary>
 [ApiController]
+[Authorize(Policy = AuthorizationPolicies.Admin)]
 [Route("inventory")]
 public sealed class InventoryController : ControllerBase
 {

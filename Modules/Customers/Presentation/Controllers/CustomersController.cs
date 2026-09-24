@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OrderCore.Api.Modules.Customers.Application.UseCases;
 using OrderCore.Api.Modules.Customers.Presentation.Presenters;
 using OrderCore.Api.Modules.Customers.Presentation.Requests;
 using OrderCore.Api.Modules.Customers.Presentation.Responses;
+using OrderCore.Api.Shared.Presentation.Authentication;
 
 namespace OrderCore.Api.Modules.Customers.Presentation.Controllers;
 
@@ -18,40 +20,28 @@ namespace OrderCore.Api.Modules.Customers.Presentation.Controllers;
 /// are not caught here: <c>ApiExceptionHandler</c> (Shared/Presentation)
 /// turns them into the ProblemDetails responses the ProducesResponseType
 /// attributes below document.
+///
+/// Admin-only. Customers register through <c>POST auth/sign-up</c>
+/// (Identity module), which creates the customer; their own profile and
+/// addresses are served under <c>customers/me</c>.
 /// </summary>
 [ApiController]
+[Authorize(Policy = AuthorizationPolicies.Admin)]
 [Route("customers")]
 public sealed class CustomersController : ControllerBase
 {
-    private readonly RegisterCustomerUseCase _registerCustomerUseCase;
     private readonly GetCustomerByIdUseCase _getCustomerByIdUseCase;
     private readonly AddCustomerAddressUseCase _addCustomerAddressUseCase;
     private readonly ListCustomerAddressesUseCase _listCustomerAddressesUseCase;
 
     public CustomersController(
-        RegisterCustomerUseCase registerCustomerUseCase,
         GetCustomerByIdUseCase getCustomerByIdUseCase,
         AddCustomerAddressUseCase addCustomerAddressUseCase,
         ListCustomerAddressesUseCase listCustomerAddressesUseCase)
     {
-        _registerCustomerUseCase = registerCustomerUseCase;
         _getCustomerByIdUseCase = getCustomerByIdUseCase;
         _addCustomerAddressUseCase = addCustomerAddressUseCase;
         _listCustomerAddressesUseCase = listCustomerAddressesUseCase;
-    }
-
-    [HttpPost]
-    [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<CustomerResponse>> RegisterAsync(
-        [FromBody] RegisterCustomerRequest request,
-        CancellationToken cancellationToken)
-    {
-        var output = await _registerCustomerUseCase.ExecuteAsync(CustomerPresenter.ToCommand(request), cancellationToken);
-        var response = CustomerPresenter.ToResponse(output);
-
-        return CreatedAtAction(nameof(GetByIdAsync), new { id = response.Id }, response);
     }
 
     [HttpGet("{id:guid}")]

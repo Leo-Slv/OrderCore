@@ -8,9 +8,6 @@ namespace OrderCore.Api.Modules.Customers.Presentation.Presenters;
 
 public static class CustomerPresenter
 {
-    public static RegisterCustomerCommand ToCommand(RegisterCustomerRequest request) => new(
-        request.Name, request.Email, request.Phone, request.DocumentNumber);
-
     public static AddCustomerAddressCommand ToCommand(Guid customerId, AddCustomerAddressRequest request) => new(
         customerId,
         request.Label,

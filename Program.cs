@@ -7,9 +7,11 @@ using OrderCore.Api.Modules.Inventory;
 using OrderCore.Api.Modules.Orders;
 using OrderCore.Api.Modules.Payments;
 using OrderCore.Api.Shared;
+using OrderCore.Api.Shared.Presentation.Authentication;
 using OrderCore.Api.Shared.Presentation.Conventions;
 using OrderCore.Api.Shared.Presentation.Cors;
 using OrderCore.Api.Shared.Presentation.ExceptionHandling;
+using OrderCore.Api.Shared.Presentation.OpenApi;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -57,7 +59,16 @@ builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddStorefrontCors(builder.Configuration);
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddOpenApi();
+
+// Deny by default: every endpoint needs a signed-in user unless it is
+// marked [AllowAnonymous]; admin/customer endpoints add a policy. JWT
+// bearer authentication itself is registered by the Identity module.
+builder.Services.AddOrderCoreAuthorization();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer<BearerSecurityTransformer>();
+    options.AddOperationTransformer<BearerSecurityTransformer>();
+});
 
 var app = builder.Build();
 
@@ -67,6 +78,8 @@ app.UseExceptionHandler();
 // middleware's 401/403) become ProblemDetails too, with a default code.
 app.UseStatusCodePages();
 app.UseStorefrontCors();
+app.UseAuthentication();
+app.UseAuthorization();
 
 // OpenAPI ("swagger") document + Scalar UI, Development-only (same
 // posture as the ASP.NET Core templates' own SwaggerUI-in-Development
@@ -74,13 +87,13 @@ app.UseStorefrontCors();
 // a deployed environment by default.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
-    app.MapScalarApiReference();
+    app.MapOpenApi().AllowAnonymous();
+    app.MapScalarApiReference().AllowAnonymous();
 }
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous();
 
-app.MapGet("/", () => Results.Ok(new { service = "OrderCore.Api", status = "ok" }));
+app.MapGet("/", () => Results.Ok(new { service = "OrderCore.Api", status = "ok" })).AllowAnonymous();
 
 app.MapControllers();
 

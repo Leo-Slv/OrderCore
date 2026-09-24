@@ -45,6 +45,11 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__OrderCoreDb: "Host=postgres;Port=5432;Database=ordercore;Username=ordercore;Password=ordercore"
+      # Secrets come from a git-ignored .env next to this file (copy
+      # .env.example). The API refuses to start without a signing key.
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env (see .env.example)}
+      IdentitySeed__AdminEmail: ${ADMIN_EMAIL:-}
+      IdentitySeed__AdminPassword: ${ADMIN_PASSWORD:-}
     ports:
       - "8080:8080"
     networks:

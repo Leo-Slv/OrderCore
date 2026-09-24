@@ -58,3 +58,6 @@ logs/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+
+## Local secrets (see .env.example)
+.env

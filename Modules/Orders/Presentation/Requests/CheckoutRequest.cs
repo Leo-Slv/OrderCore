@@ -4,15 +4,14 @@ using OrderCore.Api.Modules.Orders.Application.DTOs;
 namespace OrderCore.Api.Modules.Orders.Presentation.Requests;
 
 /// <summary>
-/// The idempotency key is not part of the body: it goes in the
+/// The customer is whoever is signed in, never a field of the body. The
+/// idempotency key is not part of the body either: it goes in the
 /// <c>Idempotency-Key</c> header. <see cref="ExpectedTotal"/> is optional:
 /// send the total the buyer was shown to have the checkout refuse
 /// (<c>409 price_changed</c>) if prices moved since.
 /// </summary>
 public sealed class CheckoutRequest
 {
-    public Guid CustomerId { get; init; }
-
     public IReadOnlyList<CheckoutItemRequest> Items { get; init; } = [];
 
     public Guid ShippingAddressId { get; init; }

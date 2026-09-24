@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -9,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Customers.Infrastructure.Persistence;
+using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
@@ -34,6 +36,9 @@ namespace OrderCore.IntegrationTests.Orders;
 public sealed class StorefrontCheckoutTests : IAsyncLifetime
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    private const string AdminEmail = "admin@ordercore.test";
+    private const string AdminPassword = "admin-pass-123";
 
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine").Build();
 
@@ -66,6 +71,11 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         {
             await db.Database.MigrateAsync();
         }
+
+        await using (var db = new IdentityDbContext(Options<IdentityDbContext>(connectionString)))
+        {
+            await db.Database.MigrateAsync();
+        }
     }
 
     public async Task DisposeAsync() => await _postgres.DisposeAsync();
@@ -75,9 +85,11 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         new DbContextOptionsBuilder<T>().UseNpgsql(connectionString).Options;
 
     private WebApplicationFactory<Program> CreateFactory(FakePaymentProviderMode paymentMode = FakePaymentProviderMode.Success) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        new OrderCoreApiFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:OrderCoreDb", _postgres.GetConnectionString());
+            builder.UseSetting("IdentitySeed:AdminEmail", AdminEmail);
+            builder.UseSetting("IdentitySeed:AdminPassword", AdminPassword);
             builder.ConfigureTestServices(services =>
                 services.Configure<FakePaymentProviderOptions>(options => options.Mode = paymentMode));
         });
@@ -86,9 +98,9 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     public async Task Buyer_can_go_from_catalog_to_a_confirmed_order_and_follow_it()
     {
         await using var factory = CreateFactory();
-        var client = factory.CreateClient();
-        var (customerId, addressId) = await CreateCustomerWithAddressAsync(client);
-        var product = await CreatePublishedProductAsync(client, "Wireless Mouse", price: 150m);
+        var admin = await SignInAsAdminAsync(factory);
+        var (client, customerId, addressId) = await SignUpBuyerWithAddressAsync(factory, admin);
+        var product = await CreatePublishedProductAsync(admin, "Wireless Mouse", price: 150m);
         await SeedStockAsync(product.Id, quantity: 5);
 
         // Catalog: the product card and page show it as purchasable.
@@ -115,7 +127,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         quote.GetProperty("total").GetDecimal().Should().Be(300m);
 
         // Checkout: 202 with the order already awaiting payment.
-        var checkout = await CheckoutAsync(client, customerId, addressId, product.Id, quantity: 2, idempotencyKey: "checkout-e2e-1");
+        var checkout = await CheckoutAsync(client, addressId, product.Id, quantity: 2, idempotencyKey: "checkout-e2e-1");
         checkout.StatusCode.Should().Be(HttpStatusCode.Accepted);
         checkout.Headers.Location.Should().NotBeNull();
         var created = await checkout.Content.ReadFromJsonAsync<JsonElement>(Json);
@@ -125,7 +137,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         created.GetProperty("shippingAddress").GetProperty("street").GetString().Should().Be("Rua das Flores");
 
         // Replaying the same checkout returns the same order.
-        var replay = await CheckoutAsync(client, customerId, addressId, product.Id, quantity: 2, idempotencyKey: "checkout-e2e-1");
+        var replay = await CheckoutAsync(client, addressId, product.Id, quantity: 2, idempotencyKey: "checkout-e2e-1");
         (await replay.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid().Should().Be(orderId);
 
         // Tracking: the outbox publisher confirms the order on its own.
@@ -138,7 +150,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         history.EnumerateArray().Select(h => h.GetProperty("toStatus").GetString())
             .Should().Equal("Created", "PendingPayment", "Confirmed");
 
-        var myOrders = await client.GetFromJsonAsync<JsonElement>($"/api/orders/customers/{customerId}", Json);
+        var myOrders = await admin.GetFromJsonAsync<JsonElement>($"/api/orders/customers/{customerId}", Json);
         myOrders.GetProperty("totalItems").GetInt32().Should().Be(1);
         myOrders.GetProperty("items")[0].GetProperty("itemCount").GetInt32().Should().Be(2);
 
@@ -155,12 +167,12 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     public async Task Declined_payment_ends_the_order_in_PaymentFailed_with_the_reason()
     {
         await using var factory = CreateFactory(FakePaymentProviderMode.Declined);
-        var client = factory.CreateClient();
-        var (customerId, addressId) = await CreateCustomerWithAddressAsync(client);
-        var product = await CreatePublishedProductAsync(client, "Mechanical Keyboard", price: 400m);
+        var admin = await SignInAsAdminAsync(factory);
+        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory, admin);
+        var product = await CreatePublishedProductAsync(admin, "Mechanical Keyboard", price: 400m);
         await SeedStockAsync(product.Id, quantity: 1);
 
-        var checkout = await CheckoutAsync(client, customerId, addressId, product.Id, quantity: 1, idempotencyKey: "checkout-declined");
+        var checkout = await CheckoutAsync(client, addressId, product.Id, quantity: 1, idempotencyKey: "checkout-declined");
         var orderId = (await checkout.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
 
         var failed = await PollOrderUntilAsync(client, orderId, status => status == "PaymentFailed");
@@ -172,12 +184,12 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     public async Task Checkout_without_enough_stock_is_a_409_with_a_code_the_storefront_can_branch_on()
     {
         await using var factory = CreateFactory();
-        var client = factory.CreateClient();
-        var (customerId, addressId) = await CreateCustomerWithAddressAsync(client);
-        var product = await CreatePublishedProductAsync(client, "Monitor", price: 900m);
+        var admin = await SignInAsAdminAsync(factory);
+        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory, admin);
+        var product = await CreatePublishedProductAsync(admin, "Monitor", price: 900m);
         await SeedStockAsync(product.Id, quantity: 1);
 
-        var checkout = await CheckoutAsync(client, customerId, addressId, product.Id, quantity: 2, idempotencyKey: "checkout-no-stock");
+        var checkout = await CheckoutAsync(client, addressId, product.Id, quantity: 2, idempotencyKey: "checkout-no-stock");
 
         checkout.StatusCode.Should().Be(HttpStatusCode.Conflict);
         var problem = await checkout.Content.ReadFromJsonAsync<JsonElement>(Json);
@@ -188,11 +200,10 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     public async Task Checkout_without_an_idempotency_key_is_rejected()
     {
         await using var factory = CreateFactory();
-        var client = factory.CreateClient();
+        var client = factory.CreateCustomerClient();
 
         var response = await client.PostAsJsonAsync("/api/orders/checkout", new
         {
-            customerId = Guid.NewGuid(),
             items = new[] { new { productId = Guid.NewGuid(), quantity = 1 } },
             shippingAddressId = Guid.NewGuid(),
             billingAddressId = Guid.NewGuid(),
@@ -202,17 +213,39 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
-    private static async Task<(Guid CustomerId, Guid AddressId)> CreateCustomerWithAddressAsync(HttpClient client)
+    private static async Task<HttpClient> SignInAsAdminAsync(WebApplicationFactory<Program> factory)
     {
-        var customerResponse = await client.PostAsJsonAsync("/api/customers", new
+        var client = factory.CreateClient();
+        var response = await client.PostAsJsonAsync("/api/auth/sign-in", new { email = AdminEmail, password = AdminPassword });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var tokens = await response.Content.ReadFromJsonAsync<JsonElement>(Json);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tokens.GetProperty("accessToken").GetString());
+        return client;
+    }
+
+    /// <summary>
+    /// Signs a new buyer up (a real account and customer). The address is
+    /// added through the admin endpoint until customers can manage their
+    /// own addresses.
+    /// </summary>
+    private static async Task<(HttpClient Buyer, Guid CustomerId, Guid AddressId)> SignUpBuyerWithAddressAsync(
+        WebApplicationFactory<Program> factory, HttpClient admin)
+    {
+        var buyer = factory.CreateClient();
+        var signUp = await buyer.PostAsJsonAsync("/api/auth/sign-up", new
         {
             name = "Jane Doe",
             email = $"jane-{Guid.NewGuid():N}@example.com",
+            password = "buyer-pass-123",
         });
-        customerResponse.StatusCode.Should().Be(HttpStatusCode.Created);
-        var customerId = (await customerResponse.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        signUp.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tokens = await signUp.Content.ReadFromJsonAsync<JsonElement>(Json);
+        var customerId = tokens.GetProperty("customerId").GetGuid();
+        buyer.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tokens.GetProperty("accessToken").GetString());
 
-        var addressResponse = await client.PostAsJsonAsync($"/api/customers/{customerId}/addresses", new
+        var addressResponse = await admin.PostAsJsonAsync($"/api/customers/{customerId}/addresses", new
         {
             label = "Home",
             recipientName = "Jane Doe",
@@ -226,8 +259,8 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         });
         addressResponse.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var addresses = await client.GetFromJsonAsync<JsonElement>($"/api/customers/{customerId}/addresses", Json);
-        return (customerId, addresses[0].GetProperty("id").GetGuid());
+        var addresses = await admin.GetFromJsonAsync<JsonElement>($"/api/customers/{customerId}/addresses", Json);
+        return (buyer, customerId, addresses[0].GetProperty("id").GetGuid());
     }
 
     private static async Task<(Guid Id, string Slug)> CreatePublishedProductAsync(HttpClient client, string name, decimal price)
@@ -264,13 +297,12 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     }
 
     private static Task<HttpResponseMessage> CheckoutAsync(
-        HttpClient client, Guid customerId, Guid addressId, Guid productId, int quantity, string idempotencyKey)
+        HttpClient client, Guid addressId, Guid productId, int quantity, string idempotencyKey)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/orders/checkout")
         {
             Content = JsonContent.Create(new
             {
-                customerId,
                 items = new[] { new { productId, quantity } },
                 shippingAddressId = addressId,
                 billingAddressId = addressId,

@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
 using OrderCore.Api.Modules.Payments.Presentation.Presenters;
 using OrderCore.Api.Modules.Payments.Presentation.Requests;
 using OrderCore.Api.Modules.Payments.Presentation.Responses;
+using OrderCore.Api.Shared.Presentation.Authentication;
 
 namespace OrderCore.Api.Modules.Payments.Presentation.Controllers;
 
@@ -13,6 +15,7 @@ namespace OrderCore.Api.Modules.Payments.Presentation.Controllers;
 /// project.
 /// </summary>
 [ApiController]
+[Authorize(Policy = AuthorizationPolicies.Admin)]
 [Route("payments")]
 public sealed class PaymentsController : ControllerBase
 {

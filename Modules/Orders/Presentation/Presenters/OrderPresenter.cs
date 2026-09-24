@@ -10,8 +10,8 @@ namespace OrderCore.Api.Modules.Orders.Presentation.Presenters;
 
 public static class OrderPresenter
 {
-    public static CheckoutCommand ToCommand(CheckoutRequest request, string idempotencyKey) => new(
-        request.CustomerId,
+    public static CheckoutCommand ToCommand(CheckoutRequest request, Guid customerId, string idempotencyKey) => new(
+        customerId,
         request.Items.Select(i => new CheckoutItem(i.ProductId, i.Quantity)).ToList(),
         request.ShippingAddressId,
         request.BillingAddressId,

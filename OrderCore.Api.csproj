@@ -12,6 +12,9 @@
       project references.
     -->
     <RootNamespace>OrderCore.Api</RootNamespace>
+    <!-- Local secrets (Jwt:SigningKey, IdentitySeed:*) for `dotnet run`:
+         `dotnet user-secrets set "Jwt:SigningKey" "..."`. Never in appsettings. -->
+    <UserSecretsId>ordercore-api</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

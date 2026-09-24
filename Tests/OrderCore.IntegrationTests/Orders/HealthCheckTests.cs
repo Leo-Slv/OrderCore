@@ -12,11 +12,11 @@ namespace OrderCore.IntegrationTests.Orders;
 /// OrderCore.UnitTests/Inventory/InventoryReservationTests.cs for why the
 /// concurrency scenario (section 34) belongs here and not in unit tests.
 /// </summary>
-public sealed class HealthCheckTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class HealthCheckTests : IClassFixture<OrderCoreApiFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public HealthCheckTests(WebApplicationFactory<Program> factory)
+    public HealthCheckTests(OrderCoreApiFactory factory)
     {
         _factory = factory;
     }
@@ -29,5 +29,16 @@ public sealed class HealthCheckTests : IClassFixture<WebApplicationFactory<Progr
         var response = await client.GetAsync("/health");
 
         response.IsSuccessStatusCode.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Api_refuses_to_start_without_a_jwt_signing_key()
+    {
+        using var withoutKey = new WebApplicationFactory<Program>();
+
+        var start = () => withoutKey.CreateClient();
+
+        start.Should().Throw<Microsoft.Extensions.Options.OptionsValidationException>()
+            .Which.Message.Should().Contain("Jwt:SigningKey");
     }
 }

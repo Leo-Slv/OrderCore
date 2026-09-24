@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Application.UseCases;
 using OrderCore.Api.Modules.Catalog.Presentation.Presenters;
 using OrderCore.Api.Modules.Catalog.Presentation.Requests;
 using OrderCore.Api.Modules.Catalog.Presentation.Responses;
+using OrderCore.Api.Shared.Presentation.Authentication;
 using OrderCore.Api.Shared.Presentation.Responses;
 
 namespace OrderCore.Api.Modules.Catalog.Presentation.Controllers;
@@ -53,6 +55,7 @@ public sealed class CatalogController : ControllerBase
     }
 
     [HttpPost("products")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -68,6 +71,7 @@ public sealed class CatalogController : ControllerBase
     }
 
     [HttpPut("products/{id:guid}")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -82,6 +86,7 @@ public sealed class CatalogController : ControllerBase
     }
 
     [HttpPost("products/{id:guid}/publish")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -93,6 +98,7 @@ public sealed class CatalogController : ControllerBase
     }
 
     [HttpGet("products/{id:guid}")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProductResponse>> GetProductByIdAsync(Guid id, CancellationToken cancellationToken)
@@ -107,6 +113,7 @@ public sealed class CatalogController : ControllerBase
     /// <see cref="GetProductBySlugUseCase"/>.
     /// </summary>
     [HttpGet("products/by-slug/{slug}")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProductResponse>> GetProductBySlugAsync(string slug, CancellationToken cancellationToken)
@@ -122,6 +129,7 @@ public sealed class CatalogController : ControllerBase
     /// callers entirely waits for authentication (V2).
     /// </summary>
     [HttpGet("products")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(PagedResponse<ProductSummaryResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResponse<ProductSummaryResponse>>> ListProductsAsync(
@@ -134,6 +142,7 @@ public sealed class CatalogController : ControllerBase
     }
 
     [HttpPost("categories")]
+    [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(typeof(CategoryResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -148,6 +157,7 @@ public sealed class CatalogController : ControllerBase
     }
 
     [HttpGet("categories")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(IReadOnlyList<CategoryResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<CategoryResponse>>> ListCategoriesAsync(CancellationToken cancellationToken)
     {
