@@ -18,7 +18,7 @@ namespace OrderCore.ArchitectureTests;
 /// </summary>
 public sealed class ModuleBoundaryTests
 {
-    private static readonly string[] Modules = { "Orders", "Customers", "Catalog", "Inventory", "Payments", "AuditLogs" };
+    private static readonly string[] Modules = { "Orders", "Customers", "Catalog", "Inventory", "Payments", "AuditLogs", "Identity" };
 
     private static System.Reflection.Assembly ApiAssembly => typeof(Program).Assembly;
 
@@ -135,6 +135,25 @@ public sealed class ModuleBoundaryTests
             .GetResult();
 
         result.IsSuccessful.Should().BeTrue(BuildFailureMessage("Orders", result));
+    }
+
+    [Fact]
+    public void Identity_application_does_not_depend_on_another_modules_domain_or_infrastructure()
+    {
+        // Identity reaches Customers only through ICustomerRegistry; the
+        // adapter in Identity's Infrastructure calls Customers' Application layer.
+        var result = Types.InAssembly(ApiAssembly)
+            .That()
+            .ResideInNamespace("OrderCore.Api.Modules.Identity.Application")
+            .ShouldNot()
+            .HaveDependencyOnAny(
+                "OrderCore.Api.Modules.Customers.Domain",
+                "OrderCore.Api.Modules.Customers.Infrastructure",
+                "OrderCore.Api.Modules.Orders.Domain",
+                "OrderCore.Api.Modules.Orders.Infrastructure")
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(BuildFailureMessage("Identity", result));
     }
 
     private static string BuildFailureMessage(string module, TestResult result) =>

@@ -32,4 +32,6 @@ public static class AuditLogActionNames
     public const string ProductPublished = "ProductPublished";
 
     public const string CustomerCreated = "CustomerCreated";
+    public const string UserAccountCreated = "UserAccountCreated";
+    public const string RefreshTokenReuseDetected = "RefreshTokenReuseDetected";
 }
