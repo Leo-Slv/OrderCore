@@ -193,10 +193,16 @@ A API expõe `GET /health` para health check e `GET /` como smoke test.
 `Customers`, `Catalog`, `Orders`, `Inventory` e `Payments` — todos os
 módulos de negócio previstos — estão implementados de ponta a ponta
 (Domain + Application + Infrastructure/EF Core + Presentation) contra
-PostgreSQL real; `AuditLogs`, o único módulo técnico/transversal, segue
-como scaffolding. Ver o topo de cada
-`Docs/diagrams/implementation-class/0N-*.md` para os desvios documentados
-entre cada diagrama e o código.
+PostgreSQL real. `AuditLogs`, o módulo técnico/transversal, também está
+implementado (com um `InMemoryAuditLogRepository` — sem persistência EF
+Core, por design) e agora recebe entradas de verdade: os 16 pontos de
+`AuditLogActionNames` (criação/confirmação/cancelamento de pedido,
+autorização/captura/falha/estorno de pagamento, reserva/liberação/consumo/
+expiração de estoque, criação/mudança de preço/publicação de produto,
+cadastro de cliente) chamam `IAuditLogService.RecordAsync` — ver
+[07-auditlogs.md](Docs/diagrams/implementation-class/07-auditlogs.md).
+Ver o topo de cada `Docs/diagrams/implementation-class/0N-*.md` para os
+desvios documentados entre cada diagrama e o código.
 
 O fluxo de checkout completo está implementado e validado por um teste de
 integração de ponta a ponta (`Tests/OrderCore.IntegrationTests/Orders/CheckoutFlowTests.cs`):

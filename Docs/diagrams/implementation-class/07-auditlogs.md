@@ -175,5 +175,25 @@ classDiagram
 
 ## Consumido por outros módulos
 
-- Nenhum outro módulo chama `IAuditLogService.RecordAsync(...)` ainda — o contrato existe e está registrado (`AddAuditLogsModule()` em `Program.cs`), mas nenhum caso de uso de Orders/Payments/Inventory/Catalog/Customers foi alterado para logar auditoria. `AuditLogActionNames` já lista as ações desses módulos para quando isso for feito.
-- Quando um módulo passar a chamar `RecordAsync`, ele depende apenas de `IAuditLogService` (Application Contract) — nunca de `AuditLog`, `IAuditLogRepository` ou `InMemoryAuditLogRepository` diretamente (seção 7).
+Ver `Docs/specs/auditlogs/cross-module-audit-trail.md` para o WHAT/WHY completo. Todas as 16 constantes de `AuditLogActionNames` agora têm pelo menos um call site real, sempre injetando `IAuditLogService` diretamente (nunca `AuditLog`, `IAuditLogRepository` ou `InMemoryAuditLogRepository` — Application Contract, seção 7) e chamando `RecordAsync` só depois que o próprio `SaveChangesAsync` do caso de uso tiver sucesso, com `userId: null` em todos os casos (o projeto ainda não tem conceito de usuário autenticado):
+
+| Módulo | Caso de uso | Ação | entityName |
+|---|---|---|---|
+| Orders | `CreateOrderHandler` | `OrderCreated` | `Order` |
+| Orders | `ConfirmOrderUseCase` | `OrderConfirmed` | `Order` |
+| Orders | `CancelOrderUseCase` | `OrderCancelled` | `Order` |
+| Orders | `MarkOrderPaymentFailedUseCase` | `OrderPaymentFailed` | `Order` |
+| Payments | `CreatePaymentUseCase`/`AuthorizePaymentUseCase` | `PaymentAuthorized` ou `PaymentFailed` (conforme o resultado do provider) | `Payment` |
+| Payments | `CapturePaymentUseCase` | `PaymentCaptured` | `Payment` |
+| Payments | `FailPaymentUseCase` | `PaymentFailed` | `Payment` |
+| Payments | `RequestRefundUseCase` | `PaymentRefunded` (só quando `Payment.Refund()` é chamado, ou seja, reembolso total) | `Payment` |
+| Inventory | `ReserveStockUseCase` | `InventoryReserved` (só quando a reserva é criada com sucesso) | `InventoryReservation` |
+| Inventory | `ReleaseReservationUseCase` | `InventoryReleased` | `InventoryReservation` |
+| Inventory | `ConsumeReservationUseCase` | `InventoryConsumed` | `InventoryReservation` |
+| Inventory | `ExpireReservationUseCase` | `InventoryExpired` | `InventoryReservation` |
+| Catalog | `CreateProductUseCase` | `ProductCreated` | `Product` |
+| Catalog | `ChangeProductPriceUseCase` | `ProductPriceChanged` | `Product` |
+| Catalog | `PublishProductUseCase` | `ProductPublished` | `Product` |
+| Customers | `RegisterCustomerUseCase` | `CustomerCreated` | `Customer` |
+
+Para Inventory, `entityId` é o `InventoryReservation.Id`, não o `StockItem` — é a reserva que carrega o ciclo de vida Reserved/Released/Consumed/Expired que essas quatro ações nomeiam.
