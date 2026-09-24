@@ -1,27 +1,29 @@
 using System.Text.Json;
 using OrderCore.Api.Modules.AuditLogs.Domain.Entities;
 using OrderCore.Api.Modules.AuditLogs.Domain.Repositories;
+using OrderCore.Api.Shared.Application.Abstractions;
 
 namespace OrderCore.Api.Modules.AuditLogs.Application.Services;
 
 /// <summary>
-/// Default <see cref="IAuditLogService"/> implementation. Unlike
-/// CourseCore's, this does not enrich entries with a current-user or
-/// correlation id sourced from an <c>ICurrentUserService</c> /
-/// <c>IRequestContextService</c> — OrderCore has no auth/request-context
-/// infrastructure yet (section 32), so callers pass <paramref
-/// name="userId"/> explicitly for now. Add that enrichment here, not in
-/// callers, once those services exist.
+/// Default <see cref="IAuditLogService"/> implementation. The actor is
+/// enriched here, not in callers: when a caller passes no
+/// <c>userId</c> (every current call site), the signed-in user from
+/// <see cref="ICurrentUser"/> is recorded. With nobody signed in (a
+/// background service such as the outbox publisher) the entry has no
+/// actor, meaning the system did it. There is no correlation id yet.
 /// </summary>
 public sealed class AuditLogService : IAuditLogService
 {
     private readonly IAuditLogRepository _auditLogs;
     private readonly TimeProvider _timeProvider;
+    private readonly ICurrentUser _currentUser;
 
-    public AuditLogService(IAuditLogRepository auditLogs, TimeProvider timeProvider)
+    public AuditLogService(IAuditLogRepository auditLogs, TimeProvider timeProvider, ICurrentUser currentUser)
     {
         _auditLogs = auditLogs;
         _timeProvider = timeProvider;
+        _currentUser = currentUser;
     }
 
     public async Task RecordAsync(
@@ -33,7 +35,7 @@ public sealed class AuditLogService : IAuditLogService
         CancellationToken cancellationToken)
     {
         var metadataJson = BuildMetadataJson(metadata);
-        var auditLog = AuditLog.Create(userId, action, entityName, entityId, metadataJson, _timeProvider.GetUtcNow());
+        var auditLog = AuditLog.Create(userId ?? _currentUser.UserId, action, entityName, entityId, metadataJson, _timeProvider.GetUtcNow());
 
         await _auditLogs.AddAsync(auditLog, cancellationToken);
         await _auditLogs.SaveChangesAsync(cancellationToken);

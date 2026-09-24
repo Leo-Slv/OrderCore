@@ -46,6 +46,31 @@ public sealed class ErrorContractAndCorsTests : IClassFixture<WebApplicationFact
     }
 
     [Fact]
+    public async Task Unknown_route_returns_404_problem_details_with_a_default_code()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/does-not-exist");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("code").GetString().Should().Be("not_found");
+    }
+
+    [Fact]
+    public async Task Malformed_request_body_returns_400_problem_details_with_validation_error()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsync(
+            "/api/orders/cart/quote", new StringContent("{ not json", System.Text.Encoding.UTF8, "application/json"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("code").GetString().Should().Be("validation_error");
+    }
+
+    [Fact]
     public async Task Preflight_from_configured_origin_is_allowed()
     {
         var client = _factory.CreateClient();

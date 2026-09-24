@@ -50,7 +50,7 @@ builder.Services
 
 // Business failures (not found, rule violated, conflict) reach the client
 // as ProblemDetails with a stable "code" — see ApiExceptionHandler.
-builder.Services.AddProblemDetails();
+builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = ProblemDetailsDefaults.AddDefaultCode);
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddStorefrontCors(builder.Configuration);
 builder.Services.AddHealthChecks();
@@ -60,6 +60,10 @@ builder.Services.AddOpenApi();
 var app = builder.Build();
 
 app.UseExceptionHandler();
+
+// Empty-bodied error responses (unknown route 404, the authorization
+// middleware's 401/403) become ProblemDetails too, with a default code.
+app.UseStatusCodePages();
 app.UseStorefrontCors();
 
 // OpenAPI ("swagger") document + Scalar UI, Development-only (same

@@ -1,5 +1,6 @@
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Infrastructure;
+using OrderCore.Api.Shared.Presentation.Authentication;
 
 namespace OrderCore.Api.Shared;
 
@@ -13,6 +14,10 @@ public static class SharedDependencyInjection
     public static IServiceCollection AddSharedKernel(this IServiceCollection services)
     {
         services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();
+
+        // Who is calling, for use cases and the audit log; see ICurrentUser.
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
 
         return services;
     }

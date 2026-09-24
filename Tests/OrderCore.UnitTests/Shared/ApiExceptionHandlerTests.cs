@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
 using OrderCore.Api.Shared.Application.Exceptions;
@@ -72,5 +73,44 @@ public sealed class ApiExceptionHandlerTests
 
         status.Should().Be(StatusCodes.Status500InternalServerError);
         code.Should().Be(ApiExceptionHandler.InternalErrorCode);
+    }
+
+    [Fact]
+    public void Unauthorized_maps_to_401_with_its_own_code()
+    {
+        var (status, code, _) = ApiExceptionHandler.Classify(new UnauthorizedException("invalid_credentials", "nope"));
+
+        status.Should().Be(StatusCodes.Status401Unauthorized);
+        code.Should().Be("invalid_credentials");
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.Status400BadRequest, "validation_error")]
+    [InlineData(StatusCodes.Status401Unauthorized, "unauthenticated")]
+    [InlineData(StatusCodes.Status403Forbidden, "forbidden")]
+    [InlineData(StatusCodes.Status404NotFound, "not_found")]
+    [InlineData(StatusCodes.Status503ServiceUnavailable, "internal_error")]
+    public void Framework_problem_details_get_a_default_code(int status, string expectedCode)
+    {
+        var context = new ProblemDetailsContext
+        {
+            HttpContext = new DefaultHttpContext(),
+            ProblemDetails = new ProblemDetails { Status = status },
+        };
+
+        ProblemDetailsDefaults.AddDefaultCode(context);
+
+        context.ProblemDetails.Extensions[ApiExceptionHandler.ErrorCodeExtension].Should().Be(expectedCode);
+    }
+
+    [Fact]
+    public void A_code_already_set_is_kept()
+    {
+        var problem = new ProblemDetails { Status = StatusCodes.Status404NotFound };
+        problem.Extensions[ApiExceptionHandler.ErrorCodeExtension] = "order_not_found";
+
+        ProblemDetailsDefaults.AddDefaultCode(new ProblemDetailsContext { HttpContext = new DefaultHttpContext(), ProblemDetails = problem });
+
+        problem.Extensions[ApiExceptionHandler.ErrorCodeExtension].Should().Be("order_not_found");
     }
 }
