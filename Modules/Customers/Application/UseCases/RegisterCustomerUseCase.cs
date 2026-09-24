@@ -3,6 +3,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Customers.Application.Contracts;
 using OrderCore.Api.Modules.Customers.Application.DTOs;
 using OrderCore.Api.Modules.Customers.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Customers.Application.UseCases;
 
@@ -24,7 +25,7 @@ public sealed class RegisterCustomerUseCase
         var existing = await _customers.GetByEmailAsync(command.Email, cancellationToken);
         if (existing is not null)
         {
-            throw new InvalidOperationException($"A customer with email '{command.Email}' is already registered.");
+            throw new ConflictException("email_already_registered", $"A customer with email '{command.Email}' is already registered.");
         }
 
         var now = _timeProvider.GetUtcNow();

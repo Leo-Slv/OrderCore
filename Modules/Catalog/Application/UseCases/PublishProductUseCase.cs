@@ -2,6 +2,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Catalog.Application.UseCases;
 
@@ -21,7 +22,7 @@ public sealed class PublishProductUseCase
     public async Task<ProductOutput> ExecuteAsync(Guid productId, CancellationToken cancellationToken)
     {
         var product = await _products.GetByIdAsync(productId, cancellationToken)
-            ?? throw new InvalidOperationException($"Product '{productId}' was not found.");
+            ?? throw new NotFoundException("product_not_found", $"Product '{productId}' was not found.");
 
         product.Publish(_timeProvider.GetUtcNow());
         await _products.SaveChangesAsync(cancellationToken);

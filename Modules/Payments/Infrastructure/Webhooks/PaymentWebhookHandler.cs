@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Infrastructure.Webhooks;
 
@@ -32,7 +33,7 @@ public sealed class PaymentWebhookHandler
             ?? throw new ArgumentException("Invalid webhook payload.", nameof(payloadJson));
 
         var payment = await _payments.GetByIdAsync(payload.PaymentId, cancellationToken)
-            ?? throw new InvalidOperationException($"Payment '{payload.PaymentId}' was not found.");
+            ?? throw new NotFoundException("payment_not_found", $"Payment '{payload.PaymentId}' was not found.");
 
         switch (providerEventType)
         {

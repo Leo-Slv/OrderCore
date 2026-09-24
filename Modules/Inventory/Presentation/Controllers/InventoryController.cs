@@ -30,7 +30,7 @@ public sealed class InventoryController : ControllerBase
 
     [HttpGet("stock-items/{productId:guid}")]
     [ProducesResponseType(typeof(StockItemResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<StockItemResponse>> GetStockByProductIdAsync(Guid productId, CancellationToken cancellationToken)
     {
         var output = await _getStockByProductIdUseCase.ExecuteAsync(productId, cancellationToken);
@@ -40,8 +40,8 @@ public sealed class InventoryController : ControllerBase
 
     [HttpPost("stock-items/{productId:guid}/adjust")]
     [ProducesResponseType(typeof(StockItemResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<StockItemResponse>> AdjustStockAsync(
         Guid productId,
         [FromBody] AdjustStockRequest request,

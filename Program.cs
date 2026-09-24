@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using OrderCore.Api.Modules.AuditLogs;
 using OrderCore.Api.Modules.Catalog;
 using OrderCore.Api.Modules.Customers;
@@ -6,6 +7,8 @@ using OrderCore.Api.Modules.Orders;
 using OrderCore.Api.Modules.Payments;
 using OrderCore.Api.Shared;
 using OrderCore.Api.Shared.Presentation.Conventions;
+using OrderCore.Api.Shared.Presentation.Cors;
+using OrderCore.Api.Shared.Presentation.ExceptionHandling;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -28,12 +31,26 @@ builder.Services.AddAuditLogsModule();
 // Every controller declares only its own segment (e.g. [Route("orders")])
 // — this convention prepends "api" once, instead of every module's
 // controller repeating "api/" in its own [Route] attribute.
-builder.Services.AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention("api")));
+//
+// Enums are (de)serialized by name, so request enums are accepted — and
+// documented in OpenAPI — as "Card"/"Pix" instead of integers.
+builder.Services
+    .AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention("api")))
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+// Business failures (not found, rule violated, conflict) reach the client
+// as ProblemDetails with a stable "code" — see ApiExceptionHandler.
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
+builder.Services.AddStorefrontCors(builder.Configuration);
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
+
+app.UseExceptionHandler();
+app.UseStorefrontCors();
 
 // OpenAPI ("swagger") document + Scalar UI, Development-only (same
 // posture as the ASP.NET Core templates' own SwaggerUI-in-Development

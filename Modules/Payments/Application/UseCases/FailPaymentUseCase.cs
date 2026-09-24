@@ -2,6 +2,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
@@ -28,7 +29,7 @@ public sealed class FailPaymentUseCase
     public async Task ExecuteAsync(Guid paymentId, string reason, CancellationToken cancellationToken)
     {
         var payment = await _payments.GetByIdAsync(paymentId, cancellationToken)
-            ?? throw new InvalidOperationException($"Payment '{paymentId}' was not found.");
+            ?? throw new NotFoundException("payment_not_found", $"Payment '{paymentId}' was not found.");
 
         payment.Fail(reason);
         _outbox.Enqueue(new PaymentFailed

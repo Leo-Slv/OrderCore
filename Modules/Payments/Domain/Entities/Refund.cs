@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Domain.Entities;
 
@@ -79,7 +80,7 @@ public sealed class Refund : Entity<Guid>
     {
         if (Status != expected)
         {
-            throw new InvalidOperationException($"Cannot transition refund '{Id}' from '{Status}' as if it were '{expected}'.");
+            throw new DomainRuleViolationException("invalid_refund_state", $"Cannot transition refund '{Id}' from '{Status}' as if it were '{expected}'.");
         }
     }
 

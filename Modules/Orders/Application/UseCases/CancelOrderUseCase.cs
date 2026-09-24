@@ -2,6 +2,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 
@@ -34,7 +35,7 @@ public sealed class CancelOrderUseCase
     public async Task ExecuteAsync(CancelOrderCommand command, CancellationToken cancellationToken)
     {
         var order = await _orderRepository.GetByIdAsync(command.OrderId, cancellationToken)
-            ?? throw new InvalidOperationException($"Order '{command.OrderId}' was not found.");
+            ?? throw new NotFoundException("order_not_found", $"Order '{command.OrderId}' was not found.");
 
         order.Cancel(command.Reason, _timeProvider.GetUtcNow());
         await _inventoryService.ReleaseReservationsAsync(command.OrderId, cancellationToken);

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 using OrderCore.Api.Modules.Orders.Domain.Enums;
+using OrderCore.Api.Shared.Domain.Exceptions;
 using Xunit;
 
 namespace OrderCore.UnitTests.Orders;
@@ -52,7 +53,7 @@ public sealed class OrderTests
 
         var act = () => AddWidget(order);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]
@@ -94,7 +95,7 @@ public sealed class OrderTests
 
         var act = () => order.RequestPayment(now);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]
@@ -110,7 +111,7 @@ public sealed class OrderTests
 
         var act = () => order.Cancel("customer request", now);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]

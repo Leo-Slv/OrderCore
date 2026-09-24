@@ -14,13 +14,10 @@ namespace OrderCore.Api.Modules.Customers.Presentation.Controllers;
 /// this codebase (section 33: prefer the established convention over
 /// introducing a second one).
 ///
-/// The use cases currently signal "not found" / "duplicate" with a plain
-/// <see cref="InvalidOperationException"/>, which today reaches the client
-/// as an unhandled 500 — there's no shared exception-handling convention
-/// yet to map it to 404/409 (per claude.md: introduce one shared convention
-/// rather than a try/catch per endpoint). The ProducesResponseType
-/// attributes below document the intended contract, not yet-wired
-/// behavior.
+/// Failures thrown by the use cases (not found, duplicate, rule violated)
+/// are not caught here: <c>ApiExceptionHandler</c> (Shared/Presentation)
+/// turns them into the ProblemDetails responses the ProducesResponseType
+/// attributes below document.
 /// </summary>
 [ApiController]
 [Route("customers")]
@@ -45,7 +42,8 @@ public sealed class CustomersController : ControllerBase
 
     [HttpPost]
     [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<CustomerResponse>> RegisterAsync(
         [FromBody] RegisterCustomerRequest request,
         CancellationToken cancellationToken)
@@ -58,7 +56,7 @@ public sealed class CustomersController : ControllerBase
 
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<CustomerResponse>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
         var output = await _getCustomerByIdUseCase.ExecuteAsync(id, cancellationToken);
@@ -68,8 +66,8 @@ public sealed class CustomersController : ControllerBase
 
     [HttpPost("{id:guid}/addresses")]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddAddressAsync(
         Guid id,
         [FromBody] AddCustomerAddressRequest request,
@@ -82,7 +80,7 @@ public sealed class CustomersController : ControllerBase
 
     [HttpGet("{id:guid}/addresses")]
     [ProducesResponseType(typeof(IReadOnlyList<CustomerAddressResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<CustomerAddressResponse>>> ListAddressesAsync(
         Guid id,
         CancellationToken cancellationToken)

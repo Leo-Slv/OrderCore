@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Inventory.Application.UseCases;
 
@@ -29,10 +30,10 @@ public sealed class ConsumeReservationUseCase
     public async Task ExecuteAsync(Guid reservationId, CancellationToken cancellationToken)
     {
         var reservation = await _reservations.GetByIdAsync(reservationId, cancellationToken)
-            ?? throw new InvalidOperationException($"Reservation '{reservationId}' was not found.");
+            ?? throw new NotFoundException("reservation_not_found", $"Reservation '{reservationId}' was not found.");
 
         var stockItem = await _stockItems.GetByProductIdAsync(reservation.ProductId, cancellationToken)
-            ?? throw new InvalidOperationException($"No stock record for product '{reservation.ProductId}'.");
+            ?? throw new NotFoundException("stock_item_not_found", $"No stock record for product '{reservation.ProductId}'.");
 
         reservation.Consume(_timeProvider.GetUtcNow());
         stockItem.Consume(reservation.Quantity);

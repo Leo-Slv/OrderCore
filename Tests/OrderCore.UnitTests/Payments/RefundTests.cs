@@ -1,6 +1,7 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
+using OrderCore.Api.Shared.Domain.Exceptions;
 using Xunit;
 
 namespace OrderCore.UnitTests.Payments;
@@ -37,7 +38,7 @@ public sealed class RefundTests
 
         var act = () => refund.Complete(Now);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]
@@ -48,6 +49,6 @@ public sealed class RefundTests
 
         var act = () => refund.Fail("provider declined", Now);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 }

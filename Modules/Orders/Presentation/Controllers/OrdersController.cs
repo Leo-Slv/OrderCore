@@ -12,10 +12,6 @@ namespace OrderCore.Api.Modules.Orders.Presentation.Controllers;
 /// Thin endpoint delegating to the Orders use cases (section 39) — same
 /// [ApiController]/ControllerBase shape as CustomersController/CatalogController/
 /// InventoryController.
-///
-/// The use cases currently signal "not found" with a plain
-/// <see cref="InvalidOperationException"/>, same caveat as
-/// CustomersController's.
 /// </summary>
 [ApiController]
 [Route("orders")]
@@ -46,7 +42,8 @@ public sealed class OrdersController : ControllerBase
 
     [HttpPost]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OrderResponse>> CreateOrderAsync([FromBody] CreateOrderRequest request, CancellationToken cancellationToken)
     {
         var command = new CreateOrderCommand(
@@ -65,7 +62,8 @@ public sealed class OrdersController : ControllerBase
 
     [HttpPut("{id:guid}/addresses")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> SetAddressesAsync(Guid id, [FromBody] SetOrderAddressesRequest request, CancellationToken cancellationToken)
     {
         var command = new SetOrderAddressesCommand(
@@ -93,8 +91,9 @@ public sealed class OrdersController : ControllerBase
     /// </summary>
     [HttpPost("{id:guid}/request-payment")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> RequestPaymentAsync(Guid id, CancellationToken cancellationToken)
     {
         await _requestOrderPaymentUseCase.ExecuteAsync(id, cancellationToken);
@@ -104,7 +103,7 @@ public sealed class OrdersController : ControllerBase
 
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OrderResponse>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
         var order = await _getOrderByIdUseCase.ExecuteAsync(id, cancellationToken);
@@ -123,8 +122,8 @@ public sealed class OrdersController : ControllerBase
 
     [HttpPost("{id:guid}/cancel")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CancelAsync(Guid id, [FromBody] CancelOrderRequest request, CancellationToken cancellationToken)
     {
         await _cancelOrderUseCase.ExecuteAsync(new CancelOrderCommand(id, request.Reason), cancellationToken);

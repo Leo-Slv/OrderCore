@@ -10,9 +10,7 @@ namespace OrderCore.Api.Modules.Payments.Presentation.Controllers;
 /// <summary>
 /// Thin endpoint delegating to the Payments use cases (section 39) — same
 /// [ApiController]/ControllerBase shape as every other controller in the
-/// project. The use cases currently signal "not found" with a plain
-/// <see cref="InvalidOperationException"/>, same caveat as
-/// CustomersController's.
+/// project.
 /// </summary>
 [ApiController]
 [Route("payments")]
@@ -34,7 +32,7 @@ public sealed class PaymentsController : ControllerBase
 
     [HttpPost]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PaymentResponse>> CreateAsync([FromBody] CreatePaymentRequest request, CancellationToken cancellationToken)
     {
         var command = new CreatePaymentCommand(request.OrderId, request.Amount, request.Currency, request.IdempotencyKey);
@@ -51,7 +49,7 @@ public sealed class PaymentsController : ControllerBase
 
     [HttpGet("orders/{orderId:guid}")]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PaymentResponse>> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken)
     {
         var payment = await _getPaymentByOrderIdUseCase.ExecuteAsync(orderId, cancellationToken);
@@ -61,8 +59,8 @@ public sealed class PaymentsController : ControllerBase
 
     [HttpPost("{id:guid}/refunds")]
     [ProducesResponseType(typeof(RefundResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<RefundResponse>> RequestRefundAsync(
         Guid id, [FromBody] RequestRefundRequest request, CancellationToken cancellationToken)
     {

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
+using OrderCore.Api.Shared.Domain.Exceptions;
 using Xunit;
 
 namespace OrderCore.UnitTests.Inventory;
@@ -63,7 +64,7 @@ public sealed class StockItemTests
 
         var act = () => stockItem.Release(1);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]
@@ -106,7 +107,7 @@ public sealed class StockItemTests
 
         var act = () => stockItem.Adjust(-1, "damaged goods");
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
 using OrderCore.Api.Modules.Inventory.Application.DTOs;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Inventory.Application.UseCases;
 
@@ -44,7 +45,7 @@ public sealed class ReserveStockUseCase
         for (var attempt = 1; ; attempt++)
         {
             var stockItem = await _stockItems.GetByProductIdAsync(command.ProductId, cancellationToken)
-                ?? throw new InvalidOperationException($"No stock record for product '{command.ProductId}'.");
+                ?? throw new NotFoundException("stock_item_not_found", $"No stock record for product '{command.ProductId}'.");
 
             if (!stockItem.TryReserve(command.Quantity))
             {

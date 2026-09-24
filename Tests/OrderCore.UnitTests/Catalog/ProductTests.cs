@@ -2,6 +2,7 @@ using FluentAssertions;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
 using OrderCore.Api.Modules.Catalog.Domain.Enums;
 using OrderCore.Api.Modules.Catalog.Domain.Events;
+using OrderCore.Api.Shared.Domain.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 using Xunit;
 
@@ -70,7 +71,7 @@ public sealed class ProductTests
 
         var act = () => product.Publish(Now);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]
@@ -81,7 +82,7 @@ public sealed class ProductTests
 
         var act = () => product.Discontinue();
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]
@@ -103,7 +104,7 @@ public sealed class ProductTests
 
         var act = () => product.RemoveImage(Guid.NewGuid());
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]

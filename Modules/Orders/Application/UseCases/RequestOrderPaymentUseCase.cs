@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 
@@ -32,12 +33,12 @@ public sealed class RequestOrderPaymentUseCase
     public async Task<CreateOrderResult> ExecuteAsync(Guid orderId, CancellationToken cancellationToken)
     {
         var order = await _orderRepository.GetByIdAsync(orderId, cancellationToken)
-            ?? throw new InvalidOperationException($"Order '{orderId}' was not found.");
+            ?? throw new NotFoundException("order_not_found", $"Order '{orderId}' was not found.");
 
         var reserved = await _inventoryService.TryReserveOrderItemsAsync(order, cancellationToken);
         if (!reserved)
         {
-            throw new InvalidOperationException($"Could not reserve stock for order '{orderId}'.");
+            throw new ConflictException("insufficient_stock", $"Could not reserve stock for order '{orderId}'.");
         }
 
         var now = _timeProvider.GetUtcNow();

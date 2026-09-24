@@ -3,6 +3,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.Api.Modules.Catalog.Application.UseCases;
@@ -26,12 +27,12 @@ public sealed class CreateProductUseCase
     public async Task<ProductOutput> ExecuteAsync(CreateProductCommand command, CancellationToken cancellationToken)
     {
         var category = await _categories.GetByIdAsync(command.CategoryId, cancellationToken)
-            ?? throw new InvalidOperationException($"Category '{command.CategoryId}' was not found.");
+            ?? throw new NotFoundException("category_not_found", $"Category '{command.CategoryId}' was not found.");
 
         var existing = await _products.GetBySkuAsync(command.Sku, cancellationToken);
         if (existing is not null)
         {
-            throw new InvalidOperationException($"A product with SKU '{command.Sku}' already exists.");
+            throw new ConflictException("sku_already_exists", $"A product with SKU '{command.Sku}' already exists.");
         }
 
         var now = _timeProvider.GetUtcNow();

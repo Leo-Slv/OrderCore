@@ -2,6 +2,7 @@ using FluentAssertions;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Application.UseCases;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 using Xunit;
 
@@ -41,7 +42,7 @@ public sealed class CreateProductUseCaseTests
         var act = () => useCase.ExecuteAsync(
             new CreateProductCommand("SKU-1", "Wireless Mouse", Guid.NewGuid(), 99.9m, "BRL"), CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<NotFoundException>().Where(e => e.Code == "category_not_found");
     }
 
     [Fact]
@@ -54,6 +55,6 @@ public sealed class CreateProductUseCaseTests
         var act = () => useCase.ExecuteAsync(
             new CreateProductCommand("SKU-1", "Another Mouse", categoryId, 50m, "BRL"), CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<ConflictException>().Where(e => e.Code == "sku_already_exists");
     }
 }

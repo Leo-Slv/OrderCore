@@ -28,7 +28,7 @@ public sealed class AuditLogsController : ControllerBase
 
     [HttpGet]
     [ProducesResponseType(typeof(PagedResponse<AuditLogResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResponse<AuditLogResponse>>> ListAsync(
         [FromQuery] ListAuditLogsRequest request,
         CancellationToken cancellationToken)

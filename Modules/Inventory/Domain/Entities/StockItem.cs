@@ -1,4 +1,5 @@
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Inventory.Domain.Entities;
 
@@ -94,7 +95,7 @@ public sealed class StockItem : AggregateRoot<Guid>
 
         if (quantity > QuantityReserved)
         {
-            throw new InvalidOperationException("Cannot release more than is currently reserved.");
+            throw new DomainRuleViolationException("invalid_stock_operation", "Cannot release more than is currently reserved.");
         }
 
         QuantityReserved -= quantity;
@@ -107,7 +108,7 @@ public sealed class StockItem : AggregateRoot<Guid>
 
         if (quantity > QuantityReserved)
         {
-            throw new InvalidOperationException("Cannot consume more than is currently reserved.");
+            throw new DomainRuleViolationException("invalid_stock_operation", "Cannot consume more than is currently reserved.");
         }
 
         QuantityReserved -= quantity;
@@ -130,7 +131,7 @@ public sealed class StockItem : AggregateRoot<Guid>
         var newQuantityOnHand = QuantityOnHand + quantity;
         if (newQuantityOnHand < QuantityReserved)
         {
-            throw new InvalidOperationException("Adjustment would leave fewer units on hand than are currently reserved.");
+            throw new DomainRuleViolationException("stock_below_reserved", "Adjustment would leave fewer units on hand than are currently reserved.");
         }
 
         QuantityOnHand = newQuantityOnHand;

@@ -2,6 +2,7 @@ using FluentAssertions;
 using OrderCore.Api.Modules.Customers.Application.DTOs;
 using OrderCore.Api.Modules.Customers.Application.UseCases;
 using OrderCore.Api.Modules.Customers.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 using Xunit;
 
@@ -35,6 +36,6 @@ public sealed class AddCustomerAddressUseCaseTests
 
         var act = () => useCase.ExecuteAsync(command, CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<NotFoundException>().Where(e => e.Code == "customer_not_found");
     }
 }

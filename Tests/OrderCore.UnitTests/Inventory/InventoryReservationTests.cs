@@ -2,6 +2,7 @@ using FluentAssertions;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Domain.Enums;
 using OrderCore.Api.Modules.Inventory.Domain.Events;
+using OrderCore.Api.Shared.Domain.Exceptions;
 using Xunit;
 
 namespace OrderCore.UnitTests.Inventory;
@@ -45,7 +46,7 @@ public sealed class InventoryReservationTests
 
         var act = () => reservation.Release(Now);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]
@@ -69,7 +70,7 @@ public sealed class InventoryReservationTests
 
         var act = () => reservation.Consume(Now);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.Api.Modules.Catalog.Application.UseCases;
@@ -21,7 +22,7 @@ public sealed class CreateCategoryUseCase
         if (command.ParentCategoryId is { } parentCategoryId)
         {
             _ = await _categories.GetByIdAsync(parentCategoryId, cancellationToken)
-                ?? throw new InvalidOperationException($"Parent category '{parentCategoryId}' was not found.");
+                ?? throw new NotFoundException("category_not_found", $"Parent category '{parentCategoryId}' was not found.");
         }
 
         var now = _timeProvider.GetUtcNow();

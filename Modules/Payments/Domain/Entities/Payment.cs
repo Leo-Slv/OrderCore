@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Domain.Entities;
 
@@ -121,7 +122,7 @@ public sealed class Payment : AggregateRoot<Guid>
     {
         if (Status is PaymentStatus.Captured or PaymentStatus.Refunded)
         {
-            throw new InvalidOperationException($"Cannot fail a payment in status '{Status}'.");
+            throw new DomainRuleViolationException("invalid_payment_state", $"Cannot fail a payment in status '{Status}'.");
         }
 
         Status = PaymentStatus.Failed;
@@ -155,7 +156,7 @@ public sealed class Payment : AggregateRoot<Guid>
         var alreadyRefunded = _refunds.Where(r => r.Status != RefundStatus.Failed).Sum(r => r.Amount);
         if (amount > Amount - alreadyRefunded)
         {
-            throw new InvalidOperationException("Refund amount exceeds the payment's refundable balance.");
+            throw new DomainRuleViolationException("refund_exceeds_balance", "Refund amount exceeds the payment's refundable balance.");
         }
 
         var refund = global::OrderCore.Api.Modules.Payments.Domain.Entities.Refund.Create(amount, reason, now);
@@ -168,7 +169,8 @@ public sealed class Payment : AggregateRoot<Guid>
     {
         if (Status != expected)
         {
-            throw new InvalidOperationException(
+            throw new DomainRuleViolationException(
+                "invalid_payment_state",
                 $"Cannot transition payment '{Id}' from '{Status}' as if it were '{expected}'.");
         }
     }

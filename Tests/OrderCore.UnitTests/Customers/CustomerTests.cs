@@ -1,6 +1,7 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Customers.Domain.Entities;
 using OrderCore.Api.Modules.Customers.Domain.Events;
+using OrderCore.Api.Shared.Domain.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 using Xunit;
 
@@ -57,7 +58,7 @@ public sealed class CustomerTests
 
         var act = () => customer.RemoveAddress(Guid.NewGuid());
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<DomainRuleViolationException>();
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 
@@ -29,7 +30,7 @@ public sealed class MarkOrderPaymentFailedUseCase
     public async Task ExecuteAsync(Guid orderId, string reason, CancellationToken cancellationToken)
     {
         var order = await _orderRepository.GetByIdAsync(orderId, cancellationToken)
-            ?? throw new InvalidOperationException($"Order '{orderId}' was not found.");
+            ?? throw new NotFoundException("order_not_found", $"Order '{orderId}' was not found.");
 
         order.FailPayment(reason, _timeProvider.GetUtcNow());
         await _inventoryService.ReleaseReservationsAsync(orderId, cancellationToken);

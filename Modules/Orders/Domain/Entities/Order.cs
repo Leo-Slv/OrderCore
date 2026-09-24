@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Orders.Domain.Enums;
 using OrderCore.Api.Modules.Orders.Domain.Events;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.Api.Modules.Orders.Domain.Entities;
@@ -132,7 +133,7 @@ public sealed class Order : AggregateRoot<Guid>
         EnsureStatus(OrderStatus.Created, $"Cannot remove items from an order in status '{Status}'.");
 
         var existing = _items.FirstOrDefault(i => i.ProductId == productId)
-            ?? throw new InvalidOperationException($"Product '{productId}' is not part of this order.");
+            ?? throw new DomainRuleViolationException("order_item_not_found", $"Product '{productId}' is not part of this order.");
 
         _items.Remove(existing);
         IncrementVersion();
@@ -167,7 +168,7 @@ public sealed class Order : AggregateRoot<Guid>
 
     private OrderItem FindItem(Guid productId) =>
         _items.FirstOrDefault(i => i.ProductId == productId)
-            ?? throw new InvalidOperationException($"Product '{productId}' is not part of this order.");
+            ?? throw new DomainRuleViolationException("order_item_not_found", $"Product '{productId}' is not part of this order.");
 
     public void SetAddresses(Address shippingAddress, Address billingAddress)
     {
@@ -228,7 +229,7 @@ public sealed class Order : AggregateRoot<Guid>
 
         if (_items.Count == 0)
         {
-            throw new InvalidOperationException("Cannot request payment for an order with no items.");
+            throw new DomainRuleViolationException("order_without_items", "Cannot request payment for an order with no items.");
         }
 
         Status = OrderStatus.PendingPayment;
@@ -289,7 +290,7 @@ public sealed class Order : AggregateRoot<Guid>
     {
         if (Status is OrderStatus.Delivered or OrderStatus.Shipped or OrderStatus.Cancelled)
         {
-            throw new InvalidOperationException($"Cannot cancel an order in status '{Status}'.");
+            throw new DomainRuleViolationException("invalid_order_state", $"Cannot cancel an order in status '{Status}'.");
         }
 
         Status = OrderStatus.Cancelled;
@@ -302,7 +303,7 @@ public sealed class Order : AggregateRoot<Guid>
     {
         if (Status != expected)
         {
-            throw new InvalidOperationException(errorMessage);
+            throw new DomainRuleViolationException("invalid_order_state", errorMessage);
         }
     }
 

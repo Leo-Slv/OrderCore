@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Customers.Application.Contracts;
 using OrderCore.Api.Modules.Customers.Application.DTOs;
 using OrderCore.Api.Modules.Customers.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Customers.Application.UseCases;
 
@@ -18,7 +19,7 @@ public sealed class AddCustomerAddressUseCase
     public async Task<Guid> ExecuteAsync(AddCustomerAddressCommand command, CancellationToken cancellationToken)
     {
         var customer = await _customers.GetByIdAsync(command.CustomerId, cancellationToken)
-            ?? throw new InvalidOperationException($"Customer '{command.CustomerId}' was not found.");
+            ?? throw new NotFoundException("customer_not_found", $"Customer '{command.CustomerId}' was not found.");
 
         var address = CustomerAddress.Create(
             command.Label, command.RecipientName, command.Phone, command.Address, _timeProvider.GetUtcNow());

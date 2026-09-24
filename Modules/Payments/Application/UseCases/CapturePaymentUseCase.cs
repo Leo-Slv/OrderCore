@@ -3,6 +3,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
@@ -30,13 +31,13 @@ public sealed class CapturePaymentUseCase
     public async Task<CreatePaymentResult> ExecuteAsync(Guid paymentId, CancellationToken cancellationToken)
     {
         var payment = await _payments.GetByIdAsync(paymentId, cancellationToken)
-            ?? throw new InvalidOperationException($"Payment '{paymentId}' was not found.");
+            ?? throw new NotFoundException("payment_not_found", $"Payment '{paymentId}' was not found.");
 
         var result = await _provider.CaptureAsync(payment, cancellationToken);
 
         if (!result.Succeeded)
         {
-            throw new InvalidOperationException($"Capture failed for payment '{paymentId}': {result.FailureReason}.");
+            throw new ConflictException("payment_capture_failed", $"Capture failed for payment '{paymentId}': {result.FailureReason}.");
         }
 
         payment.Capture(_timeProvider.GetUtcNow());

@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Customers.Domain.Events;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Customers.Domain.Entities;
 
@@ -215,9 +216,9 @@ public sealed class Customer : AggregateRoot<Guid>
 
     private CustomerAddress FindAddress(Guid addressId) =>
         _addresses.FirstOrDefault(a => a.Id == addressId)
-            ?? throw new InvalidOperationException($"Address '{addressId}' does not belong to this customer.");
+            ?? throw new DomainRuleViolationException("customer_address_not_found", $"Address '{addressId}' does not belong to this customer.");
 
     private CustomerPaymentMethod FindPaymentMethod(Guid paymentMethodId) =>
         _paymentMethods.FirstOrDefault(m => m.Id == paymentMethodId)
-            ?? throw new InvalidOperationException($"Payment method '{paymentMethodId}' does not belong to this customer.");
+            ?? throw new DomainRuleViolationException("customer_payment_method_not_found", $"Payment method '{paymentMethodId}' does not belong to this customer.");
 }

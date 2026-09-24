@@ -1,6 +1,7 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Customers.Application.DTOs;
 using OrderCore.Api.Modules.Customers.Application.UseCases;
+using OrderCore.Api.Shared.Application.Exceptions;
 using Xunit;
 
 namespace OrderCore.UnitTests.Customers;
@@ -30,6 +31,6 @@ public sealed class RegisterCustomerUseCaseTests
 
         var act = () => useCase.ExecuteAsync(Command(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<ConflictException>().Where(e => e.Code == "email_already_registered");
     }
 }

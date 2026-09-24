@@ -3,6 +3,8 @@ using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 
@@ -40,7 +42,7 @@ public sealed class CreateOrderHandler
     {
         if (command.Items.Count == 0)
         {
-            throw new InvalidOperationException("An order must contain at least one item.");
+            throw new DomainRuleViolationException("order_without_items", "An order must contain at least one item.");
         }
 
         var now = _timeProvider.GetUtcNow();
@@ -50,7 +52,7 @@ public sealed class CreateOrderHandler
         foreach (var item in command.Items)
         {
             var product = await _productCatalog.GetAsync(item.ProductId, cancellationToken)
-                ?? throw new InvalidOperationException($"Product '{item.ProductId}' was not found.");
+                ?? throw new NotFoundException("product_not_found", $"Product '{item.ProductId}' was not found.");
 
             var primaryImageUrl = product.Images.FirstOrDefault(i => i.IsPrimary)?.Url ?? product.Images.FirstOrDefault()?.Url;
 

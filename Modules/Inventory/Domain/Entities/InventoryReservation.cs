@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Inventory.Domain.Enums;
 using OrderCore.Api.Modules.Inventory.Domain.Events;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Inventory.Domain.Entities;
 
@@ -118,7 +119,8 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
     {
         if (Status != expected)
         {
-            throw new InvalidOperationException(
+            throw new DomainRuleViolationException(
+                "invalid_reservation_state",
                 $"Cannot transition reservation '{Id}' from '{Status}' as if it were '{expected}'.");
         }
     }

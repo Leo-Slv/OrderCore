@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
@@ -36,7 +37,7 @@ public sealed class AuthorizePaymentUseCase
     public async Task<CreatePaymentResult> ExecuteAsync(Guid paymentId, CancellationToken cancellationToken)
     {
         var payment = await _payments.GetByIdAsync(paymentId, cancellationToken)
-            ?? throw new InvalidOperationException($"Payment '{paymentId}' was not found.");
+            ?? throw new NotFoundException("payment_not_found", $"Payment '{paymentId}' was not found.");
 
         if (payment.Status == PaymentStatus.Pending)
         {

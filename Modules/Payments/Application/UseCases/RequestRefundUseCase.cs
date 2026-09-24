@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
+using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
@@ -38,7 +39,7 @@ public sealed class RequestRefundUseCase
     public async Task<Domain.Entities.Refund> ExecuteAsync(RequestRefundCommand command, CancellationToken cancellationToken)
     {
         var payment = await _payments.GetByIdAsync(command.PaymentId, cancellationToken)
-            ?? throw new InvalidOperationException($"Payment '{command.PaymentId}' was not found.");
+            ?? throw new NotFoundException("payment_not_found", $"Payment '{command.PaymentId}' was not found.");
 
         var now = _timeProvider.GetUtcNow();
         var refund = payment.RequestRefund(command.Amount, command.Reason, now);

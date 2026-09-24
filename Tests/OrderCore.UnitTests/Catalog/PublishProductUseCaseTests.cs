@@ -2,6 +2,7 @@ using FluentAssertions;
 using OrderCore.Api.Modules.Catalog.Application.UseCases;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
 using OrderCore.Api.Modules.Catalog.Domain.Enums;
+using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 using Xunit;
 
@@ -29,6 +30,6 @@ public sealed class PublishProductUseCaseTests
 
         var act = () => useCase.ExecuteAsync(Guid.NewGuid(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<NotFoundException>().Where(e => e.Code == "product_not_found");
     }
 }

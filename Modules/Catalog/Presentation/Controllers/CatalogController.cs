@@ -17,10 +17,6 @@ namespace OrderCore.Api.Modules.Catalog.Presentation.Controllers;
 /// CatalogController never wires it to an endpoint, so it stays reachable
 /// only from other Application-layer code until the diagram says
 /// otherwise.
-///
-/// The use cases currently signal "not found" / "duplicate" with a plain
-/// <see cref="InvalidOperationException"/>, same caveat as
-/// CustomersController's.
 /// </summary>
 [ApiController]
 [Route("catalog")]
@@ -54,7 +50,9 @@ public sealed class CatalogController : ControllerBase
 
     [HttpPost("products")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ProductResponse>> CreateProductAsync(
         [FromBody] CreateProductRequest request,
         CancellationToken cancellationToken)
@@ -67,7 +65,8 @@ public sealed class CatalogController : ControllerBase
 
     [HttpPut("products/{id:guid}")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ProductResponse>> UpdateProductAsync(
         Guid id,
         [FromBody] UpdateProductRequest request,
@@ -80,7 +79,8 @@ public sealed class CatalogController : ControllerBase
 
     [HttpPost("products/{id:guid}/publish")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PublishProductAsync(Guid id, CancellationToken cancellationToken)
     {
         await _publishProductUseCase.ExecuteAsync(id, cancellationToken);
@@ -90,7 +90,7 @@ public sealed class CatalogController : ControllerBase
 
     [HttpGet("products/{id:guid}")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProductResponse>> GetProductByIdAsync(Guid id, CancellationToken cancellationToken)
     {
         var output = await _getProductByIdUseCase.ExecuteAsync(id, cancellationToken);
@@ -111,7 +111,8 @@ public sealed class CatalogController : ControllerBase
 
     [HttpPost("categories")]
     [ProducesResponseType(typeof(CategoryResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<CategoryResponse>> CreateCategoryAsync(
         [FromBody] CreateCategoryRequest request,
         CancellationToken cancellationToken)

@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Catalog.Domain.Enums;
 using OrderCore.Api.Modules.Catalog.Domain.Events;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.Api.Modules.Catalog.Domain.Entities;
@@ -144,7 +145,7 @@ public sealed class Product : AggregateRoot<Guid>
     {
         if (Status != ProductStatus.Draft)
         {
-            throw new InvalidOperationException($"Cannot publish a product in status '{Status}'.");
+            throw new DomainRuleViolationException("invalid_product_state", $"Cannot publish a product in status '{Status}'.");
         }
 
         Status = ProductStatus.Active;
@@ -157,7 +158,7 @@ public sealed class Product : AggregateRoot<Guid>
     {
         if (Status == ProductStatus.Discontinued)
         {
-            throw new InvalidOperationException("Product is already discontinued.");
+            throw new DomainRuleViolationException("invalid_product_state", "Product is already discontinued.");
         }
 
         Status = ProductStatus.Discontinued;
@@ -188,7 +189,7 @@ public sealed class Product : AggregateRoot<Guid>
     public void RemoveImage(Guid imageId)
     {
         var image = _images.FirstOrDefault(i => i.Id == imageId)
-            ?? throw new InvalidOperationException($"Image '{imageId}' does not belong to this product.");
+            ?? throw new DomainRuleViolationException("product_image_not_found", $"Image '{imageId}' does not belong to this product.");
 
         _images.Remove(image);
         IncrementVersion();
@@ -199,7 +200,7 @@ public sealed class Product : AggregateRoot<Guid>
         for (var index = 0; index < orderedImageIds.Count; index++)
         {
             var image = _images.FirstOrDefault(i => i.Id == orderedImageIds[index])
-                ?? throw new InvalidOperationException($"Image '{orderedImageIds[index]}' does not belong to this product.");
+                ?? throw new DomainRuleViolationException("product_image_not_found", $"Image '{orderedImageIds[index]}' does not belong to this product.");
 
             image.SetDisplayOrder(index);
         }
@@ -221,7 +222,7 @@ public sealed class Product : AggregateRoot<Guid>
     public void RemoveVariant(Guid variantId)
     {
         var variant = _variants.FirstOrDefault(v => v.Id == variantId)
-            ?? throw new InvalidOperationException($"Variant '{variantId}' does not belong to this product.");
+            ?? throw new DomainRuleViolationException("product_variant_not_found", $"Variant '{variantId}' does not belong to this product.");
 
         _variants.Remove(variant);
         IncrementVersion();

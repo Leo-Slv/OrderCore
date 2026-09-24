@@ -1,6 +1,7 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Inventory.Application.UseCases;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
+using OrderCore.Api.Shared.Application.Exceptions;
 using Xunit;
 
 namespace OrderCore.UnitTests.Inventory;
@@ -27,6 +28,6 @@ public sealed class AdjustStockUseCaseTests
 
         var act = () => useCase.ExecuteAsync(Guid.NewGuid(), 1, "reason", CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<NotFoundException>().Where(e => e.Code == "stock_item_not_found");
     }
 }
