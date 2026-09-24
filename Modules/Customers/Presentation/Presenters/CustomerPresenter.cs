@@ -38,7 +38,17 @@ public static class CustomerPresenter
     {
         Id = address.Id,
         Label = address.Label,
+        RecipientName = address.RecipientName,
+        Phone = address.Phone,
+        Street = address.Address.Street,
+        Number = address.Address.Number,
+        Complement = address.Address.Complement,
+        Neighborhood = address.Address.Neighborhood,
         City = address.Address.City,
+        State = address.Address.State,
+        PostalCode = address.Address.PostalCode,
+        Country = address.Address.Country,
         IsDefaultShipping = address.IsDefaultShipping,
+        IsDefaultBilling = address.IsDefaultBilling,
     };
 }
