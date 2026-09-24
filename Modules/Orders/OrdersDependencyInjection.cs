@@ -4,8 +4,10 @@ using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Domain.Events;
 using OrderCore.Api.Modules.Orders.Infrastructure.Adapters;
 using OrderCore.Api.Modules.Orders.Infrastructure.EventHandlers;
+using OrderCore.Api.Modules.Orders.Infrastructure.IntegrationEventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
 using OrderCore.Api.Shared.Application.Abstractions;
 
 namespace OrderCore.Api.Modules.Orders;
@@ -28,14 +30,19 @@ public static class OrdersDependencyInjection
         services.AddScoped<IOrderNumberGenerator, SequentialOrderNumberGenerator>();
         services.AddScoped<IProductCatalog, ProductCatalogAdapter>();
         services.AddScoped<IInventoryService, InventoryServiceAdapter>();
+        services.AddScoped<IPaymentGateway, PaymentGatewayAdapter>();
 
         services.AddScoped<IDomainEventHandler<OrderCreated>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderConfirmed>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderCancelled>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderPaymentFailed>, OrderStatusHistoryProjector>();
 
+        services.AddScoped<IDomainEventHandler<PaymentAuthorized>, PaymentAuthorizedIntegrationEventHandler>();
+        services.AddScoped<IDomainEventHandler<PaymentFailed>, PaymentFailedIntegrationEventHandler>();
+
         services.AddScoped<CreateOrderHandler>();
         services.AddScoped<SetOrderAddressesUseCase>();
+        services.AddScoped<RequestOrderPaymentUseCase>();
         services.AddScoped<ConfirmOrderUseCase>();
         services.AddScoped<MarkOrderPaymentFailedUseCase>();
         services.AddScoped<CancelOrderUseCase>();
