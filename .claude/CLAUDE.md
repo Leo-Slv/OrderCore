@@ -258,6 +258,13 @@ endpoints, place them under the owning module's
 `Presentation/Controllers` (or an endpoint-mapping equivalent), not directly
 in `Program.cs`.
 
+The `api` prefix is applied globally by `ApiRoutePrefixConvention`
+(`Shared/Presentation/Conventions/ApiRoutePrefixConvention.cs`, registered
+via `AddControllers(options => options.Conventions.Add(...))` in
+`Program.cs`) — a controller's own `[Route(...)]` must declare only its own
+segment (e.g. `[Route("orders")]`), never `[Route("api/orders")]`; the
+convention combines it into `api/orders` automatically.
+
 Do not add local try/catch blocks for normal application/domain errors once
 a shared exception-handling convention exists — introduce and reuse one
 instead of ad hoc handling per endpoint.
