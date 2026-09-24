@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
@@ -9,12 +11,15 @@ public sealed class CreateProductUseCase
 {
     private readonly IProductRepository _products;
     private readonly ICategoryRepository _categories;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public CreateProductUseCase(IProductRepository products, ICategoryRepository categories, TimeProvider timeProvider)
+    public CreateProductUseCase(
+        IProductRepository products, ICategoryRepository categories, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _products = products;
         _categories = categories;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -35,6 +40,14 @@ public sealed class CreateProductUseCase
 
         await _products.AddAsync(product, cancellationToken);
         await _products.SaveChangesAsync(cancellationToken);
+
+        await _auditLog.RecordAsync(
+            AuditLogActionNames.ProductCreated,
+            "Product",
+            product.Id,
+            new Dictionary<string, string?> { ["sku"] = product.Sku },
+            userId: null,
+            cancellationToken);
 
         return ProductOutput.From(product);
     }

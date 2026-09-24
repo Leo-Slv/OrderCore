@@ -22,7 +22,7 @@ public sealed class CreateProductUseCaseTests
     public async Task ExecuteAsync_creates_a_product_with_a_slug_derived_from_the_name()
     {
         var (products, categories, categoryId) = await SetupAsync();
-        var useCase = new CreateProductUseCase(products, categories, TimeProvider.System);
+        var useCase = new CreateProductUseCase(products, categories, new FakeAuditLogService(), TimeProvider.System);
 
         var output = await useCase.ExecuteAsync(
             new CreateProductCommand("SKU-1", "Wireless Mouse", categoryId, 99.9m, "BRL"), CancellationToken.None);
@@ -36,7 +36,7 @@ public sealed class CreateProductUseCaseTests
     public async Task ExecuteAsync_rejects_an_unknown_category()
     {
         var products = new FakeProductRepository();
-        var useCase = new CreateProductUseCase(products, new FakeCategoryRepository(), TimeProvider.System);
+        var useCase = new CreateProductUseCase(products, new FakeCategoryRepository(), new FakeAuditLogService(), TimeProvider.System);
 
         var act = () => useCase.ExecuteAsync(
             new CreateProductCommand("SKU-1", "Wireless Mouse", Guid.NewGuid(), 99.9m, "BRL"), CancellationToken.None);
@@ -48,7 +48,7 @@ public sealed class CreateProductUseCaseTests
     public async Task ExecuteAsync_rejects_a_duplicate_sku()
     {
         var (products, categories, categoryId) = await SetupAsync();
-        var useCase = new CreateProductUseCase(products, categories, TimeProvider.System);
+        var useCase = new CreateProductUseCase(products, categories, new FakeAuditLogService(), TimeProvider.System);
         await useCase.ExecuteAsync(new CreateProductCommand("SKU-1", "Wireless Mouse", categoryId, 99.9m, "BRL"), CancellationToken.None);
 
         var act = () => useCase.ExecuteAsync(
