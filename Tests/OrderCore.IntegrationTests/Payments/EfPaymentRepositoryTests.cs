@@ -169,4 +169,37 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
             reloaded!.Method.Should().Be(PaymentMethod.Card);
         }
     }
+
+    [Fact]
+    public async Task Requesting_a_refund_on_an_already_saved_payment_inserts_it()
+    {
+        var orderId = Guid.NewGuid();
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfPaymentRepository(dbContext);
+            var payment = Payment.Create(orderId, 100m, "BRL", PaymentMethod.Card, "idem-refund-later", "Fake", null, DateTimeOffset.UtcNow);
+            payment.MarkProcessing();
+            payment.Authorize("provider-ref", DateTimeOffset.UtcNow);
+            payment.Capture(DateTimeOffset.UtcNow);
+            await repository.AddAsync(payment, CancellationToken.None);
+            await repository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfPaymentRepository(dbContext);
+            var payment = await repository.GetByOrderIdAsync(orderId, CancellationToken.None);
+            payment!.RequestRefund(40m, "customer request", DateTimeOffset.UtcNow);
+
+            await repository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var reloaded = await new EfPaymentRepository(dbContext).GetByOrderIdAsync(orderId, CancellationToken.None);
+
+            reloaded!.Refunds.Should().ContainSingle(r => r.Amount == 40m);
+        }
+    }
 }

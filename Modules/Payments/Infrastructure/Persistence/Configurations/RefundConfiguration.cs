@@ -12,6 +12,12 @@ public sealed class RefundConfiguration : IEntityTypeConfiguration<RefundPersist
 
         builder.HasKey(r => r.Id);
 
+        // The id is assigned by the domain, not the database. Without this, EF
+        // Core treats a new child that already has a key, found while saving
+        // its parent, as an existing row and runs an UPDATE (0 rows, concurrency
+        // exception) instead of an INSERT.
+        builder.Property(r => r.Id).ValueGeneratedNever();
+
         builder.Property(r => r.Status).HasMaxLength(20).IsRequired();
         builder.Property(r => r.Amount).HasPrecision(18, 2);
 

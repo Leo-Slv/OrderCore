@@ -259,4 +259,32 @@ public sealed class EfProductRepositoryTests : IAsyncLifetime
         slugs[oldest].Should().Be("mouse");
         slugs[newer].Should().Be("mouse-bbbbbbbb");
     }
+
+    [Fact]
+    public async Task Adding_an_image_and_variant_to_an_already_saved_product_inserts_them()
+    {
+        Guid productId;
+        await using (var dbContext = CreateDbContext())
+        {
+            productId = await SeedAsync(dbContext, "SKU-A", "Wireless Mouse", 10m);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfProductRepository(dbContext);
+            var product = await repository.GetByIdAsync(productId, CancellationToken.None);
+            product!.AddImage("https://example.com/mouse.png", "Mouse", isPrimary: true, DateTimeOffset.UtcNow);
+            product.AddVariant("SKU-A-BLK", "Black", "{\"color\":\"black\"}", 0m, DateTimeOffset.UtcNow);
+
+            await repository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var reloaded = await new EfProductRepository(dbContext).GetByIdAsync(productId, CancellationToken.None);
+
+            reloaded!.Images.Should().ContainSingle();
+            reloaded.Variants.Should().ContainSingle();
+        }
+    }
 }

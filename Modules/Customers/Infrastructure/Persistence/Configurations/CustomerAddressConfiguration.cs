@@ -12,6 +12,12 @@ public sealed class CustomerAddressConfiguration : IEntityTypeConfiguration<Cust
 
         builder.HasKey(a => a.Id);
 
+        // The id is assigned by the domain, not the database. Without this, EF
+        // Core treats a new child that already has a key, found while saving
+        // its parent, as an existing row and runs an UPDATE (0 rows, concurrency
+        // exception) instead of an INSERT.
+        builder.Property(a => a.Id).ValueGeneratedNever();
+
         builder.Property(a => a.Label).HasMaxLength(100).IsRequired();
         builder.Property(a => a.RecipientName).HasMaxLength(200).IsRequired();
         builder.Property(a => a.Phone).HasMaxLength(30);

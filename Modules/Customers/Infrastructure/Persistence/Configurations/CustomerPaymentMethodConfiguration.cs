@@ -12,6 +12,12 @@ public sealed class CustomerPaymentMethodConfiguration : IEntityTypeConfiguratio
 
         builder.HasKey(m => m.Id);
 
+        // The id is assigned by the domain, not the database. Without this, EF
+        // Core treats a new child that already has a key, found while saving
+        // its parent, as an existing row and runs an UPDATE (0 rows, concurrency
+        // exception) instead of an INSERT.
+        builder.Property(m => m.Id).ValueGeneratedNever();
+
         builder.Property(m => m.Provider).HasMaxLength(50).IsRequired();
         builder.Property(m => m.ProviderCustomerReference).HasMaxLength(200).IsRequired();
         builder.Property(m => m.Brand).HasMaxLength(50).IsRequired();

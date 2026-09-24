@@ -113,4 +113,35 @@ public sealed class EfCustomerRepositoryTests : IAsyncLifetime
 
         result.Should().BeNull();
     }
+
+    [Fact]
+    public async Task Adding_an_address_to_an_already_saved_customer_inserts_it()
+    {
+        var customerId = Guid.Empty;
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfCustomerRepository(dbContext);
+            var customer = Customer.Create("Jane Doe", "jane@example.com", "hashed-password", DateTimeOffset.UtcNow);
+            await repository.AddAsync(customer, CancellationToken.None);
+            await repository.SaveChangesAsync(CancellationToken.None);
+            customerId = customer.Id;
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfCustomerRepository(dbContext);
+            var customer = await repository.GetByIdAsync(customerId, CancellationToken.None);
+            customer!.AddAddress(CustomerAddress.Create("Work", "Jane Doe", null, SomeAddress(), DateTimeOffset.UtcNow));
+
+            await repository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var reloaded = await new EfCustomerRepository(dbContext).GetByIdAsync(customerId, CancellationToken.None);
+
+            reloaded!.Addresses.Should().ContainSingle(a => a.Label == "Work");
+        }
+    }
 }

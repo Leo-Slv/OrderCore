@@ -12,6 +12,12 @@ public sealed class ProductImageConfiguration : IEntityTypeConfiguration<Product
 
         builder.HasKey(i => i.Id);
 
+        // The id is assigned by the domain, not the database. Without this, EF
+        // Core treats a new child that already has a key, found while saving
+        // its parent, as an existing row and runs an UPDATE (0 rows, concurrency
+        // exception) instead of an INSERT.
+        builder.Property(i => i.Id).ValueGeneratedNever();
+
         builder.Property(i => i.Url).HasMaxLength(2000).IsRequired();
         builder.Property(i => i.AltText).HasMaxLength(200);
 
