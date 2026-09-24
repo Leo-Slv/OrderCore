@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
@@ -17,14 +19,20 @@ public sealed class CreateOrderHandler
     private readonly IOrderRepository _orderRepository;
     private readonly IProductCatalog _productCatalog;
     private readonly IOrderNumberGenerator _orderNumbers;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
     public CreateOrderHandler(
-        IOrderRepository orderRepository, IProductCatalog productCatalog, IOrderNumberGenerator orderNumbers, TimeProvider timeProvider)
+        IOrderRepository orderRepository,
+        IProductCatalog productCatalog,
+        IOrderNumberGenerator orderNumbers,
+        IAuditLogService auditLog,
+        TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _productCatalog = productCatalog;
         _orderNumbers = orderNumbers;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -51,6 +59,14 @@ public sealed class CreateOrderHandler
 
         await _orderRepository.AddAsync(order, cancellationToken);
         await _orderRepository.SaveChangesAsync(cancellationToken);
+
+        await _auditLog.RecordAsync(
+            AuditLogActionNames.OrderCreated,
+            "Order",
+            order.Id,
+            new Dictionary<string, string?> { ["customerId"] = order.CustomerId.ToString(), ["totalAmount"] = order.TotalAmount.ToString() },
+            userId: null,
+            cancellationToken);
 
         return new CreateOrderResult(order.Id, order.TotalAmount, order.Status.ToString());
     }

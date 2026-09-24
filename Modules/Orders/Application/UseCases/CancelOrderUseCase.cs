@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 
@@ -17,12 +19,15 @@ public sealed class CancelOrderUseCase
 {
     private readonly IOrderRepository _orderRepository;
     private readonly IInventoryService _inventoryService;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public CancelOrderUseCase(IOrderRepository orderRepository, IInventoryService inventoryService, TimeProvider timeProvider)
+    public CancelOrderUseCase(
+        IOrderRepository orderRepository, IInventoryService inventoryService, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _inventoryService = inventoryService;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -34,5 +39,13 @@ public sealed class CancelOrderUseCase
         order.Cancel(command.Reason, _timeProvider.GetUtcNow());
         await _inventoryService.ReleaseReservationsAsync(command.OrderId, cancellationToken);
         await _orderRepository.SaveChangesAsync(cancellationToken);
+
+        await _auditLog.RecordAsync(
+            AuditLogActionNames.OrderCancelled,
+            "Order",
+            command.OrderId,
+            new Dictionary<string, string?> { ["reason"] = command.Reason },
+            userId: null,
+            cancellationToken);
     }
 }

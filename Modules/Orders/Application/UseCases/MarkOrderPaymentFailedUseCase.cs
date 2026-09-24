@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
@@ -12,12 +14,15 @@ public sealed class MarkOrderPaymentFailedUseCase
 {
     private readonly IOrderRepository _orderRepository;
     private readonly IInventoryService _inventoryService;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public MarkOrderPaymentFailedUseCase(IOrderRepository orderRepository, IInventoryService inventoryService, TimeProvider timeProvider)
+    public MarkOrderPaymentFailedUseCase(
+        IOrderRepository orderRepository, IInventoryService inventoryService, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _inventoryService = inventoryService;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -29,5 +34,13 @@ public sealed class MarkOrderPaymentFailedUseCase
         order.FailPayment(reason, _timeProvider.GetUtcNow());
         await _inventoryService.ReleaseReservationsAsync(orderId, cancellationToken);
         await _orderRepository.SaveChangesAsync(cancellationToken);
+
+        await _auditLog.RecordAsync(
+            AuditLogActionNames.OrderPaymentFailed,
+            "Order",
+            orderId,
+            new Dictionary<string, string?> { ["reason"] = reason },
+            userId: null,
+            cancellationToken);
     }
 }

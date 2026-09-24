@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Repositories;
@@ -123,16 +124,16 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
             var inventoryUnitOfWork = new InventoryUnitOfWork(inventoryDb, stockRepository, reservationRepository, NoOpDispatcher());
             var inventoryService = new InventoryServiceAdapter(
                 new Api.Modules.Inventory.Application.UseCases.ReserveStockUseCase(
-                    stockRepository, reservationRepository, inventoryUnitOfWork, TimeProvider.System),
+                    stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
                 new Api.Modules.Inventory.Application.UseCases.ReleaseReservationUseCase(
-                    stockRepository, reservationRepository, inventoryUnitOfWork, TimeProvider.System),
+                    stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
                 new Api.Modules.Inventory.Application.UseCases.ConsumeReservationUseCase(
-                    stockRepository, reservationRepository, inventoryUnitOfWork, TimeProvider.System),
+                    stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
                 reservationRepository);
 
             var orderRepository = new EfOrderRepository(ordersDb, OrdersDispatcher(ordersDb));
             var orderNumbers = new SequentialOrderNumberGenerator(ordersDb, TimeProvider.System);
-            var createOrder = new CreateOrderHandler(orderRepository, productCatalog, orderNumbers, TimeProvider.System);
+            var createOrder = new CreateOrderHandler(orderRepository, productCatalog, orderNumbers, NoOpAuditLog(), TimeProvider.System);
 
             var order = await createOrder.HandleAsync(
                 new Api.Modules.Orders.Application.DTOs.CreateOrderCommand(
@@ -201,6 +202,19 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
 
     private static IServiceProvider EmptyServiceProvider() => new ServiceCollection().BuildServiceProvider();
 
+    private static IAuditLogService NoOpAuditLog() => new NoOpAuditLogService();
+
+    private sealed class NoOpAuditLogService : IAuditLogService
+    {
+        public Task RecordAsync(
+            string action,
+            string entityName,
+            Guid? entityId,
+            IReadOnlyDictionary<string, string?>? metadata,
+            Guid? userId,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     /// <summary>
     /// A real dispatcher resolving Orders' own domain-event handlers
     /// (OrderStatusHistoryProjector) and its two integration-event handlers
@@ -217,11 +231,11 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         var inventoryUnitOfWork = new InventoryUnitOfWork(inventoryDb, stockRepository, reservationRepository, NoOpDispatcher());
         var inventoryService = new InventoryServiceAdapter(
             new Api.Modules.Inventory.Application.UseCases.ReserveStockUseCase(
-                stockRepository, reservationRepository, inventoryUnitOfWork, TimeProvider.System),
+                stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
             new Api.Modules.Inventory.Application.UseCases.ReleaseReservationUseCase(
-                stockRepository, reservationRepository, inventoryUnitOfWork, TimeProvider.System),
+                stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
             new Api.Modules.Inventory.Application.UseCases.ConsumeReservationUseCase(
-                stockRepository, reservationRepository, inventoryUnitOfWork, TimeProvider.System),
+                stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
             reservationRepository);
 
         var services = new ServiceCollection();
@@ -235,6 +249,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         services.AddSingleton<IOrderRepository>(sp => new EfOrderRepository(ordersDb, NoOpDispatcher()));
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IInventoryService>(inventoryService);
+        services.AddSingleton<IAuditLogService>(NoOpAuditLog());
         services.AddSingleton<ConfirmOrderUseCase>();
         services.AddSingleton<IDomainEventHandler<PaymentAuthorized>, PaymentAuthorizedIntegrationEventHandler>();
 
@@ -247,6 +262,6 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         var paymentRepository = new EfPaymentRepository(paymentsDb);
         var outbox = new OutboxWriter(paymentsDb);
         var provider = new FakePaymentProvider(Options.Create(new FakePaymentProviderOptions()));
-        return new CreatePaymentUseCase(paymentRepository, provider, outbox, TimeProvider.System);
+        return new CreatePaymentUseCase(paymentRepository, provider, outbox, NoOpAuditLog(), TimeProvider.System);
     }
 }
