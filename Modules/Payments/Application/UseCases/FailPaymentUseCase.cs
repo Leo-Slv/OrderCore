@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
 
@@ -12,12 +14,14 @@ public sealed class FailPaymentUseCase
 {
     private readonly IPaymentRepository _payments;
     private readonly IOutboxWriter _outbox;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public FailPaymentUseCase(IPaymentRepository payments, IOutboxWriter outbox, TimeProvider timeProvider)
+    public FailPaymentUseCase(IPaymentRepository payments, IOutboxWriter outbox, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _payments = payments;
         _outbox = outbox;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -38,5 +42,13 @@ public sealed class FailPaymentUseCase
         });
 
         await _payments.SaveChangesAsync(cancellationToken);
+
+        await _auditLog.RecordAsync(
+            AuditLogActionNames.PaymentFailed,
+            "Payment",
+            payment.Id,
+            new Dictionary<string, string?> { ["orderId"] = payment.OrderId.ToString(), ["reason"] = reason },
+            userId: null,
+            cancellationToken);
     }
 }

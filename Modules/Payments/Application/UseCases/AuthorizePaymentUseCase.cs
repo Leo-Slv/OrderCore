@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
@@ -18,13 +20,16 @@ public sealed class AuthorizePaymentUseCase
     private readonly IPaymentRepository _payments;
     private readonly IPaymentProvider _provider;
     private readonly IOutboxWriter _outbox;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public AuthorizePaymentUseCase(IPaymentRepository payments, IPaymentProvider provider, IOutboxWriter outbox, TimeProvider timeProvider)
+    public AuthorizePaymentUseCase(
+        IPaymentRepository payments, IPaymentProvider provider, IOutboxWriter outbox, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _payments = payments;
         _provider = provider;
         _outbox = outbox;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -69,6 +74,27 @@ public sealed class AuthorizePaymentUseCase
         }
 
         await _payments.SaveChangesAsync(cancellationToken);
+
+        if (result.Succeeded)
+        {
+            await _auditLog.RecordAsync(
+                AuditLogActionNames.PaymentAuthorized,
+                "Payment",
+                payment.Id,
+                new Dictionary<string, string?> { ["orderId"] = payment.OrderId.ToString(), ["amount"] = payment.Amount.ToString() },
+                userId: null,
+                cancellationToken);
+        }
+        else
+        {
+            await _auditLog.RecordAsync(
+                AuditLogActionNames.PaymentFailed,
+                "Payment",
+                payment.Id,
+                new Dictionary<string, string?> { ["orderId"] = payment.OrderId.ToString(), ["reason"] = payment.FailureReason },
+                userId: null,
+                cancellationToken);
+        }
 
         return new CreatePaymentResult(payment.Id, payment.Status.ToString());
     }

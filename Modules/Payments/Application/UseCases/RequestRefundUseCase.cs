@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
@@ -20,13 +22,16 @@ public sealed class RequestRefundUseCase
     private readonly IPaymentRepository _payments;
     private readonly IPaymentProvider _provider;
     private readonly IOutboxWriter _outbox;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public RequestRefundUseCase(IPaymentRepository payments, IPaymentProvider provider, IOutboxWriter outbox, TimeProvider timeProvider)
+    public RequestRefundUseCase(
+        IPaymentRepository payments, IPaymentProvider provider, IOutboxWriter outbox, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _payments = payments;
         _provider = provider;
         _outbox = outbox;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -39,6 +44,7 @@ public sealed class RequestRefundUseCase
         var refund = payment.RequestRefund(command.Amount, command.Reason, now);
 
         var result = await _provider.RefundAsync(payment, cancellationToken);
+        var paymentFullyRefunded = false;
 
         if (result.Succeeded)
         {
@@ -54,6 +60,7 @@ public sealed class RequestRefundUseCase
             if (totalRefunded >= payment.Amount)
             {
                 payment.Refund();
+                paymentFullyRefunded = true;
             }
 
             _outbox.Enqueue(new PaymentRefunded
@@ -71,6 +78,17 @@ public sealed class RequestRefundUseCase
         }
 
         await _payments.SaveChangesAsync(cancellationToken);
+
+        if (paymentFullyRefunded)
+        {
+            await _auditLog.RecordAsync(
+                AuditLogActionNames.PaymentRefunded,
+                "Payment",
+                payment.Id,
+                new Dictionary<string, string?> { ["amount"] = refund.Amount.ToString() },
+                userId: null,
+                cancellationToken);
+        }
 
         return refund;
     }

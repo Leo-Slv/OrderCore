@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
@@ -14,12 +16,14 @@ public sealed class CapturePaymentUseCase
 {
     private readonly IPaymentRepository _payments;
     private readonly IPaymentProvider _provider;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public CapturePaymentUseCase(IPaymentRepository payments, IPaymentProvider provider, TimeProvider timeProvider)
+    public CapturePaymentUseCase(IPaymentRepository payments, IPaymentProvider provider, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _payments = payments;
         _provider = provider;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -37,6 +41,8 @@ public sealed class CapturePaymentUseCase
 
         payment.Capture(_timeProvider.GetUtcNow());
         await _payments.SaveChangesAsync(cancellationToken);
+
+        await _auditLog.RecordAsync(AuditLogActionNames.PaymentCaptured, "Payment", payment.Id, metadata: null, userId: null, cancellationToken);
 
         return new CreatePaymentResult(payment.Id, payment.Status.ToString());
     }

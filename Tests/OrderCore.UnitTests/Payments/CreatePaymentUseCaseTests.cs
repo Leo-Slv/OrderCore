@@ -15,7 +15,7 @@ public sealed class CreatePaymentUseCaseTests
     public async Task ExecuteAsync_authorizes_and_enqueues_PaymentAuthorized_when_the_provider_succeeds()
     {
         var outbox = new FakeOutboxWriter();
-        var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: true), outbox, TimeProvider.System);
+        var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: true), outbox, new FakeAuditLogService(), TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(), CancellationToken.None);
 
@@ -27,7 +27,7 @@ public sealed class CreatePaymentUseCaseTests
     public async Task ExecuteAsync_fails_and_enqueues_PaymentFailed_when_the_provider_declines()
     {
         var outbox = new FakeOutboxWriter();
-        var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: false), outbox, TimeProvider.System);
+        var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: false), outbox, new FakeAuditLogService(), TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(), CancellationToken.None);
 

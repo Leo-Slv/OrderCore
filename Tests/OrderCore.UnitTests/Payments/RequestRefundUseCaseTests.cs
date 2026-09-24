@@ -25,7 +25,7 @@ public sealed class RequestRefundUseCaseTests
     {
         var (payments, payment) = await SetupCapturedPaymentAsync(100m);
         var outbox = new FakeOutboxWriter();
-        var useCase = new RequestRefundUseCase(payments, new StubPaymentProvider(succeeds: true), outbox, TimeProvider.System);
+        var useCase = new RequestRefundUseCase(payments, new StubPaymentProvider(succeeds: true), outbox, new FakeAuditLogService(), TimeProvider.System);
 
         await useCase.ExecuteAsync(new RequestRefundCommand(payment.Id, 100m, "customer request"), CancellationToken.None);
 
@@ -37,7 +37,7 @@ public sealed class RequestRefundUseCaseTests
     public async Task ExecuteAsync_partial_refund_does_not_mark_the_payment_Refunded()
     {
         var (payments, payment) = await SetupCapturedPaymentAsync(100m);
-        var useCase = new RequestRefundUseCase(payments, new StubPaymentProvider(succeeds: true), new FakeOutboxWriter(), TimeProvider.System);
+        var useCase = new RequestRefundUseCase(payments, new StubPaymentProvider(succeeds: true), new FakeOutboxWriter(), new FakeAuditLogService(), TimeProvider.System);
 
         await useCase.ExecuteAsync(new RequestRefundCommand(payment.Id, 40m, "partial"), CancellationToken.None);
 
@@ -48,7 +48,7 @@ public sealed class RequestRefundUseCaseTests
     public async Task ExecuteAsync_when_the_provider_declines_marks_the_refund_Failed_without_touching_payment_status()
     {
         var (payments, payment) = await SetupCapturedPaymentAsync(100m);
-        var useCase = new RequestRefundUseCase(payments, new StubPaymentProvider(succeeds: false), new FakeOutboxWriter(), TimeProvider.System);
+        var useCase = new RequestRefundUseCase(payments, new StubPaymentProvider(succeeds: false), new FakeOutboxWriter(), new FakeAuditLogService(), TimeProvider.System);
 
         await useCase.ExecuteAsync(new RequestRefundCommand(payment.Id, 40m, "partial"), CancellationToken.None);
 
