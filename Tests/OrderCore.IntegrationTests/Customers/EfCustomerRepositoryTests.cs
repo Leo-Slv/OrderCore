@@ -144,4 +144,43 @@ public sealed class EfCustomerRepositoryTests : IAsyncLifetime
             reloaded!.Addresses.Should().ContainSingle(a => a.Label == "Work");
         }
     }
+
+    [Fact]
+    public async Task Editing_and_removing_addresses_of_a_saved_customer_is_persisted()
+    {
+        Guid customerId, homeId, workId;
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfCustomerRepository(dbContext);
+            var customer = Customer.Create("Jane Doe", "jane@example.com", DateTimeOffset.UtcNow);
+            var home = CustomerAddress.Create("Home", "Jane Doe", null, SomeAddress(), DateTimeOffset.UtcNow);
+            var work = CustomerAddress.Create("Work", "Jane Doe", null, SomeAddress(), DateTimeOffset.UtcNow);
+            customer.AddAddress(home);
+            customer.AddAddress(work);
+            await repository.AddAsync(customer, CancellationToken.None);
+            await repository.SaveChangesAsync(CancellationToken.None);
+            (customerId, homeId, workId) = (customer.Id, home.Id, work.Id);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfCustomerRepository(dbContext);
+            var customer = await repository.GetByIdAsync(customerId, CancellationToken.None);
+            customer!.UpdateAddress(
+                homeId, "New home", "Jane Doe", null,
+                Address.Create("Other St", "9", null, "Uptown", "Springfield", "IL", "62702", "USA"), DateTimeOffset.UtcNow);
+            customer.RemoveAddress(workId);
+            await repository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var reloaded = await new EfCustomerRepository(dbContext).GetByIdAsync(customerId, CancellationToken.None);
+
+            var address = reloaded!.Addresses.Should().ContainSingle().Subject;
+            address.Label.Should().Be("New home");
+            address.Address.Street.Should().Be("Other St");
+        }
+    }
 }

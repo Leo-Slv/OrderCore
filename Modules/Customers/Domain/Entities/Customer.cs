@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Customers.Domain.Events;
 using OrderCore.Api.Shared.Domain;
 using OrderCore.Api.Shared.Domain.Exceptions;
+using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.Api.Modules.Customers.Domain.Entities;
 
@@ -119,6 +120,18 @@ public sealed class Customer : AggregateRoot<Guid>
         // is always created immediately before being added in the same use
         // case, so its own CreatedAt is an accurate OccurredAt here.
         Raise(new CustomerAddressAdded(Guid.NewGuid(), address.CreatedAt, Id, address.Id));
+    }
+
+    /// <summary>
+    /// Edits a saved address in place: its id, and so any default-address
+    /// flag, stays the same. Orders placed with it are unaffected, since
+    /// orders keep their own copy of the address.
+    /// </summary>
+    public void UpdateAddress(Guid addressId, string label, string recipientName, string? phone, Address address, DateTimeOffset now)
+    {
+        FindAddress(addressId).Update(label, recipientName, phone, address, now);
+        UpdatedAt = now;
+        IncrementVersion();
     }
 
     public void RemoveAddress(Guid addressId)

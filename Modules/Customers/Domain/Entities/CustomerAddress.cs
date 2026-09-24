@@ -72,6 +72,26 @@ public sealed class CustomerAddress : Entity<Guid>
     }
 
     /// <summary>
+    /// Replaces everything the customer can edit. `internal`: reached only
+    /// through <see cref="Customer.UpdateAddress"/>, so the aggregate's
+    /// version moves with it.
+    /// </summary>
+    internal void Update(string label, string recipientName, string? phone, Address address, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            throw new ArgumentException("Label is required.", nameof(label));
+        }
+
+        ArgumentNullException.ThrowIfNull(address);
+
+        UpdateContactInfo(recipientName, phone);
+        Label = label;
+        Address = address;
+        UpdatedAt = now;
+    }
+
+    /// <summary>
     /// Reconstructs a <see cref="CustomerAddress"/> from already-persisted
     /// state. `internal` because only <c>CustomerMapper</c> should call it
     /// — see <see cref="Customer.Rehydrate"/>.

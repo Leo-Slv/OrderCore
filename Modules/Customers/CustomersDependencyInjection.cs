@@ -26,6 +26,9 @@ public static class CustomersDependencyInjection
         services.AddScoped<AddCustomerAddressUseCase>();
         services.AddScoped<ListCustomerAddressesUseCase>();
         services.AddScoped<GetCustomerAddressUseCase>();
+        services.AddScoped<UpdateCustomerAddressUseCase>();
+        services.AddScoped<RemoveCustomerAddressUseCase>();
+        services.AddScoped<SetDefaultAddressUseCase>();
         services.AddScoped<GetCustomerByIdUseCase>();
 
         return services;
