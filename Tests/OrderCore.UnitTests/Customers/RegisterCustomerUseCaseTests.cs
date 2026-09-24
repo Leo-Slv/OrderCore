@@ -13,7 +13,7 @@ public sealed class RegisterCustomerUseCaseTests
     [Fact]
     public async Task ExecuteAsync_registers_a_new_customer()
     {
-        var useCase = new RegisterCustomerUseCase(new FakeCustomerRepository(), TimeProvider.System);
+        var useCase = new RegisterCustomerUseCase(new FakeCustomerRepository(), new FakeAuditLogService(), TimeProvider.System);
 
         var output = await useCase.ExecuteAsync(Command(), CancellationToken.None);
 
@@ -25,7 +25,7 @@ public sealed class RegisterCustomerUseCaseTests
     public async Task ExecuteAsync_rejects_a_duplicate_email()
     {
         var repository = new FakeCustomerRepository();
-        var useCase = new RegisterCustomerUseCase(repository, TimeProvider.System);
+        var useCase = new RegisterCustomerUseCase(repository, new FakeAuditLogService(), TimeProvider.System);
         await useCase.ExecuteAsync(Command(), CancellationToken.None);
 
         var act = () => useCase.ExecuteAsync(Command(), CancellationToken.None);

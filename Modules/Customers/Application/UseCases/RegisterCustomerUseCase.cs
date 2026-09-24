@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Customers.Application.Contracts;
 using OrderCore.Api.Modules.Customers.Application.DTOs;
 using OrderCore.Api.Modules.Customers.Domain.Entities;
@@ -7,11 +9,13 @@ namespace OrderCore.Api.Modules.Customers.Application.UseCases;
 public sealed class RegisterCustomerUseCase
 {
     private readonly ICustomerRepository _customers;
+    private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public RegisterCustomerUseCase(ICustomerRepository customers, TimeProvider timeProvider)
+    public RegisterCustomerUseCase(ICustomerRepository customers, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _customers = customers;
+        _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
 
@@ -29,6 +33,14 @@ public sealed class RegisterCustomerUseCase
 
         await _customers.AddAsync(customer, cancellationToken);
         await _customers.SaveChangesAsync(cancellationToken);
+
+        await _auditLog.RecordAsync(
+            AuditLogActionNames.CustomerCreated,
+            "Customer",
+            customer.Id,
+            new Dictionary<string, string?> { ["email"] = customer.Email },
+            userId: null,
+            cancellationToken);
 
         return new CustomerOutput(customer.Id, customer.Name, customer.Email, customer.Active);
     }
