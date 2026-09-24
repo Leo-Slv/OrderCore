@@ -36,6 +36,15 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <!-- OpenAPI/Scalar (section "API Conventions" in claude.md): the .NET
+         9+ built-in generator produces the OpenAPI ("swagger") document,
+         Scalar.AspNetCore renders it as an interactive UI. No Swashbuckle —
+         SwaggerUI itself was dropped from the ASP.NET Core templates in
+         favor of this pairing, and Microsoft.AspNetCore.OpenApi already
+         reads the [ProducesResponseType] attributes every controller in
+         this project already carries. -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.17.9" />
   </ItemGroup>
 
 </Project>

@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Inventory;
 using OrderCore.Api.Modules.Orders;
 using OrderCore.Api.Modules.Payments;
 using OrderCore.Api.Shared;
+using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,8 +27,19 @@ builder.Services.AddAuditLogsModule();
 builder.Services.AddControllers();
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOpenApi();
 
 var app = builder.Build();
+
+// OpenAPI ("swagger") document + Scalar UI, Development-only (same
+// posture as the ASP.NET Core templates' own SwaggerUI-in-Development
+// default): the API surface isn't something to expose unauthenticated in
+// a deployed environment by default.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference();
+}
 
 app.MapHealthChecks("/health");
 
