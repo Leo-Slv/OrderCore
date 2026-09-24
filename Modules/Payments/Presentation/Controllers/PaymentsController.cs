@@ -15,7 +15,7 @@ namespace OrderCore.Api.Modules.Payments.Presentation.Controllers;
 /// CustomersController's.
 /// </summary>
 [ApiController]
-[Route("api/payments")]
+[Route("payments")]
 public sealed class PaymentsController : ControllerBase
 {
     private readonly CreatePaymentUseCase _createPaymentUseCase;

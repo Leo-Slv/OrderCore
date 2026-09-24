@@ -18,7 +18,7 @@ namespace OrderCore.Api.Modules.Orders.Presentation.Controllers;
 /// CustomersController's.
 /// </summary>
 [ApiController]
-[Route("api/orders")]
+[Route("orders")]
 public sealed class OrdersController : ControllerBase
 {
     private readonly CreateOrderHandler _createOrderHandler;

@@ -16,7 +16,7 @@ namespace OrderCore.Api.Modules.Inventory.Presentation.Controllers;
 /// ChangeProductPriceUseCase in Catalog.
 /// </summary>
 [ApiController]
-[Route("api/inventory")]
+[Route("inventory")]
 public sealed class InventoryController : ControllerBase
 {
     private readonly GetStockByProductIdUseCase _getStockByProductIdUseCase;

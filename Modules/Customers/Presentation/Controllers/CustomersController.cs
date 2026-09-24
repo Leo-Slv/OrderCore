@@ -23,7 +23,7 @@ namespace OrderCore.Api.Modules.Customers.Presentation.Controllers;
 /// behavior.
 /// </summary>
 [ApiController]
-[Route("api/customers")]
+[Route("customers")]
 public sealed class CustomersController : ControllerBase
 {
     private readonly RegisterCustomerUseCase _registerCustomerUseCase;

@@ -16,7 +16,7 @@ namespace OrderCore.Api.Modules.AuditLogs.Presentation.Controllers;
 /// keeping.
 /// </summary>
 [ApiController]
-[Route("api/audit-logs")]
+[Route("audit-logs")]
 public sealed class AuditLogsController : ControllerBase
 {
     private readonly ListAuditLogsUseCase _listAuditLogsUseCase;

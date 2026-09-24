@@ -23,7 +23,7 @@ namespace OrderCore.Api.Modules.Catalog.Presentation.Controllers;
 /// CustomersController's.
 /// </summary>
 [ApiController]
-[Route("api/catalog")]
+[Route("catalog")]
 public sealed class CatalogController : ControllerBase
 {
     private readonly CreateProductUseCase _createProductUseCase;

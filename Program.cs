@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Inventory;
 using OrderCore.Api.Modules.Orders;
 using OrderCore.Api.Modules.Payments;
 using OrderCore.Api.Shared;
+using OrderCore.Api.Shared.Presentation.Conventions;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,7 +25,10 @@ builder.Services.AddOrdersModule(builder.Configuration);
 builder.Services.AddPaymentsModule(builder.Configuration);
 builder.Services.AddAuditLogsModule();
 
-builder.Services.AddControllers();
+// Every controller declares only its own segment (e.g. [Route("orders")])
+// — this convention prepends "api" once, instead of every module's
+// controller repeating "api/" in its own [Route] attribute.
+builder.Services.AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention("api")));
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
