@@ -34,8 +34,18 @@ builder.Services.AddAuditLogsModule();
 //
 // Enums are (de)serialized by name, so request enums are accepted — and
 // documented in OpenAPI — as "Card"/"Pix" instead of integers.
+//
+// SuppressAsyncSuffixInActionNames = false keeps action names as declared
+// (e.g. "GetByIdAsync"), so CreatedAtAction(nameof(GetByIdAsync), ...) can
+// find the action. With the framework's default (true) the name becomes
+// "GetById", link generation fails, and every create endpoint answered
+// 500 after having already saved.
 builder.Services
-    .AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention("api")))
+    .AddControllers(options =>
+    {
+        options.Conventions.Add(new ApiRoutePrefixConvention("api"));
+        options.SuppressAsyncSuffixInActionNames = false;
+    })
     .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // Business failures (not found, rule violated, conflict) reach the client
