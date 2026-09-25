@@ -77,6 +77,27 @@ public sealed class EndpointAccessTests : IClassFixture<ApiDatabase>, IAsyncLife
     [InlineData(Caller.Admin, "GET", "/api/orders/customers/00000000-0000-0000-0000-000000000001", HttpStatusCode.OK)]
     [InlineData(Caller.Customer, "GET", "/api/inventory/stock-items/00000000-0000-0000-0000-000000000001", HttpStatusCode.Forbidden)]
     [InlineData(Caller.Customer, "GET", "/api/payments/orders/00000000-0000-0000-0000-000000000001", HttpStatusCode.Forbidden)]
+    // Backoffice (admin only): the admin/ reads and the new lists.
+    [InlineData(Caller.Anonymous, "GET", "/api/admin/orders", HttpStatusCode.Unauthorized)]
+    [InlineData(Caller.Customer, "GET", "/api/admin/orders", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Admin, "GET", "/api/admin/orders", HttpStatusCode.OK)]
+    [InlineData(Caller.Customer, "GET", "/api/admin/dashboard", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Admin, "GET", "/api/admin/dashboard", HttpStatusCode.OK)]
+    [InlineData(Caller.Customer, "GET", "/api/admin/catalog/products", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Admin, "GET", "/api/admin/catalog/products", HttpStatusCode.OK)]
+    [InlineData(Caller.Customer, "GET", "/api/payments", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Admin, "GET", "/api/payments", HttpStatusCode.OK)]
+    [InlineData(Caller.Customer, "GET", "/api/customers", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Admin, "GET", "/api/customers", HttpStatusCode.OK)]
+    [InlineData(Caller.Customer, "GET", "/api/inventory/stock-items", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Admin, "GET", "/api/inventory/stock-items", HttpStatusCode.OK)]
+    // Backoffice commands: a customer is refused before the order is even looked up.
+    [InlineData(Caller.Anonymous, "POST", "/api/orders/00000000-0000-0000-0000-000000000001/ship", HttpStatusCode.Unauthorized)]
+    [InlineData(Caller.Customer, "POST", "/api/orders/00000000-0000-0000-0000-000000000001/ship", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Admin, "POST", "/api/orders/00000000-0000-0000-0000-000000000001/ship", HttpStatusCode.NotFound)]
+    [InlineData(Caller.Customer, "POST", "/api/orders/00000000-0000-0000-0000-000000000001/cancel", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Customer, "POST", "/api/customers/00000000-0000-0000-0000-000000000001/deactivate", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Customer, "POST", "/api/inventory/stock-items/00000000-0000-0000-0000-000000000001/receive", HttpStatusCode.Forbidden)]
     public async Task Access_matches_the_endpoints_classification(Caller caller, string method, string url, HttpStatusCode expected)
     {
         var client = ClientFor(caller);
