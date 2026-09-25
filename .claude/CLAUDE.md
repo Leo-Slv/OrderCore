@@ -19,6 +19,9 @@ Existing modules include:
 - Payments
 - AuditLogs (cross-cutting/technical module, not a business bounded
   context — mirrors CourseCore's own AuditLogs module)
+- Identity (cross-cutting/technical module: accounts, credentials, refresh
+  sessions and JWT issuing/validation for customers and admins; the
+  `Customer` itself stays in Customers)
 
 Cross-cutting functionality belongs under:
 
@@ -174,10 +177,10 @@ to a module.
 ## Persistence
 
 The project targets PostgreSQL via Entity Framework Core. All five business
-modules (Customers, Catalog, Orders, Inventory, Payments) have
-`Infrastructure/Persistence` implemented end to end — `AuditLogs` (the
-cross-cutting/technical module) is still scaffolding only. Follow their
-shape when implementing persistence for another module:
+modules (Customers, Catalog, Orders, Inventory, Payments) and the Identity
+technical module have `Infrastructure/Persistence` implemented end to end —
+`AuditLogs` (the other cross-cutting/technical module) is still
+in-memory only. Follow their shape when implementing persistence for another module:
 
 Domain Entity
     ↕ Mapper
@@ -264,10 +267,13 @@ Cross-cutting concerns shared across multiple business modules belong under
   `IDomainEvent`, value objects (`Address`, `Slug`), and
   `Exceptions/DomainRuleViolationException`.
 - `Shared/Application` — technical DTOs used by more than one module, e.g.
-  `PagedResult<T>`, and `Exceptions/NotFoundException`/`ConflictException`.
+  `PagedResult<T>`; `Exceptions/NotFoundException`/`ConflictException`/
+  `UnauthorizedException`; `Abstractions/ICurrentUser` and `UserRoles`.
 - `Shared/Presentation` — technical response shapes used by more than one
   module, e.g. `PagedResponse<T>`; `ExceptionHandling/ApiExceptionHandler`;
-  `Cors/CorsExtensions`; `Conventions/ApiRoutePrefixConvention`.
+  `Cors/CorsExtensions`; `Conventions/ApiRoutePrefixConvention`;
+  `Authentication/` (`AuthorizationPolicies`, `HttpContextCurrentUser`,
+  `OrderCoreClaimTypes`); `OpenApi/BearerSecurityTransformer`.
 
 Do not move module-specific business logic into `Shared/` merely for reuse.
 
@@ -317,6 +323,34 @@ detail outside Development. A leftover `InvalidOperationException` is a
 bug, not a business error. Error `[ProducesResponseType]`s declare
 `typeof(ProblemDetails)`. Clients branch on `code`, so treat codes as part
 of the public contract: don't rename them casually.
+
+### Authentication and access
+
+The API denies by default: a fallback policy requires a signed-in user,
+so every endpoint needs a bearer token unless it is marked
+`[AllowAnonymous]`. Every new controller action must be classified
+explicitly, on itself or its controller, with `[AllowAnonymous]`,
+`[Authorize]` (any signed-in user) or `[Authorize(Policy =
+AuthorizationPolicies.Customer | Admin)]`;
+`OrderCore.ArchitectureTests/EndpointAuthorizationTests` fails the build
+otherwise. The OpenAPI document picks the classification up by itself
+(Bearer scheme, 401/403 on protected operations), so actions don't repeat
+`[ProducesResponseType]` for 401/403.
+
+- A customer's own data is served under `me` routes (`customers/me`,
+  `orders/me`) and the customer id always comes from `ICurrentUser`, never
+  from the route or body. Don't add a customer id to a request body or
+  route a customer can call.
+- "Only your own" is a use-case rule, not a controller check: the use
+  case takes the requesting customer (null for admins) and answers the
+  same `*_not_found` 404 for someone else's resource as for one that
+  doesn't exist (see `OrderAccess`, `CustomerAddressLookup`).
+- Use cases and services that need to know who is calling ask
+  `ICurrentUser`; they don't read HTTP claims. `AuditLogService` already
+  fills in the actor from it, so call sites keep passing `userId: null`.
+- Secrets (`Jwt:SigningKey`, `IdentitySeed:*`) come from the environment
+  or user-secrets, never from committed settings; the API refuses to
+  start without a signing key.
 
 ### CORS
 
@@ -368,6 +402,15 @@ layers.
 
 Follow the structure and patterns of existing tests before introducing a new
 testing approach.
+
+API-level integration tests go through the real host:
+`Tests/OrderCore.IntegrationTests/OrderCoreApiFactory` (supplies the JWT
+signing key; `CreateAdminClient`/`CreateCustomerClient` issue real tokens
+for made-up accounts, enough when no database is involved) and
+`ApiDatabase` (a migrated PostgreSQL container, the host with a seeded
+admin, and the shared HTTP steps: sign in as admin, sign a customer up,
+add an address, publish a product, check out). Use `ApiDatabase` as a
+class fixture, or one per test when a test needs an empty database.
 
 Prefer testing observable behavior and business rules over implementation
 details.

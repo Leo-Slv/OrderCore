@@ -314,6 +314,11 @@ módulos através de uma Application Contract, seguindo a mesma estrutura
 `Modules/AuditLogs/{Application,Domain,Infrastructure,Presentation}` da
 seção 5.1.
 
+Um segundo módulo técnico, `Identity`, guarda contas, senhas e sessões
+(clientes e administradores) e emite e valida os tokens JWT; veja a
+seção 32. Também não é um bounded context de negócio: o `Customer`
+continua sendo do módulo Customers, e o `Identity` só guarda o id dele.
+
 ---
 
 # 7. Regra fundamental de modularização
@@ -374,6 +379,7 @@ Contratos entre módulos existentes hoje:
 | Orders → Payments | `IPaymentGateway` | `PaymentGatewayAdapter` → `CreatePaymentUseCase`, `GetPaymentByOrderIdUseCase` |
 | Orders → Customers | `ICustomerDirectory` | `CustomerDirectoryAdapter` → `GetCustomerAddressUseCase` |
 | Catalog → Inventory | `IStockAvailabilityProvider` | `InventoryStockAvailabilityAdapter` → `GetStockAvailabilityUseCase` |
+| Identity → Customers | `ICustomerRegistry` | `CustomerRegistryAdapter` → `RegisterCustomerUseCase` |
 | Payments → Orders | eventos de integração via outbox | `PaymentAuthorized`/`PaymentFailed` → handlers do Orders |
 
 ---
@@ -1298,6 +1304,28 @@ A API deve considerar:
 
 O sistema não deve armazenar informações completas de cartão.
 
+O que já está implementado (módulo `Identity`, ver
+`Docs/diagrams/implementation-class/08-identity.md`):
+
+* **autenticação** por JWT emitido pelo próprio OrderCore (HMAC-SHA256,
+  15 minutos) mais refresh token rotativo (256 bits aleatórios, só o hash
+  é guardado, 14 dias). Reapresentar um refresh token já usado revoga a
+  sessão inteira, porque indica um token roubado;
+* **senhas** com hash PBKDF2 salgado (`PasswordHasher<T>` do ASP.NET Core),
+  política mínima de 8 a 128 caracteres com letra e número. Qualquer falha
+  de login responde o mesmo `invalid_credentials`;
+* **autorização** com as políticas `Customer` e `Admin` e bloqueio por
+  padrão (seção 39). Cliente só enxerga os próprios dados; os de outro
+  cliente respondem 404, como se não existissem;
+* **secrets fora do código**: a chave de assinatura (`Jwt:SigningKey`) e o
+  primeiro admin (`IdentitySeed:*`) vêm do ambiente ou de user-secrets; o
+  docker-compose lê de um `.env` ignorado pelo git. A API não sobe sem a
+  chave;
+* a auditoria registra quem fez cada ação.
+
+Ainda não implementado: rate limiting de login, verificação de e-mail,
+recuperação de senha e permissões finas de admin.
+
 Quando utilizar Stripe, os dados sensíveis devem ser tratados conforme o modelo de integração escolhido pelo provider.
 
 ---
@@ -1561,6 +1589,18 @@ decide o que mostrar a partir do `code` (ex.: `insufficient_stock`,
 **CORS.** Só as origens listadas em `Cors:AllowedOrigins` podem chamar a
 API do navegador.
 
+**Acesso.** A API bloqueia por padrão: todo endpoint exige um token, a
+não ser que esteja marcado como público. As classes de acesso são:
+
+| Acesso | Endpoints |
+|---|---|
+| Público | navegação do catálogo (listagem, produto por slug, categorias), cotação do carrinho, `auth/sign-up`, `sign-in`, `refresh`, health, docs |
+| Cliente | checkout, `customers/me` (perfil e endereços), `orders/me` |
+| Cliente dono ou admin | `orders/{id}` e o histórico de status |
+| Admin | todo o resto (escrita no catálogo, estoque, pagamentos, audit logs, clientes e pedidos por id) |
+
+Um teste de arquitetura falha se alguma action não estiver classificada.
+
 Quando implementados como controllers (em vez de minimal API), cada
 controller vive em `OrderCore.Api/Modules/{Módulo}/Presentation/Controllers/`
 (seção 5.1), ao lado de `Requests/`, `Responses/` e `Presenters/` do mesmo
@@ -1619,6 +1659,9 @@ para os pagamentos existentes) e `AddCheckoutIdempotencyKeyAndHistorySequence`
 `(CustomerId, CheckoutIdempotencyKey)` e `order_status_history.Sequence`
 identity, para a timeline manter a ordem de transições com o mesmo
 horário).
+A autenticação acrescentou `InitialIdentitySchema` (Identity —
+`user_accounts` e `refresh_sessions`, com e-mail normalizado único) e
+`RemoveCustomerPasswordHash` (Customers — a senha saiu de `customers`).
 `IProductCatalog` (contrato do próprio Orders) também ganhou sua
 implementação real, `ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`),
 que lê de `IProductRepository` do Catalog — a indireção de "Application

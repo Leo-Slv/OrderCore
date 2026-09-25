@@ -42,7 +42,10 @@ OrderCore
 ├── Customers
 ├── Catalog
 ├── Inventory
-└── Payments   ← bounded context isolado desde o início
+├── Payments   ← bounded context isolado desde o início
+│
+├── AuditLogs  ← módulos técnicos/transversais,
+└── Identity   ← não bounded contexts de negócio
 ```
 
 O código de produção é um único projeto (`OrderCore.Api.csproj`, na raiz
@@ -113,9 +116,11 @@ em Development).
 | Home / listagem | `GET /api/catalog/products?active=true&sort=PriceAsc&onSale=true&page=1&pageSize=20` → paginado, com slug, imagem principal e disponibilidade (`InStock`/`LowStock`/`OutOfStock`, nunca a quantidade) |
 | Produto | `GET /api/catalog/products/by-slug/{slug}` → só produtos publicados |
 | Carrinho | `POST /api/orders/cart/quote` → preço atual e problemas por linha (`PriceChanged`, `InsufficientStock`, `Unavailable`, `NotFound`), sem reservar nada |
-| Checkout | `GET /api/customers/{id}/addresses`, depois `POST /api/orders/checkout` com header `Idempotency-Key` → 202 com o pedido já em `PendingPayment` |
-| Acompanhamento | `GET /api/orders/{id}` (polling até `Confirmed`/`PaymentFailed`) e `GET /api/orders/{id}/status-history` (timeline) |
-| Meus pedidos | `GET /api/orders/customers/{customerId}?page=1&pageSize=20` |
+| Cadastro / login | `POST /api/auth/sign-up`, `POST /api/auth/sign-in` → access token (JWT, 15 min) + refresh token (14 dias); `POST /api/auth/refresh` troca o refresh token por um par novo; `POST /api/auth/sign-out` encerra a sessão |
+| Minha conta | `GET`/`PUT /api/customers/me`, `GET`/`POST /api/customers/me/addresses`, `PUT`/`DELETE /api/customers/me/addresses/{addressId}`, `POST …/{addressId}/default-shipping` e `…/default-billing` |
+| Checkout | `GET /api/customers/me/addresses`, depois `POST /api/orders/checkout` com header `Idempotency-Key` → 202 com o pedido já em `PendingPayment` (o cliente vem do token) |
+| Acompanhamento | `GET /api/orders/{id}` (polling até `Confirmed`/`PaymentFailed`) e `GET /api/orders/{id}/status-history` (timeline) — pedido de outro cliente responde 404 |
+| Meus pedidos | `GET /api/orders/me?page=1&pageSize=20` |
 
 O checkout valida, reserva estoque e inicia o pagamento num único caso
 de uso: o front pede "quero criar este pedido" e o OrderCore decide se
@@ -126,8 +131,17 @@ Erros de negócio chegam como `ProblemDetails` (RFC 7807) com um `code`
 estável para o front decidir o que mostrar — por exemplo
 `409 insufficient_stock`, `409 price_changed`, `404 address_not_found`.
 A API só aceita chamadas de navegador das origens em `Cors:AllowedOrigins`
-(`http://localhost:3000` por padrão). Autenticação ainda não existe:
-por enquanto o cliente é identificado pelo id na requisição.
+(`http://localhost:3000` por padrão).
+
+**Acesso.** A API bloqueia por padrão: toda rota exige
+`Authorization: Bearer <access token>`, exceto a vitrine (listagem e
+produto por slug), a cotação do carrinho, `auth/sign-up|sign-in|refresh`,
+`/health` e a documentação. Checkout, `customers/me` e `orders/me` exigem
+um token de cliente; os endpoints administrativos (clientes, estoque,
+pagamentos, auditoria, gestão do catálogo) exigem um token de admin.
+Sem token → `401 unauthenticated`; token sem permissão → `403 forbidden`.
+Os detalhes estão em
+[`Docs/specs/identity/authentication-and-account.md`](Docs/specs/identity/authentication-and-account.md).
 
 ## Fluxo de pagamento
 
@@ -184,8 +198,9 @@ Tests/
 │   ├── Customers/
 │   ├── Catalog/
 │   ├── Inventory/
-│   └── Payments/
-├── OrderCore.IntegrationTests/   # PostgreSQL, EF Core, concorrência real
+│   ├── Payments/
+│   └── Identity/
+├── OrderCore.IntegrationTests/   # PostgreSQL, EF Core, concorrência real, API HTTP
 │   └── (mesma organização por módulo)
 └── OrderCore.ArchitectureTests/  # regras estruturais entre camadas/módulos
 ```
@@ -197,18 +212,39 @@ em que `Payments` for extraído para `PayCore`, seus testes já estão
 isolados em uma única pasta junto com o resto do módulo.
 
 `OrderCore.ArchitectureTests` é a exceção deliberada: valida regras que
-atravessam módulos e camadas, então é organizado por regra/convenção.
+atravessam módulos e camadas, então é organizado por regra/convenção —
+incluindo `EndpointAuthorizationTests`, que falha se alguma action não
+declarar explicitamente quem pode chamá-la.
+
+Os testes de integração sobem PostgreSQL via Testcontainers, então
+precisam do Docker rodando. Os testes que passam pela API HTTP usam
+`OrderCoreApiFactory` (host real com uma chave de assinatura de teste) e
+`ApiDatabase` (banco migrado + admin semeado + passos HTTP comuns).
 
 ## Como executar
 
 Pré-requisitos: [.NET 10 SDK](https://dotnet.microsoft.com/download) e
 Docker.
 
+A API não sobe sem uma chave de assinatura de JWT (`Jwt:SigningKey`, no
+mínimo 32 bytes), e o primeiro admin é criado na inicialização a partir
+de `IdentitySeed:AdminEmail`/`AdminPassword`. Nenhum dos dois fica no
+repositório:
+
 ```bash
+# Com docker compose: copie .env.example para .env (git-ignored) e preencha
+# JWT_SIGNING_KEY, ADMIN_EMAIL e ADMIN_PASSWORD
+cp .env.example .env
+
 # Subir PostgreSQL + API
 docker compose up --build
 
-# Rodar a API localmente (fora do container), contra o Postgres do compose
+# Rodando a API localmente (fora do container): guarde os segredos em user-secrets
+dotnet user-secrets set "Jwt:SigningKey" "1049089openssl rand -base64 48)"
+dotnet user-secrets set "IdentitySeed:AdminEmail" "admin.local"
+dotnet user-secrets set "IdentitySeed:AdminPassword" "<senha com letra e dígito>"
+
+# ...e rode contra o Postgres do compose
 dotnet run --project OrderCore.Api.csproj
 
 # Rodar todos os testes
@@ -222,7 +258,14 @@ Em ambiente de Development, a API expõe documentação interativa via
 OpenAPI padrão do .NET (`Microsoft.AspNetCore.OpenApi`) servido em
 `/openapi/v1.json` — sem Swashbuckle/SwaggerUI. Ambos ficam disponíveis
 apenas em Development (`app.Environment.IsDevelopment()`), nunca expostos
-por padrão fora do ambiente local.
+por padrão fora do ambiente local. O Scalar aceita o access token (botão
+de autenticação Bearer) para chamar as rotas protegidas.
+
+As migrations não são aplicadas na inicialização. Bancos locais criados
+antes da autenticação precisam das migrations novas do Identity e do
+Customers (`RemoveCustomerPasswordHash`); clientes antigos não têm conta
+de login, então o mais simples é recriar o banco local
+(`docker compose down -v`) e aplicar as migrations de novo.
 
 ## Estado atual do scaffold
 
@@ -231,11 +274,15 @@ módulos de negócio previstos — estão implementados de ponta a ponta
 (Domain + Application + Infrastructure/EF Core + Presentation) contra
 PostgreSQL real. `AuditLogs`, o módulo técnico/transversal, também está
 implementado (com um `InMemoryAuditLogRepository` — sem persistência EF
-Core, por design) e agora recebe entradas de verdade: os 16 pontos de
+Core, por design). `Identity`, o outro módulo técnico, cuida de contas,
+senhas, sessões de refresh e emissão dos JWT, com persistência EF Core
+própria — ver
+[08-identity.md](Docs/diagrams/implementation-class/08-identity.md).
+`AuditLogs` recebe entradas de verdade: os 18 pontos de
 `AuditLogActionNames` (criação/confirmação/cancelamento de pedido,
 autorização/captura/falha/estorno de pagamento, reserva/liberação/consumo/
 expiração de estoque, criação/mudança de preço/publicação de produto,
-cadastro de cliente) chamam `IAuditLogService.RecordAsync` — ver
+cadastro de cliente, criação de conta, reuso de refresh token) chamam `IAuditLogService.RecordAsync` — ver
 [07-auditlogs.md](Docs/diagrams/implementation-class/07-auditlogs.md).
 Ver o topo de cada `Docs/diagrams/implementation-class/0N-*.md` para os
 desvios documentados entre cada diagrama e o código.
@@ -258,7 +305,13 @@ HTTP real contra PostgreSQL, com o `OutboxPublisherBackgroundService` do
 próprio host confirmando (ou falhando, com o provedor em modo `Declined`)
 o pedido: `Tests/OrderCore.IntegrationTests/Orders/StorefrontCheckoutTests.cs`.
 
-Autenticação/autorização, os endpoints de backoffice (listagem global de
+Autenticação e autorização estão implementadas (cadastro, login,
+refresh com rotação, papéis cliente/admin, posse dos próprios dados) e
+testadas pela API HTTP em `Tests/OrderCore.IntegrationTests/Identity`,
+`Shared/EndpointAccessTests`, `Orders/OrderOwnershipTests` e
+`Customers/MyAccountTests`.
+
+Os endpoints de backoffice (listagem global de
 pedidos e transições de envio, estoque, pagamentos, dashboard), a
 integração com RabbitMQ de verdade (o outbox hoje despacha in-process)
 e a extração opcional de `Payments` para `PayCore` ainda não foram

@@ -227,3 +227,32 @@ One or more per stage, Conventional Commits, e.g.
 `docs: document the Identity module and endpoint access rules` — plus
 the spec + this plan as `docs(identity): ...` before Stage 1, and the
 backoffice spec on its own.
+
+## Execution notes (what differed from this plan)
+
+- **Customer password removed in Stage 2, not Stage 3.** The Identity
+  module's sign-up path replaced `Customer`'s password hash right away,
+  so dropping the column (`RemoveCustomerPasswordHash`) went in with it
+  to avoid a commit where both held a password.
+- **Checkout from the token and removal of `POST customers` moved to
+  Stage 4.** Once the fallback policy denied anonymous calls, the old
+  anonymous registration and the customer id in the checkout body no
+  longer had a caller, so they were changed with the endpoint
+  classification instead of waiting for Stage 5.
+- **401/403 documented by the OpenAPI transformer.**
+  `BearerSecurityTransformer` adds the Bearer requirement and the 401/403
+  responses to every operation that isn't anonymous, derived from the
+  same metadata `EndpointAuthorizationTests` checks, instead of a
+  `[ProducesResponseType]` for each on every action.
+- **Unknown routes answer 401 to anonymous callers.** The fallback policy
+  runs before routing can say 404. Accepted as a consequence of deny by
+  default (it also hides which routes exist); a signed-in caller still
+  gets 404.
+- **Deactivated account on refresh.** The first version checked a revoked
+  session before the account state, so refreshing after deactivation was
+  reported as token reuse (revoking the family and raising the reuse
+  event). The account is now checked first and answers `AccountInactive`.
+- **`ApiDatabase` extracted (Stage 6).** The HTTP-level tests all needed
+  the same container, migrations, seeded admin and sign-up/checkout
+  steps, so `StorefrontCheckoutTests`' setup moved into a shared
+  `ApiDatabase` fixture instead of each test class copying it.
