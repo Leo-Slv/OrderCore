@@ -90,7 +90,8 @@ visible as one timeline.
    into messages belongs to V4, when Payments becomes PayCore.
 3. **Events published:**
    - Payments: the existing requested/authorized/failed/refunded, plus
-     **captured** and **voided**;
+     **captured** and **voided**; (the Stripe feature later adds
+     **authorization expired**);
    - Orders: the **order lifecycle** — created, payment requested,
      confirmed, processing, shipped, delivered, payment failed,
      cancelled;
