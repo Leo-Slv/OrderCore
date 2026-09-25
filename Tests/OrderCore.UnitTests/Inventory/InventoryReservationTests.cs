@@ -83,6 +83,34 @@ public sealed class InventoryReservationTests
 
         reservation.DomainEvents.Should().BeEmpty();
     }
+
+    [Fact]
+    public void Return_after_Consume_sets_ReturnedAt_and_raises_a_returned_movement()
+    {
+        var reservation = InventoryReservation.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), quantity: 3, Now);
+        reservation.Consume(Now);
+        reservation.ClearDomainEvents();
+
+        reservation.Return(Now);
+
+        reservation.Status.Should().Be(ReservationStatus.Returned);
+        reservation.ReturnedAt.Should().Be(Now);
+        var raised = reservation.DomainEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<InventoryStockMovementRecorded>().Subject;
+        raised.MovementType.Should().Be(StockMovementType.ReservationReturned);
+        raised.Quantity.Should().Be(3);
+        raised.ReferenceId.Should().Be(reservation.Id);
+    }
+
+    [Fact]
+    public void Return_of_a_reservation_never_consumed_is_rejected()
+    {
+        var reservation = CreateReservation();
+
+        var act = () => reservation.Return(Now);
+
+        act.Should().Throw<DomainRuleViolationException>().Which.Code.Should().Be("invalid_reservation_state");
+    }
 }
 
 // NOTE: the concurrency scenario described in section 34 of the project

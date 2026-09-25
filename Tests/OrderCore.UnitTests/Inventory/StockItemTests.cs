@@ -1,5 +1,7 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
+using OrderCore.Api.Modules.Inventory.Domain.Enums;
+using OrderCore.Api.Modules.Inventory.Domain.Events;
 using OrderCore.Api.Shared.Domain.Exceptions;
 using Xunit;
 
@@ -101,7 +103,7 @@ public sealed class StockItemTests
     {
         var stockItem = CreateStockItem(5);
 
-        stockItem.Receive(10);
+        stockItem.Receive(10, "supplier delivery", Now);
 
         stockItem.QuantityOnHand.Should().Be(15);
     }
@@ -111,7 +113,7 @@ public sealed class StockItemTests
     {
         var stockItem = CreateStockItem(5);
 
-        stockItem.Adjust(-2, "damaged goods");
+        stockItem.Adjust(-2, "damaged goods", Now);
 
         stockItem.QuantityOnHand.Should().Be(3);
     }
@@ -122,7 +124,7 @@ public sealed class StockItemTests
         var stockItem = CreateStockItem(5);
         stockItem.TryReserve(5);
 
-        var act = () => stockItem.Adjust(-1, "damaged goods");
+        var act = () => stockItem.Adjust(-1, "damaged goods", Now);
 
         act.Should().Throw<DomainRuleViolationException>();
     }
@@ -132,8 +134,88 @@ public sealed class StockItemTests
     {
         var stockItem = CreateStockItem(5);
 
-        var act = () => stockItem.Adjust(1, "");
+        var act = () => stockItem.Adjust(1, "", Now);
 
         act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void A_reorder_level_makes_low_stock_reachable()
+    {
+        var stockItem = CreateStockItem(3);
+
+        stockItem.SetReorderLevel(5, Now);
+
+        stockItem.ReorderLevel.Should().Be(5);
+        stockItem.IsLowStock.Should().BeTrue();
+        stockItem.UpdatedAt.Should().Be(Now);
+    }
+
+    [Fact]
+    public void A_negative_reorder_level_is_rejected()
+    {
+        var act = () => CreateStockItem().SetReorderLevel(-1, Now);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Create_with_units_records_them_as_inbound_and_an_empty_one_records_nothing()
+    {
+        CreateStockItem(4).DomainEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<InventoryStockMovementRecorded>()
+            .Which.MovementType.Should().Be(StockMovementType.Inbound);
+        CreateStockItem(0).DomainEvents.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Receive_records_an_inbound_movement_with_its_reason()
+    {
+        var stockItem = CreateStockItem(0);
+
+        stockItem.Receive(7, "  invoice 123  ", Now);
+
+        var movement = stockItem.DomainEvents.Should().ContainSingle().Which.Should().BeOfType<InventoryStockMovementRecorded>().Subject;
+        movement.MovementType.Should().Be(StockMovementType.Inbound);
+        movement.Quantity.Should().Be(7);
+        movement.Reason.Should().Be("invoice 123");
+        movement.ReferenceId.Should().Be(stockItem.Id);
+    }
+
+    [Fact]
+    public void Adjust_records_a_signed_adjustment_with_its_reason()
+    {
+        var stockItem = CreateStockItem(0);
+        stockItem.Receive(5, null, Now);
+        stockItem.ClearDomainEvents();
+
+        stockItem.Adjust(-2, "damaged goods", Now);
+
+        var movement = stockItem.DomainEvents.Should().ContainSingle().Which.Should().BeOfType<InventoryStockMovementRecorded>().Subject;
+        movement.MovementType.Should().Be(StockMovementType.Adjustment);
+        movement.Quantity.Should().Be(-2);
+        movement.Reason.Should().Be("damaged goods");
+    }
+
+    [Fact]
+    public void A_reason_longer_than_the_limit_is_rejected_before_anything_changes()
+    {
+        var stockItem = CreateStockItem(5);
+        var tooLong = new string('x', StockItem.MaxReasonLength + 1);
+
+        stockItem.Invoking(s => s.Receive(1, tooLong, Now)).Should().Throw<ArgumentException>();
+        stockItem.Invoking(s => s.Adjust(1, tooLong, Now)).Should().Throw<ArgumentException>();
+        stockItem.QuantityOnHand.Should().Be(5);
+    }
+
+    [Fact]
+    public void ReturnConsumed_puts_units_back_without_recording_a_movement_itself()
+    {
+        var stockItem = CreateStockItem(0);
+
+        stockItem.ReturnConsumed(2, Now);
+
+        stockItem.QuantityOnHand.Should().Be(2);
+        stockItem.DomainEvents.Should().BeEmpty();
     }
 }

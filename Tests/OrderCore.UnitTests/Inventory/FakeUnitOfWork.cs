@@ -11,13 +11,23 @@ internal sealed class FakeUnitOfWork : IUnitOfWork
 {
     private int _conflictsRemaining;
 
+    private bool _reportDuplicate;
+
     public int SaveChangesCallCount { get; private set; }
 
     public static FakeUnitOfWork ThatConflictsThenSucceeds(int conflictCount) => new() { _conflictsRemaining = conflictCount };
 
+    /// <summary>Simulates another request having created the same stock item first.</summary>
+    public static FakeUnitOfWork ThatReportsADuplicateStockItem() => new() { _reportDuplicate = true };
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         SaveChangesCallCount++;
+
+        if (_reportDuplicate)
+        {
+            throw new DuplicateStockItemException("Simulated duplicate stock item.", new Exception());
+        }
 
         if (_conflictsRemaining > 0)
         {
