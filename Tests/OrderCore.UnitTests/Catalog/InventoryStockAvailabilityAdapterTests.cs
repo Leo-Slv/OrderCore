@@ -11,12 +11,18 @@ namespace OrderCore.UnitTests.Catalog;
 /// <summary>
 /// Runs Inventory's real <see cref="GetStockAvailabilityUseCase"/> over its
 /// in-memory repository, so the quantity-to-state mapping is checked
-/// against what Inventory actually reports. The <c>LowStock</c> case needs
-/// a reorder level, which only persisted data can have today; it is
-/// covered by <c>EfStockItemRepositoryTests</c> on the Inventory side.
+/// against what Inventory actually reports, in both directions (the
+/// storefront's availability and the backoffice's stock levels).
 /// </summary>
 public sealed class InventoryStockAvailabilityAdapterTests
 {
+    private static InventoryStockAvailabilityAdapter CreateAdapter(FakeStockItemRepository stockItems) =>
+        new(
+            new GetStockAvailabilityUseCase(stockItems),
+            new EnsureStockItemUseCase(stockItems, new FakeUnitOfWork(), TimeProvider.System),
+            new GetStockLevelsUseCase(stockItems),
+            new ListProductIdsInStockStateUseCase(stockItems));
+
     [Fact]
     public async Task GetAvailabilityAsync_maps_stock_to_a_state_for_every_requested_product()
     {
@@ -28,7 +34,7 @@ public sealed class InventoryStockAvailabilityAdapterTests
         await stockItems.AddAsync(fullyReserved, CancellationToken.None);
         var withoutStockRecord = Guid.NewGuid();
 
-        var adapter = new InventoryStockAvailabilityAdapter(new GetStockAvailabilityUseCase(stockItems));
+        var adapter = CreateAdapter(stockItems);
         var result = await adapter.GetAvailabilityAsync(
             [inStock.ProductId, fullyReserved.ProductId, withoutStockRecord], CancellationToken.None);
 
@@ -38,5 +44,37 @@ public sealed class InventoryStockAvailabilityAdapterTests
             [fullyReserved.ProductId] = StockAvailability.OutOfStock,
             [withoutStockRecord] = StockAvailability.OutOfStock,
         });
+    }
+
+    [Fact]
+    public async Task Stock_levels_carry_the_numbers_and_a_state_and_filter_by_state()
+    {
+        var stockItems = new FakeStockItemRepository();
+        var low = StockItem.Create(Guid.NewGuid(), 3, null, DateTimeOffset.UtcNow);
+        low.SetReorderLevel(3, DateTimeOffset.UtcNow);
+        low.TryReserve(1);
+        var plenty = StockItem.Create(Guid.NewGuid(), 50, null, DateTimeOffset.UtcNow);
+        await stockItems.AddAsync(low, CancellationToken.None);
+        await stockItems.AddAsync(plenty, CancellationToken.None);
+        var adapter = CreateAdapter(stockItems);
+
+        var levels = await adapter.GetStockLevelsAsync([low.ProductId, plenty.ProductId, Guid.NewGuid()], CancellationToken.None);
+
+        levels.Should().HaveCount(2);
+        levels[low.ProductId].Should().Be(new ProductStockLevel(3, 1, 2, 3, StockAvailability.LowStock));
+        levels[plenty.ProductId].State.Should().Be(StockAvailability.InStock);
+        (await adapter.ListProductIdsInStateAsync(StockAvailability.LowStock, CancellationToken.None))
+            .Should().Equal(low.ProductId);
+    }
+
+    [Fact]
+    public async Task Ensuring_a_stock_record_creates_an_empty_one_in_inventory()
+    {
+        var stockItems = new FakeStockItemRepository();
+        var productId = Guid.NewGuid();
+
+        await CreateAdapter(stockItems).EnsureStockRecordAsync(productId, CancellationToken.None);
+
+        (await stockItems.GetByProductIdAsync(productId, CancellationToken.None))!.QuantityOnHand.Should().Be(0);
     }
 }

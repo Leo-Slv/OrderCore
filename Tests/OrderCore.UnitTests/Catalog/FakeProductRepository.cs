@@ -39,6 +39,19 @@ internal sealed class FakeProductRepository : IProductRepository
         return Task.FromResult<(IReadOnlyList<Product>, int)>((page, matching.Count));
     }
 
+    /// <summary>Applies the id restriction and the status filter, newest first, and paging.</summary>
+    public Task<(IReadOnlyList<Product> Items, int TotalCount)> ListForAdminAsync(
+        ListAdminProductsFilter filter, IReadOnlyCollection<Guid>? onlyProductIds, CancellationToken cancellationToken)
+    {
+        var matching = _products.Values
+            .Where(p => onlyProductIds is null || onlyProductIds.Contains(p.Id))
+            .Where(p => filter.Status is null || p.Status == filter.Status)
+            .OrderByDescending(p => p.CreatedAt)
+            .ToList();
+        var page = matching.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize).ToList();
+        return Task.FromResult<(IReadOnlyList<Product>, int)>((page, matching.Count));
+    }
+
     public Task AddAsync(Product product, CancellationToken cancellationToken)
     {
         _products[product.Id] = product;

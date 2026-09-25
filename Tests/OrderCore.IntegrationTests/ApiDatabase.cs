@@ -142,14 +142,28 @@ public sealed class ApiDatabase : IAsyncLifetime
         return (productId, product.GetProperty("slug").GetString()!);
     }
 
-    /// <summary>Directly in the database: no endpoint creates a stock record yet.</summary>
+    /// <summary>
+    /// Directly in the database, for tests about something else than
+    /// receiving stock: puts <paramref name="quantity"/> units in the
+    /// product's stock record (created with the product), or creates the
+    /// record for a product that never went through the catalog.
+    /// </summary>
     public async Task SeedStockAsync(Guid productId, int quantity)
     {
         await using var inventoryDb = new InventoryDbContext(Options<InventoryDbContext>());
         var stockItems = new EfStockItemRepository(inventoryDb);
         var unitOfWork = new InventoryUnitOfWork(
             inventoryDb, stockItems, new EfInventoryReservationRepository(inventoryDb), new NoOpDomainEventDispatcher());
-        await stockItems.AddAsync(StockItem.Create(productId, quantity, null, DateTimeOffset.UtcNow), CancellationToken.None);
+        var stockItem = await stockItems.GetByProductIdAsync(productId, CancellationToken.None);
+        if (stockItem is null)
+        {
+            await stockItems.AddAsync(StockItem.Create(productId, quantity, null, DateTimeOffset.UtcNow), CancellationToken.None);
+        }
+        else if (quantity > 0)
+        {
+            stockItem.Receive(quantity, "test seed", DateTimeOffset.UtcNow);
+        }
+
         await unitOfWork.SaveChangesAsync(CancellationToken.None);
     }
 

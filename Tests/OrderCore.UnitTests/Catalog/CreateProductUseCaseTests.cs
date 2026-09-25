@@ -19,8 +19,12 @@ public sealed class CreateProductUseCaseTests
         return (new FakeProductRepository(), categories, category.Id);
     }
 
-    private static CreateProductUseCase CreateUseCase(FakeProductRepository products, FakeCategoryRepository categories) =>
-        new(products, new FakeStockAvailabilityProvider(), categories, new FakeAuditLogService(), TimeProvider.System);
+    private static CreateProductUseCase CreateUseCase(
+        FakeProductRepository products, FakeCategoryRepository categories, FakeStockAvailabilityProvider? stock = null)
+    {
+        stock ??= new FakeStockAvailabilityProvider();
+        return new(products, stock, stock, categories, new FakeAuditLogService(), TimeProvider.System);
+    }
 
     [Fact]
     public async Task ExecuteAsync_creates_a_product_with_a_slug_derived_from_the_name()
