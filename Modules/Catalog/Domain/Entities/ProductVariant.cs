@@ -1,3 +1,4 @@
+using System.Text.Json;
 using OrderCore.Api.Shared.Domain;
 
 namespace OrderCore.Api.Modules.Catalog.Domain.Entities;
@@ -11,6 +12,10 @@ namespace OrderCore.Api.Modules.Catalog.Domain.Entities;
 /// </summary>
 public sealed class ProductVariant : Entity<Guid>
 {
+    public const int MaxSkuLength = 50;
+
+    public const int MaxNameLength = 200;
+
     public string Sku { get; private set; } = string.Empty;
 
     public string Name { get; private set; } = string.Empty;
@@ -53,7 +58,36 @@ public sealed class ProductVariant : Entity<Guid>
             throw new ArgumentException("Name is required.", nameof(name));
         }
 
-        return new ProductVariant(Guid.NewGuid(), sku, name, attributesJson, additionalPrice, now);
+        if (sku.Trim().Length > MaxSkuLength || name.Trim().Length > MaxNameLength)
+        {
+            throw new ArgumentException($"Sku can have at most {MaxSkuLength} characters and name at most {MaxNameLength}.", nameof(sku));
+        }
+
+        if (!IsJsonObject(attributesJson))
+        {
+            throw new ArgumentException("Attributes must be a JSON object, e.g. {\"size\":\"M\"}.", nameof(attributesJson));
+        }
+
+        return new ProductVariant(Guid.NewGuid(), sku.Trim(), name.Trim(), attributesJson, additionalPrice, now);
+    }
+
+    /// <summary>The column is <c>jsonb</c>: anything else would fail in the database, not here.</summary>
+    private static bool IsJsonObject(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     public void ChangeAdditionalPrice(decimal newAdditionalPrice)

@@ -123,8 +123,33 @@ public sealed class Product : AggregateRoot<Guid>
 
         var oldPrice = CurrentPrice;
         CurrentPrice = newPrice;
+
+        // A "was" price that is no longer above the price would advertise a
+        // promotion that doesn't exist.
+        if (CompareAtPrice <= newPrice)
+        {
+            CompareAtPrice = null;
+        }
+
         IncrementVersion();
         Raise(new ProductPriceChanged(Guid.NewGuid(), now, Id, oldPrice, newPrice));
+    }
+
+    /// <summary>
+    /// The "was" price shown struck through next to <see cref="CurrentPrice"/>
+    /// (a promotion). It must be above the current price; <c>null</c> ends
+    /// the promotion.
+    /// </summary>
+    public void SetCompareAtPrice(decimal? compareAtPrice)
+    {
+        if (compareAtPrice is { } price && price <= CurrentPrice)
+        {
+            throw new DomainRuleViolationException(
+                "invalid_compare_at_price", "The compare-at price must be greater than the current price.");
+        }
+
+        CompareAtPrice = compareAtPrice;
+        IncrementVersion();
     }
 
     public void UpdateDetails(string name, string? shortDescription, string? description, string? brand)
@@ -173,6 +198,7 @@ public sealed class Product : AggregateRoot<Guid>
     public void AddImage(string url, string? altText, bool isPrimary, DateTimeOffset now)
     {
         var image = ProductImage.Create(url, altText, isPrimary, now);
+        image.SetDisplayOrder(_images.Count == 0 ? 0 : _images.Max(i => i.DisplayOrder) + 1);
 
         if (isPrimary)
         {
@@ -195,8 +221,19 @@ public sealed class Product : AggregateRoot<Guid>
         IncrementVersion();
     }
 
+    /// <summary>
+    /// <paramref name="orderedImageIds"/> must list every image of the product
+    /// exactly once, in the new order; a partial list would leave two
+    /// images sharing a position.
+    /// </summary>
     public void ReorderImages(IReadOnlyList<Guid> orderedImageIds)
     {
+        if (orderedImageIds.Count != _images.Count || orderedImageIds.Distinct().Count() != orderedImageIds.Count)
+        {
+            throw new DomainRuleViolationException(
+                "invalid_image_order", "The new order must list every image of the product exactly once.");
+        }
+
         for (var index = 0; index < orderedImageIds.Count; index++)
         {
             var image = _images.FirstOrDefault(i => i.Id == orderedImageIds[index])
@@ -214,6 +251,12 @@ public sealed class Product : AggregateRoot<Guid>
     /// </summary>
     public void AddVariant(string sku, string name, string attributesJson, decimal additionalPrice, DateTimeOffset now)
     {
+        if (_variants.Any(v => string.Equals(v.Sku, sku?.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new DomainRuleViolationException(
+                "variant_sku_already_exists", $"The product already has a variant with SKU '{sku}'.");
+        }
+
         var variant = ProductVariant.Create(sku, name, attributesJson, additionalPrice, now);
         _variants.Add(variant);
         IncrementVersion();

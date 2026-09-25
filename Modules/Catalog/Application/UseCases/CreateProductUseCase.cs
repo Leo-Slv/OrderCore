@@ -12,6 +12,7 @@ public sealed class CreateProductUseCase
 {
     private readonly IProductRepository _products;
     private readonly IStockAvailabilityProvider _availability;
+    private readonly IStockLevels _stockLevels;
     private readonly ICategoryRepository _categories;
     private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
@@ -19,12 +20,14 @@ public sealed class CreateProductUseCase
     public CreateProductUseCase(
         IProductRepository products,
         IStockAvailabilityProvider availability,
+        IStockLevels stockLevels,
         ICategoryRepository categories,
         IAuditLogService auditLog,
         TimeProvider timeProvider)
     {
         _products = products;
         _availability = availability;
+        _stockLevels = stockLevels;
         _categories = categories;
         _auditLog = auditLog;
         _timeProvider = timeProvider;
@@ -56,6 +59,10 @@ public sealed class CreateProductUseCase
             new Dictionary<string, string?> { ["sku"] = product.Sku },
             userId: null,
             cancellationToken);
+
+        // After the product is saved: if this fails, the product exists without
+        // a stock record until it is published, which ensures it again.
+        await _stockLevels.EnsureStockRecordAsync(product.Id, cancellationToken);
 
         var availability = await _availability.GetAvailabilityAsync(product.Id, cancellationToken);
         return ProductOutput.From(product, availability);

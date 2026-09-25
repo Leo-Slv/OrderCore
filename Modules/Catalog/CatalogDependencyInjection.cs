@@ -21,7 +21,10 @@ public static class CatalogDependencyInjection
 
         services.AddScoped<IProductRepository, EfProductRepository>();
         services.AddScoped<ICategoryRepository, EfCategoryRepository>();
-        services.AddScoped<IStockAvailabilityProvider, InventoryStockAvailabilityAdapter>();
+        // One adapter instance behind both contracts.
+        services.AddScoped<InventoryStockAvailabilityAdapter>();
+        services.AddScoped<IStockAvailabilityProvider>(sp => sp.GetRequiredService<InventoryStockAvailabilityAdapter>());
+        services.AddScoped<IStockLevels>(sp => sp.GetRequiredService<InventoryStockAvailabilityAdapter>());
 
         services.AddScoped<CreateProductUseCase>();
         services.AddScoped<UpdateProductUseCase>();
@@ -30,6 +33,11 @@ public static class CatalogDependencyInjection
         services.AddScoped<GetProductByIdUseCase>();
         services.AddScoped<GetProductBySlugUseCase>();
         services.AddScoped<ListProductsUseCase>();
+        services.AddScoped<ListAdminProductsUseCase>();
+        services.AddScoped<SetCompareAtPriceUseCase>();
+        services.AddScoped<DiscontinueProductUseCase>();
+        services.AddScoped<ManageProductImagesUseCase>();
+        services.AddScoped<ManageProductVariantsUseCase>();
         services.AddScoped<CreateCategoryUseCase>();
         services.AddScoped<ListCategoriesUseCase>();
 

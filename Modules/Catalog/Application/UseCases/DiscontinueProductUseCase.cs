@@ -6,26 +6,22 @@ using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Catalog.Application.UseCases;
 
-public sealed class PublishProductUseCase
+/// <summary>
+/// Takes a product off sale for good: it leaves the storefront (listing,
+/// product page, cart and checkout all treat it as unavailable) but stays
+/// in the backoffice and in the orders that already bought it.
+/// </summary>
+public sealed class DiscontinueProductUseCase
 {
     private readonly IProductRepository _products;
     private readonly IStockAvailabilityProvider _availability;
-    private readonly IStockLevels _stockLevels;
     private readonly IAuditLogService _auditLog;
-    private readonly TimeProvider _timeProvider;
 
-    public PublishProductUseCase(
-        IProductRepository products,
-        IStockAvailabilityProvider availability,
-        IStockLevels stockLevels,
-        IAuditLogService auditLog,
-        TimeProvider timeProvider)
+    public DiscontinueProductUseCase(IProductRepository products, IStockAvailabilityProvider availability, IAuditLogService auditLog)
     {
         _products = products;
         _availability = availability;
-        _stockLevels = stockLevels;
         _auditLog = auditLog;
-        _timeProvider = timeProvider;
     }
 
     public async Task<ProductOutput> ExecuteAsync(Guid productId, CancellationToken cancellationToken)
@@ -33,15 +29,10 @@ public sealed class PublishProductUseCase
         var product = await _products.GetByIdAsync(productId, cancellationToken)
             ?? throw new NotFoundException("product_not_found", $"Product '{productId}' was not found.");
 
-        product.Publish(_timeProvider.GetUtcNow());
+        product.Discontinue();
         await _products.SaveChangesAsync(cancellationToken);
 
-        await _auditLog.RecordAsync(AuditLogActionNames.ProductPublished, "Product", productId, metadata: null, userId: null, cancellationToken);
-
-        // Idempotent: normally created with the product already; this repairs a
-        // product whose creation failed before its stock record was made, and
-        // any created before stock records were ensured (backoffice decision 6).
-        await _stockLevels.EnsureStockRecordAsync(product.Id, cancellationToken);
+        await _auditLog.RecordAsync(AuditLogActionNames.ProductDiscontinued, "Product", productId, metadata: null, userId: null, cancellationToken);
 
         var availability = await _availability.GetAvailabilityAsync(product.Id, cancellationToken);
         return ProductOutput.From(product, availability);

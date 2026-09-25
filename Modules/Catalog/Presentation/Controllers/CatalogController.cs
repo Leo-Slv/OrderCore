@@ -17,10 +17,9 @@ namespace OrderCore.Api.Modules.Catalog.Presentation.Controllers;
 /// AuditLogsController (see the note on CustomersController about
 /// 02-customers.md's CustomersEndpoints).
 ///
-/// ChangeProductPriceUseCase has no route here: 03-catalog.md's
-/// CatalogController never wires it to an endpoint, so it stays reachable
-/// only from other Application-layer code until the diagram says
-/// otherwise.
+/// The rest of the admin product operations (price, promotion,
+/// discontinue, images, variants) live in <see cref="ProductManagementController"/>,
+/// and the backoffice list in <see cref="CatalogAdminController"/>.
 /// </summary>
 [ApiController]
 [Route("catalog")]

@@ -96,6 +96,48 @@ public sealed class EfProductRepository : IProductRepository
         return (models.Select(Track).ToList(), totalCount);
     }
 
+    public async Task<(IReadOnlyList<Product> Items, int TotalCount)> ListForAdminAsync(
+        ListAdminProductsFilter filter, IReadOnlyCollection<Guid>? onlyProductIds, CancellationToken cancellationToken)
+    {
+        IQueryable<ProductPersistenceModel> query = _dbContext.Products;
+
+        if (onlyProductIds is not null)
+        {
+            query = query.Where(p => onlyProductIds.Contains(p.Id));
+        }
+
+        if (filter.Status is { } status)
+        {
+            var statusName = status.ToString();
+            query = query.Where(p => p.Status == statusName);
+        }
+
+        if (filter.CategoryId is { } categoryId)
+        {
+            query = query.Where(p => p.CategoryId == categoryId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.SearchTerm))
+        {
+            var pattern = $"%{filter.SearchTerm.Trim()}%";
+            query = query.Where(p => EF.Functions.ILike(p.Name, pattern) || EF.Functions.ILike(p.Sku, pattern));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var models = await query
+            .OrderByDescending(p => p.CreatedAt)
+            .ThenBy(p => p.Id)
+            .Include(p => p.Images)
+            .Include(p => p.Variants)
+            .AsSplitQuery()
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
+            .ToListAsync(cancellationToken);
+
+        return (models.Select(Track).ToList(), totalCount);
+    }
+
     public async Task AddAsync(Product product, CancellationToken cancellationToken)
     {
         var model = ProductMapper.ToPersistence(product);

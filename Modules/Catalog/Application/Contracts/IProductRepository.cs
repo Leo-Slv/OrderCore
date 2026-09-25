@@ -32,6 +32,14 @@ public interface IProductRepository
     Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(
         ListProductsFilter filter, bool publishedOnly, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The backoffice list: every status, newest first. With
+    /// <paramref name="onlyProductIds"/>, only those products are considered
+    /// (the stock-state filter, resolved by Inventory).
+    /// </summary>
+    Task<(IReadOnlyList<Product> Items, int TotalCount)> ListForAdminAsync(
+        ListAdminProductsFilter filter, IReadOnlyCollection<Guid>? onlyProductIds, CancellationToken cancellationToken);
+
     Task AddAsync(Product product, CancellationToken cancellationToken);
 
     Task SaveChangesAsync(CancellationToken cancellationToken);

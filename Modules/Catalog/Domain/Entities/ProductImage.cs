@@ -10,6 +10,10 @@ namespace OrderCore.Api.Modules.Catalog.Domain.Entities;
 /// </summary>
 public sealed class ProductImage : Entity<Guid>
 {
+    public const int MaxUrlLength = 2000;
+
+    public const int MaxAltTextLength = 200;
+
     public string Url { get; private set; } = string.Empty;
 
     public string? AltText { get; private set; }
@@ -37,6 +41,18 @@ public sealed class ProductImage : Entity<Guid>
         if (string.IsNullOrWhiteSpace(url))
         {
             throw new ArgumentException("Url is required.", nameof(url));
+        }
+
+        if (url.Length > MaxUrlLength
+            || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException($"Url must be an absolute http(s) address of at most {MaxUrlLength} characters.", nameof(url));
+        }
+
+        if (altText?.Length > MaxAltTextLength)
+        {
+            throw new ArgumentException($"Alt text can have at most {MaxAltTextLength} characters.", nameof(altText));
         }
 
         return new ProductImage(Guid.NewGuid(), url, altText, isPrimary, now);

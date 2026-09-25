@@ -31,6 +31,8 @@ public static class AuditLogActionNames
     public const string ProductCreated = "ProductCreated";
     public const string ProductPriceChanged = "ProductPriceChanged";
     public const string ProductPublished = "ProductPublished";
+    public const string ProductPromotionChanged = "ProductPromotionChanged";
+    public const string ProductDiscontinued = "ProductDiscontinued";
 
     public const string CustomerCreated = "CustomerCreated";
     public const string UserAccountCreated = "UserAccountCreated";
