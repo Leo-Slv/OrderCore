@@ -21,6 +21,12 @@ Adicionado pelo MVP do storefront (`Docs/specs/storefront/storefront-api-mvp.md`
 - **Acompanhamento** — `RequestPayment` passou a disparar `OrderPaymentRequested`, para o histórico registrar `Created → PendingPayment`; `order_status_history` ganhou `Sequence` (identity) para manter a ordem de transições gravadas no mesmo save com o mesmo horário; `IOrderStatusHistoryReader`/`EfOrderStatusHistoryReader` expõem esse histórico. `GetOrderDetailsUseCase` junta o pedido ao resumo do pagamento; `ListCustomerOrdersUseCase` e `IOrderRepository.ListByCustomerIdAsync` ficaram paginados (mais novo primeiro).
 - `OrderPresenter.ToResponse(CreateOrderResult)` foi removido (não era usado por nenhum endpoint).
 
+Adicionado pela autenticação (V2, `Docs/specs/identity/authentication-and-account.md`):
+
+- **O cliente vem do token.** O checkout (política `Customer`) usa `ICurrentUser.CustomerId`; `CheckoutRequest.CustomerId` foi removido, então ninguém compra em nome de outro cliente.
+- **Só o dono vê o pedido.** `GetOrderDetailsUseCase`/`GetOrderStatusHistoryUseCase` recebem o cliente que está pedindo (`null` para admin); `OrderAccess` responde `order_not_found` para o pedido de outro cliente, igual a um pedido que não existe, para ids não poderem ser sondados. É regra de caso de uso, não do controller.
+- **`GET orders/me`**: o histórico do cliente logado. `GET orders/customers/{id}` e os endpoints passo a passo (`POST orders`, `PUT …/addresses`, `request-payment`, `cancel`) ficaram só para admin.
+
 ```mermaid
 
 classDiagram
@@ -77,6 +83,11 @@ classDiagram
         <<external>>
     }
 
+    class ICurrentUser {
+        <<external>>
+        <<interface>>
+    }
+
     class PaymentAuthorized {
         <<external>>
     }
@@ -94,6 +105,7 @@ classDiagram
     note for GetCustomerAddressUseCase "Customers module — ver 02-customers.md"
     note for CreatePaymentUseCase "Payments module — ver 06-payments.md"
     note for GetPaymentByOrderIdUseCase "Payments module — ver 06-payments.md"
+    note for ICurrentUser "Shared kernel — ver 01-shared-kernel.md"
     note for PaymentAuthorized "Payments module — ver 06-payments.md"
     note for PaymentFailed "Payments module — ver 06-payments.md"
 
@@ -413,13 +425,18 @@ classDiagram
     class GetOrderDetailsUseCase {
         -IOrderRepository orderRepository
         -IPaymentGateway paymentGateway
-        +ExecuteAsync(Guid orderId) Task~OrderDetailsOutput~
+        +ExecuteAsync(Guid orderId, Guid? requestingCustomerId) Task~OrderDetailsOutput~
+    }
+
+    class OrderAccess {
+        <<static>>
+        +LoadVisibleToAsync(IOrderRepository orders, Guid orderId, Guid? requestingCustomerId)$ Task~Order~
     }
 
     class GetOrderStatusHistoryUseCase {
         -IOrderRepository orderRepository
         -IOrderStatusHistoryReader history
-        +ExecuteAsync(Guid orderId) Task~IReadOnlyList~OrderStatusHistoryEntry~~
+        +ExecuteAsync(Guid orderId, Guid? requestingCustomerId) Task~IReadOnlyList~OrderStatusHistoryEntry~~
     }
 
     class SetOrderAddressesUseCase {
@@ -605,6 +622,7 @@ classDiagram
         -CancelOrderUseCase cancelOrderUseCase
         -CheckoutUseCase checkoutUseCase
         -QuoteCartUseCase quoteCartUseCase
+        -ICurrentUser currentUser
         +QuoteCartAsync(QuoteCartRequest request) Task~ActionResult~CartQuoteResponse~~
         +CheckoutAsync(CheckoutRequest request, string idempotencyKey) Task~ActionResult~OrderResponse~~
         +CreateOrderAsync(CreateOrderRequest request) Task~ActionResult~OrderResponse~~
@@ -612,6 +630,7 @@ classDiagram
         +RequestPaymentAsync(Guid id, RequestOrderPaymentRequest request) Task~IActionResult~
         +GetByIdAsync(Guid id) Task~ActionResult~OrderResponse~~
         +GetStatusHistoryAsync(Guid id) Task~ActionResult~IReadOnlyList~OrderStatusHistoryEntryResponse~~~
+        +ListMineAsync(int page, int pageSize) Task~ActionResult~PagedResponse~OrderSummaryResponse~~~
         +ListByCustomerAsync(Guid customerId, int page, int pageSize) Task~ActionResult~PagedResponse~OrderSummaryResponse~~~
         +CancelAsync(Guid id, CancelOrderRequest request) Task~IActionResult~
     }
@@ -622,7 +641,6 @@ classDiagram
     }
 
     class CheckoutRequest {
-        +Guid CustomerId
         +IReadOnlyList~CheckoutItemRequest~ Items
         +Guid ShippingAddressId
         +Guid BillingAddressId
@@ -754,7 +772,7 @@ classDiagram
     }
 
     class OrderPresenter {
-        +ToCommand(CheckoutRequest request, string idempotencyKey) CheckoutCommand
+        +ToCommand(CheckoutRequest request, Guid customerId, string idempotencyKey) CheckoutCommand
         +ToLines(QuoteCartRequest request) IReadOnlyList~QuoteCartLine~
         +ToResponse(OrderDetailsOutput details) OrderResponse
         +ToResponse(Order order) OrderResponse
@@ -811,6 +829,8 @@ classDiagram
     OrderPaymentSummary --> PaymentMethodChoice
     GetOrderStatusHistoryUseCase --> IOrderRepository
     GetOrderStatusHistoryUseCase --> IOrderStatusHistoryReader
+    GetOrderDetailsUseCase ..> OrderAccess : owner or admin only
+    GetOrderStatusHistoryUseCase ..> OrderAccess : owner or admin only
     IProductCatalog ..> CatalogProductSnapshot : returns
 
     IOrderRepository <|.. EfOrderRepository
@@ -858,6 +878,7 @@ classDiagram
     OrdersController --> QuoteCartUseCase
     OrdersController --> GetOrderDetailsUseCase
     OrdersController --> GetOrderStatusHistoryUseCase
+    OrdersController --> ICurrentUser : customer from the token
     OrdersController --> OrderPresenter
     OrderPresenter --> OrderResponse
     OrderPresenter --> OrderSummaryResponse
@@ -888,6 +909,6 @@ O documento de modelagem de banco já especificava `internal_notes` e `updated_a
 O caminho que o front usa, em vez de encadear os passos acima:
 
 1. `POST orders/cart/quote` → `QuoteCartUseCase` reprecifica o carrinho (sem reservar nada).
-2. `POST orders/checkout` (header `Idempotency-Key`) → `CheckoutUseCase`: endereços (`CustomerDirectoryAdapter`) → produtos (`ProductCatalogAdapter.GetManyAsync`) → reserva (`InventoryServiceAdapter`) → salva o pedido já `PendingPayment` → `PaymentGatewayAdapter.RequestPaymentAsync`. Responde 202 com o pedido.
+2. `POST orders/checkout` (access token do cliente, header `Idempotency-Key`) → `CheckoutUseCase`: endereços (`CustomerDirectoryAdapter`) → produtos (`ProductCatalogAdapter.GetManyAsync`) → reserva (`InventoryServiceAdapter`) → salva o pedido já `PendingPayment` → `PaymentGatewayAdapter.RequestPaymentAsync`. Responde 202 com o pedido.
 3. O outbox de Payments publica `PaymentAuthorized`/`PaymentFailed` (a cada 5 s) → os mesmos integration event handlers confirmam ou falham o pedido.
-4. O front faz polling de `GET orders/{id}` (`GetOrderDetailsUseCase`, com o resumo do pagamento) e desenha a timeline com `GET orders/{id}/status-history`.
+4. O front faz polling de `GET orders/{id}` (`GetOrderDetailsUseCase`, com o resumo do pagamento) e desenha a timeline com `GET orders/{id}/status-history`; o histórico do cliente vem de `GET orders/me`.

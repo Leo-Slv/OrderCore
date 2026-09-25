@@ -13,7 +13,7 @@ Como [02-customers.md](02-customers.md), este módulo já está **implementado**
 
 Adicionado pelo MVP do storefront (`Docs/specs/storefront/storefront-api-mvp.md`, etapa 3):
 
-- **Listagem da vitrine** — `GET catalog/products` passou a devolver `PagedResponse<ProductSummaryResponse>` (total de itens/páginas, `pageSize` até 100), com ordenação `Sort` (`Name`, `PriceAsc`, `PriceDesc`, `Newest`, sempre com `Id` como desempate) e filtro `OnSale` (`CompareAtPrice > CurrentPrice`). `IProductRepository.ListAsync` devolve `(Items, TotalCount)`, no mesmo formato de `IAuditLogRepository.ListPagedAsync`. A listagem continua trazendo rascunhos se o chamador não mandar `active=true` (o admin também a usa; esconder do público depende de autenticação).
+- **Listagem da vitrine** — `GET catalog/products` passou a devolver `PagedResponse<ProductSummaryResponse>` (total de itens/páginas, `pageSize` até 100), com ordenação `Sort` (`Name`, `PriceAsc`, `PriceDesc`, `Newest`, sempre com `Id` como desempate) e filtro `OnSale` (`CompareAtPrice > CurrentPrice`). `IProductRepository.ListAsync` devolve `(Items, TotalCount)`, no mesmo formato de `IAuditLogRepository.ListPagedAsync`. Só admins veem rascunhos, produtos descontinuados ou desativados na listagem: para os demais o repositório restringe a produtos publicados e ativos (`publishedOnly`), por um argumento que nenhuma query string consegue ligar ou desligar (V2, autenticação).
 - **Página do produto por slug** — `GET catalog/products/by-slug/{slug}` (`GetProductBySlugUseCase`) só devolve produto publicado e ativo; rascunho, descontinuado e slug mal formado dão o mesmo 404. `Slug.IsValid` (shared kernel) evita tratar um slug mal formado como erro de validação.
 - **Slug único** — índice único em `products.Slug` (a migração `AddProductSlugUniqueIndex` renomeia duplicatas antigas antes de criar o índice) e `CreateProductUseCase` acrescenta o SKU quando o slug do nome já está em uso.
 - **Disponibilidade** — novo contrato `IStockAvailabilityProvider` (Catalog → Inventory), implementado por `InventoryStockAvailabilityAdapter` sobre `GetStockAvailabilityUseCase`; só o estado (`StockAvailability`: `InStock`/`LowStock`/`OutOfStock`) sai do Catalog, nunca quantidades. Todos os casos de uso que devolvem `ProductOutput` consultam a disponibilidade, para `ProductResponse` ter sempre o mesmo formato.
@@ -150,7 +150,7 @@ classDiagram
         +GetBySkuAsync(string sku) Task~Product?~
         +GetBySlugAsync(Slug slug) Task~Product?~
         +ListByIdsAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyList~Product~~
-        +ListAsync(ListProductsFilter filter) Task~ValueTuple~IReadOnlyList~Product~, int~~
+        +ListAsync(ListProductsFilter filter, bool publishedOnly) Task~ValueTuple~IReadOnlyList~Product~, int~~
         +AddAsync(Product product) Task
         +SaveChangesAsync() Task
     }
@@ -316,7 +316,7 @@ classDiagram
     class ListProductsUseCase {
         -IProductRepository products
         -IStockAvailabilityProvider availability
-        +ExecuteAsync(ListProductsFilter filter) Task~PagedResult~ProductSummaryOutput~~
+        +ExecuteAsync(ListProductsFilter filter, bool includeUnpublished) Task~PagedResult~ProductSummaryOutput~~
     }
 
     class CreateCategoryUseCase {
@@ -408,6 +408,13 @@ classDiagram
         <<external>>
     }
 
+    class ICurrentUser {
+        <<external>>
+        <<interface>>
+    }
+
+    note for ICurrentUser "Shared kernel — ver 01-shared-kernel.md"
+
     note for GetStockAvailabilityUseCase "Inventory module — ver 04-inventory.md"
 
     class InventoryStockAvailabilityAdapter {
@@ -426,6 +433,7 @@ classDiagram
         -ListProductsUseCase listProductsUseCase
         -CreateCategoryUseCase createCategoryUseCase
         -ListCategoriesUseCase listCategoriesUseCase
+        -ICurrentUser currentUser
         +CreateProductAsync(CreateProductRequest request) Task~ActionResult~ProductResponse~~
         +UpdateProductAsync(Guid id, UpdateProductRequest request) Task~ActionResult~ProductResponse~~
         +PublishProductAsync(Guid id) Task~IActionResult~
@@ -580,6 +588,7 @@ classDiagram
     CatalogController --> PublishProductUseCase
     CatalogController --> ListProductsUseCase
     CatalogController --> GetProductBySlugUseCase
+    CatalogController --> ICurrentUser : admins list unpublished products
     CatalogController --> CreateCategoryUseCase
     CatalogController --> ProductPresenter
     CatalogController --> CategoryPresenter

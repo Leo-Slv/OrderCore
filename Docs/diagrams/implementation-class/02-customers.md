@@ -5,11 +5,12 @@ Cadastro de clientes, endereços salvos e métodos de pagamento tokenizados. Bas
 Diferente da maioria dos diagramas desta pasta, este módulo já está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core e Presentation) — não é mais um blueprint futuro. `CustomersEndpoints` (minimal API estática) foi substituído por `CustomersController` ([ApiController]) ao implementar, para seguir a mesma convenção já usada por `AuditLogsController` em vez de introduzir um segundo padrão de Presentation (seção 33 do contexto do projeto). Outras diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
 
 - `Customer.Create`/`CustomerPaymentMethod.Create` recebem um `now` explícito (como `Order.Create`), já que `CreatedAt`/`UpdatedAt` precisam de um valor e o domínio não deve ler o relógio sozinho.
-- `RegisterCustomerCommand`/`RegisterCustomerRequest` incluem `PasswordHash` (placeholder até existir um módulo de autenticação real com hashing no servidor) e `AddCustomerAddressCommand`/`AddCustomerAddressRequest` incluem todos os campos de `Address` (não só Street/City/State/PostalCode), já que `Address.Create` exige todos eles.
+- `AddCustomerAddressCommand`/`CustomerAddressRequest` incluem todos os campos de `Address` (não só Street/City/State/PostalCode), já que `Address.Create` exige todos eles.
 - `Customer`, `CustomerAddress` e `CustomerPaymentMethod` ganharam um factory `internal static Rehydrate(...)`, distinto de `Create`, para que `CustomerMapper` reconstrua o agregado a partir do banco sem re-levantar `CustomerRegistered`.
 - `CustomerAddressPersistenceModel` guarda todos os campos de `Address` (não só Street/City/State/PostalCode) pelo mesmo motivo.
 - **Endereços no checkout** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, etapa 4): `CustomerAddressResponse` devolve o endereço completo (antes só `Label`/`City`/`IsDefaultShipping`), para o checkout poder mostrar e escolher um endereço salvo; `GetCustomerAddressUseCase` resolve um endereço de um cliente para o checkout do Orders — `customer_not_found`, `address_not_found` (também para o endereço de outro cliente) e `customer_inactive` para cliente desativado.
 - `CustomerAddressPersistenceModel.Id`/`CustomerPaymentMethodPersistenceModel.Id` usam `ValueGeneratedNever()`: o id vem do domínio, e sem isso o EF Core tratava um endereço novo num cliente já salvo como linha existente (UPDATE que não afetava nada, 409 na API).
+- **Conta do cliente** (V2, `Docs/specs/identity/authentication-and-account.md`): o `Customer` não guarda mais senha. As credenciais ficam no `UserAccount` do módulo Identity ([08-identity.md](08-identity.md)), que cria o cliente no cadastro chamando `RegisterCustomerUseCase` e guarda o id dele. O `POST customers` público foi removido: todo cliente nasce de um cadastro (`POST auth/sign-up`). O próprio cliente cuida dos seus dados em `MyAccountController` (`customers/me`: perfil e endereços, com `UpdateAddress`, `RemoveCustomerAddressUseCase` e `SetDefaultAddressUseCase`), sempre com o cliente vindo do token (`ICurrentUser`); um endereço de outro cliente responde 404, como um que não existe. `CustomersController` (por id) ficou só para admin. `AddCustomerAddressRequest` virou `CustomerAddressRequest`, usado para criar e editar.
 
 ```mermaid
 
@@ -18,6 +19,11 @@ classDiagram
 
     class AggregateRoot~TId~ {
         <<external>>
+    }
+
+    class ICurrentUser {
+        <<external>>
+        <<interface>>
     }
 
     class Address {
@@ -30,19 +36,19 @@ classDiagram
         +string Email
         +string? Phone
         +string? DocumentNumber
-        +string PasswordHash
         +bool Active
         +DateTimeOffset? EmailVerifiedAt
         +DateTimeOffset CreatedAt
         +DateTimeOffset UpdatedAt
         +IReadOnlyCollection~CustomerAddress~ Addresses
         +IReadOnlyCollection~CustomerPaymentMethod~ PaymentMethods
-        +Create(string name, string email, string passwordHash)$ Customer
+        +Create(string name, string email, DateTimeOffset now)$ Customer
         +UpdateProfile(string name, string? phone, string? documentNumber) void
         +VerifyEmail(DateTimeOffset now) void
         +Activate() void
         +Deactivate() void
         +AddAddress(CustomerAddress address) void
+        +UpdateAddress(Guid addressId, string label, string recipientName, string? phone, Address address, DateTimeOffset now) void
         +RemoveAddress(Guid addressId) void
         +SetDefaultShippingAddress(Guid addressId) void
         +SetDefaultBillingAddress(Guid addressId) void
@@ -125,6 +131,21 @@ classDiagram
         +Address Address
     }
 
+    class UpdateCustomerAddressCommand {
+        +Guid CustomerId
+        +Guid AddressId
+        +string Label
+        +string RecipientName
+        +string? Phone
+        +Address Address
+    }
+
+    class DefaultAddressKind {
+        <<enumeration>>
+        Shipping
+        Billing
+    }
+
     class CustomerOutput {
         +Guid Id
         +string Name
@@ -162,6 +183,22 @@ classDiagram
     class GetCustomerAddressUseCase {
         -ICustomerRepository customers
         +ExecuteAsync(Guid customerId, Guid addressId) Task~CustomerAddress~
+    }
+
+    class UpdateCustomerAddressUseCase {
+        -ICustomerRepository customers
+        -TimeProvider timeProvider
+        +ExecuteAsync(UpdateCustomerAddressCommand command) Task~CustomerAddress~
+    }
+
+    class RemoveCustomerAddressUseCase {
+        -ICustomerRepository customers
+        +ExecuteAsync(Guid customerId, Guid addressId) Task
+    }
+
+    class SetDefaultAddressUseCase {
+        -ICustomerRepository customers
+        +ExecuteAsync(Guid customerId, Guid addressId, DefaultAddressKind kind) Task
     }
 
 
@@ -227,23 +264,42 @@ classDiagram
 
     %% OrderCore.Api.Modules.Customers.Presentation
     class CustomersController {
-        -RegisterCustomerUseCase registerCustomerUseCase
+        <<admin>>
         -GetCustomerByIdUseCase getCustomerByIdUseCase
         -AddCustomerAddressUseCase addCustomerAddressUseCase
         -ListCustomerAddressesUseCase listCustomerAddressesUseCase
-        +RegisterAsync(RegisterCustomerRequest request) Task~ActionResult~CustomerResponse~~
         +GetByIdAsync(Guid id) Task~ActionResult~CustomerResponse~~
-        +AddAddressAsync(Guid id, AddCustomerAddressRequest request) Task~IActionResult~
+        +AddAddressAsync(Guid id, CustomerAddressRequest request) Task~IActionResult~
         +ListAddressesAsync(Guid id) Task~ActionResult~IReadOnlyList~CustomerAddressResponse~~~
     }
 
-    class RegisterCustomerRequest {
+    class MyAccountController {
+        <<customer>>
+        -GetCustomerByIdUseCase getCustomer
+        -UpdateCustomerProfileUseCase updateProfile
+        -ListCustomerAddressesUseCase listAddresses
+        -AddCustomerAddressUseCase addAddress
+        -GetCustomerAddressUseCase getAddress
+        -UpdateCustomerAddressUseCase updateAddress
+        -RemoveCustomerAddressUseCase removeAddress
+        -SetDefaultAddressUseCase setDefaultAddress
+        -ICurrentUser currentUser
+        +GetProfileAsync() Task~ActionResult~CustomerResponse~~
+        +UpdateProfileAsync(UpdateProfileRequest request) Task~ActionResult~CustomerResponse~~
+        +ListAddressesAsync() Task~ActionResult~IReadOnlyList~CustomerAddressResponse~~~
+        +AddAddressAsync(CustomerAddressRequest request) Task~ActionResult~CustomerAddressResponse~~
+        +UpdateAddressAsync(Guid addressId, CustomerAddressRequest request) Task~ActionResult~CustomerAddressResponse~~
+        +RemoveAddressAsync(Guid addressId) Task~IActionResult~
+        +SetDefaultShippingAddressAsync(Guid addressId) Task~IActionResult~
+        +SetDefaultBillingAddressAsync(Guid addressId) Task~IActionResult~
+    }
+
+    class UpdateProfileRequest {
         +string Name
-        +string Email
         +string? Phone
     }
 
-    class AddCustomerAddressRequest {
+    class CustomerAddressRequest {
         +string Label
         +string RecipientName
         +string Street
@@ -277,6 +333,8 @@ classDiagram
     }
 
     class CustomerPresenter {
+        +ToCommand(Guid customerId, CustomerAddressRequest request) AddCustomerAddressCommand
+        +ToCommand(Guid customerId, Guid addressId, CustomerAddressRequest request) UpdateCustomerAddressCommand
         +ToResponse(CustomerOutput output) CustomerResponse
         +ToResponse(CustomerAddress address) CustomerAddressResponse
     }
@@ -297,6 +355,10 @@ classDiagram
     GetCustomerByIdUseCase --> ICustomerRepository
     ListCustomerAddressesUseCase --> ICustomerRepository
     GetCustomerAddressUseCase --> ICustomerRepository
+    UpdateCustomerAddressUseCase --> ICustomerRepository
+    RemoveCustomerAddressUseCase --> ICustomerRepository
+    SetDefaultAddressUseCase --> ICustomerRepository
+    SetDefaultAddressUseCase ..> DefaultAddressKind
 
     ICustomerRepository <|.. EfCustomerRepository
     EfCustomerRepository --> CustomersDbContext
@@ -310,11 +372,20 @@ classDiagram
     CustomersDependencyInjection --> RegisterCustomerUseCase : registers
     CustomersDependencyInjection --> ICustomerRepository : registers
 
-    CustomersController --> RegisterCustomerUseCase
     CustomersController --> GetCustomerByIdUseCase
     CustomersController --> AddCustomerAddressUseCase
     CustomersController --> ListCustomerAddressesUseCase
     CustomersController --> CustomerPresenter
+    MyAccountController --> GetCustomerByIdUseCase
+    MyAccountController --> UpdateCustomerProfileUseCase
+    MyAccountController --> ListCustomerAddressesUseCase
+    MyAccountController --> AddCustomerAddressUseCase
+    MyAccountController --> GetCustomerAddressUseCase
+    MyAccountController --> UpdateCustomerAddressUseCase
+    MyAccountController --> RemoveCustomerAddressUseCase
+    MyAccountController --> SetDefaultAddressUseCase
+    MyAccountController --> ICurrentUser : customer from the token
+    MyAccountController --> CustomerPresenter
     CustomerPresenter --> CustomerResponse
     CustomerPresenter --> CustomerAddressResponse
 
@@ -326,9 +397,10 @@ classDiagram
 
 ## Paridade com `Docs/database/OrderCore_Modelagem_Banco_Backend.docx`
 
-`PasswordHash` (em `Customer`) e `UpdatedAt` (em `CustomerAddress`) já existiam no documento de modelagem de banco (seção 4.1/4.2) mas não tinham chegado a este diagrama — adicionados agora, junto com o parâmetro `now`/`passwordHash` que faltava nos respectivos `Create` para que os campos possam de fato ser preenchidos. `CustomerPaymentMethod.UpdatedAt` não existia em nenhum dos dois documentos — foi acrescentado em ambos por consistência com toda entidade mutável do sistema (`Customer`, `CustomerAddress`, `Category`, `Product` etc. já rastreiam `updated_at`); mantido como responsabilidade da camada de persistência, sem entrar na assinatura de `MarkAsDefault`/`UnmarkAsDefault`.
+`UpdatedAt` (em `CustomerAddress`) já existia no documento de modelagem de banco (seção 4.2) mas não tinha chegado a este diagrama — adicionado, junto com o parâmetro `now` que faltava no `Create`. O `PasswordHash` que a seção 4.1 punha em `Customer` saiu daqui na V2: a senha passou para o `UserAccount` do Identity (tabela `user_accounts`). `CustomerPaymentMethod.UpdatedAt` não existia em nenhum dos dois documentos — foi acrescentado em ambos por consistência com toda entidade mutável do sistema (`Customer`, `CustomerAddress`, `Category`, `Product` etc. já rastreiam `updated_at`); mantido como responsabilidade da camada de persistência, sem entrar na assinatura de `MarkAsDefault`/`UnmarkAsDefault`.
 
 ## Consumido por outros módulos
 
 - Nenhum outro módulo referencia `Customer` diretamente — `Order.CustomerId` guarda apenas o id (ver [05-orders.md](05-orders.md)), seguindo a mesma regra de isolamento que já existe entre Orders e Payments no código atual.
 - **Orders** chama `GetCustomerAddressUseCase` de dentro de um `CustomerDirectoryAdapter` (implementa o `ICustomerDirectory` do Orders) no checkout; só o value object `Address` (shared kernel) atravessa a fronteira — ver [05-orders.md](05-orders.md).
+- **Identity** chama `RegisterCustomerUseCase` de dentro de um `CustomerRegistryAdapter` (implementa o `ICustomerRegistry` do Identity) no cadastro, e guarda só o id do cliente criado — ver [08-identity.md](08-identity.md).

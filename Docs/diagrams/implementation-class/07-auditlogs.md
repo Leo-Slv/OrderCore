@@ -19,6 +19,11 @@ classDiagram
         <<external>>
     }
 
+    class ICurrentUser {
+        <<external>>
+        <<interface>>
+    }
+
     %% OrderCore.Api.Modules.AuditLogs.Domain.Entities
     class AuditLog {
         +Guid? UserId
@@ -61,6 +66,8 @@ classDiagram
         +ProductPriceChanged string$
         +ProductPublished string$
         +CustomerCreated string$
+        +UserAccountCreated string$
+        +RefreshTokenReuseDetected string$
     }
 
 
@@ -91,6 +98,7 @@ classDiagram
     class AuditLogService {
         -IAuditLogRepository auditLogs
         -TimeProvider timeProvider
+        -ICurrentUser currentUser
         +RecordAsync(string action, string entityName, Guid? entityId, IReadOnlyDictionary~string, string?~? metadata, Guid? userId) Task
     }
 
@@ -170,12 +178,13 @@ classDiagram
     AuditLogsController --> AuditLogPresenter
     AuditLogPresenter --> AuditLogResponse
     AuditLogPresenter --> PagedResponse~T~
+    AuditLogService --> ICurrentUser : actor when userId is null
 
 ```
 
 ## Consumido por outros módulos
 
-Ver `Docs/specs/auditlogs/cross-module-audit-trail.md` para o WHAT/WHY completo. Todas as 16 constantes de `AuditLogActionNames` agora têm pelo menos um call site real, sempre injetando `IAuditLogService` diretamente (nunca `AuditLog`, `IAuditLogRepository` ou `InMemoryAuditLogRepository` — Application Contract, seção 7) e chamando `RecordAsync` só depois que o próprio `SaveChangesAsync` do caso de uso tiver sucesso, com `userId: null` em todos os casos (o projeto ainda não tem conceito de usuário autenticado):
+Ver `Docs/specs/auditlogs/cross-module-audit-trail.md` para o WHAT/WHY completo. Todas as 18 constantes de `AuditLogActionNames` têm pelo menos um call site real, sempre injetando `IAuditLogService` diretamente (nunca `AuditLog`, `IAuditLogRepository` ou `InMemoryAuditLogRepository` — Application Contract, seção 7) e chamando `RecordAsync` só depois que o próprio `SaveChangesAsync` do caso de uso tiver sucesso. Quem chama normalmente passa `userId: null`: `AuditLogService` completa com o usuário autenticado da requisição (`ICurrentUser`, shared kernel), então toda ação feita por um cliente ou admin logado registra quem a fez sem que cada call site precise saber disso. Trabalho em background (ex.: o outbox confirmando um pedido) não tem usuário e fica sem autor, ou seja, foi o sistema. Os casos de uso do Identity passam o `userId` explicitamente, porque no cadastro e no refresh ainda não há ninguém autenticado na requisição:
 
 | Módulo | Caso de uso | Ação | entityName |
 |---|---|---|---|
@@ -195,5 +204,7 @@ Ver `Docs/specs/auditlogs/cross-module-audit-trail.md` para o WHAT/WHY completo.
 | Catalog | `ChangeProductPriceUseCase` | `ProductPriceChanged` | `Product` |
 | Catalog | `PublishProductUseCase` | `ProductPublished` | `Product` |
 | Customers | `RegisterCustomerUseCase` | `CustomerCreated` | `Customer` |
+| Identity | `SignUpCustomerUseCase`/`SeedAdminUseCase` | `UserAccountCreated` | `UserAccount` |
+| Identity | `RefreshSessionUseCase` | `RefreshTokenReuseDetected` (um refresh token já rotacionado foi reapresentado; a sessão inteira foi revogada) | `UserAccount` |
 
 Para Inventory, `entityId` é o `InventoryReservation.Id`, não o `StockItem` — é a reserva que carrega o ciclo de vida Reserved/Released/Consumed/Expired que essas quatro ações nomeiam.

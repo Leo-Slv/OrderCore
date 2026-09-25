@@ -11,6 +11,7 @@ Comece por [implementation-class/00-overview.md](implementation-class/00-overvie
 5. [Orders](implementation-class/05-orders.md)
 6. [Payments](implementation-class/06-payments.md)
 7. [AuditLogs](implementation-class/07-auditlogs.md) — módulo técnico/transversal.
+8. [Identity](implementation-class/08-identity.md) — módulo técnico/transversal: contas, credenciais e sessões.
 
 Todos os módulos já estão implementados; cada diagrama reflete o código atual e lista, no topo, onde ele difere do desenho original (incluindo o que o MVP do storefront acrescentou — ver `Docs/specs/storefront/storefront-api-mvp.md`).
 

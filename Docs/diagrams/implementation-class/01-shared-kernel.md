@@ -56,6 +56,28 @@ classDiagram
         +string Code
     }
 
+    class UnauthorizedException {
+        <<exception>>
+        +string Code
+    }
+
+
+    %% OrderCore.Api.Shared.Application.Abstractions (authentication)
+    class ICurrentUser {
+        <<interface>>
+        +Guid? UserId
+        +Guid? CustomerId
+        +string? Role
+        +bool IsAuthenticated
+        +bool IsAdmin
+    }
+
+    class UserRoles {
+        <<static>>
+        +string Customer$
+        +string Admin$
+    }
+
     class Address {
         +string Street
         +string Number
@@ -102,6 +124,40 @@ classDiagram
     }
 
 
+    class ProblemDetailsDefaults {
+        <<static>>
+        +AddDefaultCode(ProblemDetailsContext context)$ void
+        +DefaultCodeFor(int status)$ string?
+    }
+
+
+    %% OrderCore.Api.Shared.Presentation.Authentication
+    class OrderCoreClaimTypes {
+        <<static>>
+        +string UserId$
+        +string Email$
+        +string Role$
+        +string CustomerId$
+    }
+
+    class HttpContextCurrentUser {
+        -IHttpContextAccessor httpContextAccessor
+    }
+
+    class AuthorizationPolicies {
+        <<static>>
+        +string Customer$
+        +string Admin$
+        +AddOrderCoreAuthorization(IServiceCollection services)$ IServiceCollection
+    }
+
+
+    %% OrderCore.Api.Shared.Presentation.OpenApi
+    class BearerSecurityTransformer {
+        +string SchemeName$
+    }
+
+
     %% OrderCore.Api.Shared.Presentation.Cors
     class CorsExtensions {
         <<static>>
@@ -117,7 +173,14 @@ classDiagram
     IExceptionHandler <|.. ApiExceptionHandler
     ApiExceptionHandler ..> DomainRuleViolationException : 400
     ApiExceptionHandler ..> NotFoundException : 404
+    ApiExceptionHandler ..> UnauthorizedException : 401
     ApiExceptionHandler ..> ConflictException : 409
+    ProblemDetailsDefaults ..> ApiExceptionHandler : same code extension
+    ICurrentUser <|.. HttpContextCurrentUser
+    HttpContextCurrentUser ..> OrderCoreClaimTypes : reads
+    ICurrentUser ..> UserRoles
+    AuthorizationPolicies ..> UserRoles
+    AuthorizationPolicies ..> OrderCoreClaimTypes
 
 ```
 
@@ -136,6 +199,7 @@ A convenção única de tratamento de erros da API (em vez de try/catch por endp
 | Exceção | Status | `code` |
 |---|---|---|
 | `DomainRuleViolationException` (Domain — invariante ou máquina de estados) | 400 | o próprio (`invalid_order_state`, `mixed_currencies`, …) |
+| `UnauthorizedException` (Application — login ou refresh inválido) | 401 | o próprio (`invalid_credentials`, `invalid_refresh_token`) |
 | `NotFoundException` (Application) | 404 | o próprio (`order_not_found`, `address_not_found`, …) |
 | `ConflictException` (Application; não é `sealed`, ex.: `StockConcurrencyConflictException` do Inventory herda dela) | 409 | o próprio (`insufficient_stock`, `price_changed`, …) |
 | `DbUpdateConcurrencyException` (EF Core) | 409 | `concurrency_conflict` |
@@ -143,6 +207,16 @@ A convenção única de tratamento de erros da API (em vez de try/catch por endp
 | qualquer outra | 500 | `internal_error`, sem detalhe fora de Development |
 
 `DomainRuleViolationException` fica em `Shared/Domain` para que o Domain de qualquer módulo possa lançá-la sem depender de nada fora do kernel. Os `[ProducesResponseType]` de erro de cada controller declaram `typeof(ProblemDetails)`.
+
+Além das exceções, `ProblemDetailsDefaults` dá um `code` às respostas de erro do próprio framework: validação de modelo (400 → `validation_error`), rota desconhecida (404 → `not_found`) e as 401/403 da autorização (`unauthenticated`/`forbidden`), que `UseStatusCodePages` transforma em `ProblemDetails`. Assim o cliente sempre pode decidir pelo `code`.
+
+## Autenticação e autorização
+
+Os tokens são emitidos e validados pelo módulo Identity ([08-identity.md](08-identity.md)). O que todos os módulos compartilham fica aqui:
+
+- **`ICurrentUser`**: quem está chamando (id da conta, id do cliente, papel), lido das claims do token por `HttpContextCurrentUser`. Casos de uso e o `AuditLogService` perguntam a ele em vez de ler HTTP. Fora de uma requisição (background) é "ninguém".
+- **`AuthorizationPolicies`**: `Customer` (papel `Customer` e claim `customer_id`) e `Admin`, mais uma política de fallback que exige usuário logado. Ou seja, **bloqueio por padrão**: o que não for marcado `[AllowAnonymous]` exige token, inclusive rotas que não existem (401 para anônimo, 404 para logado, para não revelar quais rotas existem). `EndpointAuthorizationTests` (testes de arquitetura) falha se alguma action não estiver classificada explicitamente.
+- **`BearerSecurityTransformer`**: declara o esquema Bearer no documento OpenAPI e marca as operações protegidas com suas respostas 401/403, para o Scalar conseguir enviar o token.
 
 ## CORS
 

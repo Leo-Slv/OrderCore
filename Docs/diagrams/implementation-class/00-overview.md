@@ -10,7 +10,8 @@ graph LR
     Orders["Orders module\n(Domain · Application · Infrastructure · Presentation)"]
     Payments["Payments module\n(Domain · Application · Infrastructure · Presentation)"]
     AuditLogs["AuditLogs module\n(technical/cross-cutting, not a business bounded context)"]
-    Shared["Shared kernel\n(Entity, AggregateRoot, IDomainEvent, Address, Slug, PagedResult, PagedResponse,\nexceções tipadas + ApiExceptionHandler, CORS)"]
+    Identity["Identity module\n(technical/cross-cutting: accounts, credentials, sessions, JWT)"]
+    Shared["Shared kernel\n(Entity, AggregateRoot, IDomainEvent, Address, Slug, PagedResult, PagedResponse,\nexceções tipadas + ApiExceptionHandler, CORS,\nICurrentUser + políticas Customer/Admin)"]
 
     Orders -->|IProductCatalog| Catalog
     Orders -->|IInventoryService| Inventory
@@ -23,6 +24,8 @@ graph LR
     Inventory -.->|IAuditLogService| AuditLogs
     Catalog -.->|IAuditLogService| AuditLogs
     Customers -.->|IAuditLogService| AuditLogs
+    Identity -->|"ICustomerRegistry (cadastro)"| Customers
+    Identity -.->|IAuditLogService| AuditLogs
 
     Customers --> Shared
     Catalog --> Shared
@@ -30,6 +33,7 @@ graph LR
     Orders --> Shared
     Payments --> Shared
     AuditLogs --> Shared
+    Identity --> Shared
 ```
 
 ## Diagramas detalhados (um por módulo, cada um pequeno o suficiente para renderizar)
@@ -41,6 +45,7 @@ graph LR
 5. [Orders](05-orders.md) — pedido, itens, ciclo de vida, checkout em um passo, cotação do carrinho, adapters para os outros módulos.
 6. [Payments](06-payments.md) — pagamento (com forma de pagamento), estornos, outbox de eventos de integração.
 7. [AuditLogs](07-auditlogs.md) — registro de ações via `IAuditLogService`, listagem paginada.
+8. [Identity](08-identity.md) — contas (cliente/admin), senhas, sessões de refresh e emissão/validação dos JWT.
 
 Todos os diagramas refletem código já implementado; cada um lista, no topo, onde o código difere do desenho original e o que foi acrescentado depois (ex.: o MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`).
 
