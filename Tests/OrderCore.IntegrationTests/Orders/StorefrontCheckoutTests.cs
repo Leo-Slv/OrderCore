@@ -1,26 +1,12 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence;
-using OrderCore.Api.Modules.Customers.Infrastructure.Persistence;
-using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
-using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
-using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
-using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
-using OrderCore.Api.Shared.Application.Abstractions;
-using OrderCore.Api.Shared.Domain;
-using Testcontainers.PostgreSql;
 using Xunit;
+using static OrderCore.IntegrationTests.ApiDatabase;
 
 namespace OrderCore.IntegrationTests.Orders;
 
@@ -29,82 +15,31 @@ namespace OrderCore.IntegrationTests.Orders;
 /// PostgreSQL: catalog → cart quote → checkout → the outbox publisher
 /// (running as the host's own background service) confirms the order →
 /// tracking. Unlike <see cref="CheckoutFlowTests"/>, nothing is wired by
-/// hand: routing, model binding, the exception handler, DI and the
-/// background service are all the production ones. Only stock is seeded
-/// directly, since no endpoint creates a stock record.
+/// hand: routing, model binding, authentication, the exception handler,
+/// DI and the background service are all the production ones. Only stock
+/// is seeded directly, since no endpoint creates a stock record. Each test
+/// gets its own database, since the catalog assertions expect it empty.
 /// </summary>
 public sealed class StorefrontCheckoutTests : IAsyncLifetime
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private readonly ApiDatabase _database = new();
 
-    private const string AdminEmail = "admin@ordercore.test";
-    private const string AdminPassword = "admin-pass-123";
+    public Task InitializeAsync() => _database.InitializeAsync();
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine").Build();
-
-    public async Task InitializeAsync()
-    {
-        await _postgres.StartAsync();
-        var connectionString = _postgres.GetConnectionString();
-
-        await using (var db = new CustomersDbContext(Options<CustomersDbContext>(connectionString)))
-        {
-            await db.Database.MigrateAsync();
-        }
-
-        await using (var db = new CatalogDbContext(Options<CatalogDbContext>(connectionString)))
-        {
-            await db.Database.MigrateAsync();
-        }
-
-        await using (var db = new InventoryDbContext(Options<InventoryDbContext>(connectionString)))
-        {
-            await db.Database.MigrateAsync();
-        }
-
-        await using (var db = new OrdersDbContext(Options<OrdersDbContext>(connectionString)))
-        {
-            await db.Database.MigrateAsync();
-        }
-
-        await using (var db = new PaymentsDbContext(Options<PaymentsDbContext>(connectionString)))
-        {
-            await db.Database.MigrateAsync();
-        }
-
-        await using (var db = new IdentityDbContext(Options<IdentityDbContext>(connectionString)))
-        {
-            await db.Database.MigrateAsync();
-        }
-    }
-
-    public async Task DisposeAsync() => await _postgres.DisposeAsync();
-
-    private static DbContextOptions<T> Options<T>(string connectionString)
-        where T : DbContext =>
-        new DbContextOptionsBuilder<T>().UseNpgsql(connectionString).Options;
-
-    private WebApplicationFactory<Program> CreateFactory(FakePaymentProviderMode paymentMode = FakePaymentProviderMode.Success) =>
-        new OrderCoreApiFactory().WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("ConnectionStrings:OrderCoreDb", _postgres.GetConnectionString());
-            builder.UseSetting("IdentitySeed:AdminEmail", AdminEmail);
-            builder.UseSetting("IdentitySeed:AdminPassword", AdminPassword);
-            builder.ConfigureTestServices(services =>
-                services.Configure<FakePaymentProviderOptions>(options => options.Mode = paymentMode));
-        });
+    public Task DisposeAsync() => _database.DisposeAsync();
 
     [Fact]
     public async Task Buyer_can_go_from_catalog_to_a_confirmed_order_and_follow_it()
     {
-        await using var factory = CreateFactory();
+        await using var factory = _database.CreateFactory();
         var admin = await SignInAsAdminAsync(factory);
-        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory);
+        var (client, _) = await SignUpCustomerAsync(factory);
+        var addressId = await AddAddressAsync(client);
         var product = await CreatePublishedProductAsync(admin, "Wireless Mouse", price: 150m);
-        await SeedStockAsync(product.Id, quantity: 5);
+        await _database.SeedStockAsync(product.Id, quantity: 5);
 
         // Catalog: the product card and page show it as purchasable.
-        var listing = await client.GetFromJsonAsync<JsonElement>("/api/catalog/products?active=true&sort=PriceAsc", Json);
+        var listing = await client.GetFromJsonAsync<JsonElement>("/api/catalog/products?sort=PriceAsc", Json);
         listing.GetProperty("totalItems").GetInt32().Should().Be(1);
         listing.GetProperty("items")[0].GetProperty("availability").GetString().Should().Be("InStock");
 
@@ -157,7 +92,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         // The two units are gone from stock for good.
         var after = await client.GetFromJsonAsync<JsonElement>($"/api/catalog/products/by-slug/{product.Slug}", Json);
         after.GetProperty("availability").GetString().Should().Be("InStock");
-        await using var inventoryDb = new InventoryDbContext(Options<InventoryDbContext>(_postgres.GetConnectionString()));
+        await using var inventoryDb = new InventoryDbContext(_database.Options<InventoryDbContext>());
         var stock = await new EfStockItemRepository(inventoryDb).GetByProductIdAsync(product.Id, CancellationToken.None);
         stock!.QuantityOnHand.Should().Be(3);
         stock.QuantityReserved.Should().Be(0);
@@ -166,11 +101,12 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     [Fact]
     public async Task Declined_payment_ends_the_order_in_PaymentFailed_with_the_reason()
     {
-        await using var factory = CreateFactory(FakePaymentProviderMode.Declined);
+        await using var factory = _database.CreateFactory(FakePaymentProviderMode.Declined);
         var admin = await SignInAsAdminAsync(factory);
-        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory);
+        var (client, _) = await SignUpCustomerAsync(factory);
+        var addressId = await AddAddressAsync(client);
         var product = await CreatePublishedProductAsync(admin, "Mechanical Keyboard", price: 400m);
-        await SeedStockAsync(product.Id, quantity: 1);
+        await _database.SeedStockAsync(product.Id, quantity: 1);
 
         var checkout = await CheckoutAsync(client, addressId, product.Id, quantity: 1, idempotencyKey: "checkout-declined");
         var orderId = (await checkout.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
@@ -183,11 +119,12 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     [Fact]
     public async Task Checkout_without_enough_stock_is_a_409_with_a_code_the_storefront_can_branch_on()
     {
-        await using var factory = CreateFactory();
+        await using var factory = _database.CreateFactory();
         var admin = await SignInAsAdminAsync(factory);
-        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory);
+        var (client, _) = await SignUpCustomerAsync(factory);
+        var addressId = await AddAddressAsync(client);
         var product = await CreatePublishedProductAsync(admin, "Monitor", price: 900m);
-        await SeedStockAsync(product.Id, quantity: 1);
+        await _database.SeedStockAsync(product.Id, quantity: 1);
 
         var checkout = await CheckoutAsync(client, addressId, product.Id, quantity: 2, idempotencyKey: "checkout-no-stock");
 
@@ -199,7 +136,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     [Fact]
     public async Task Checkout_without_an_idempotency_key_is_rejected()
     {
-        await using var factory = CreateFactory();
+        await using var factory = _database.CreateFactory();
         var client = factory.CreateCustomerClient();
 
         var response = await client.PostAsJsonAsync("/api/orders/checkout", new
@@ -211,102 +148,6 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-    }
-
-    private static async Task<HttpClient> SignInAsAdminAsync(WebApplicationFactory<Program> factory)
-    {
-        var client = factory.CreateClient();
-        var response = await client.PostAsJsonAsync("/api/auth/sign-in", new { email = AdminEmail, password = AdminPassword });
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var tokens = await response.Content.ReadFromJsonAsync<JsonElement>(Json);
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", tokens.GetProperty("accessToken").GetString());
-        return client;
-    }
-
-    /// <summary>Signs a new buyer up (a real account and customer), who then saves an address.</summary>
-    private static async Task<(HttpClient Buyer, Guid CustomerId, Guid AddressId)> SignUpBuyerWithAddressAsync(
-        WebApplicationFactory<Program> factory)
-    {
-        var buyer = factory.CreateClient();
-        var signUp = await buyer.PostAsJsonAsync("/api/auth/sign-up", new
-        {
-            name = "Jane Doe",
-            email = $"jane-{Guid.NewGuid():N}@example.com",
-            password = "buyer-pass-123",
-        });
-        signUp.StatusCode.Should().Be(HttpStatusCode.Created);
-        var tokens = await signUp.Content.ReadFromJsonAsync<JsonElement>(Json);
-        var customerId = tokens.GetProperty("customerId").GetGuid();
-        buyer.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", tokens.GetProperty("accessToken").GetString());
-
-        var addressResponse = await buyer.PostAsJsonAsync("/api/customers/me/addresses", new
-        {
-            label = "Home",
-            recipientName = "Jane Doe",
-            street = "Rua das Flores",
-            number = "42",
-            neighborhood = "Centro",
-            city = "São Paulo",
-            state = "SP",
-            postalCode = "01000-000",
-            country = "BR",
-        });
-        addressResponse.StatusCode.Should().Be(HttpStatusCode.Created);
-
-        var address = await addressResponse.Content.ReadFromJsonAsync<JsonElement>(Json);
-        return (buyer, customerId, address.GetProperty("id").GetGuid());
-    }
-
-    private static async Task<(Guid Id, string Slug)> CreatePublishedProductAsync(HttpClient client, string name, decimal price)
-    {
-        var categoryResponse = await client.PostAsJsonAsync("/api/catalog/categories", new { name = $"Category {Guid.NewGuid():N}" });
-        categoryResponse.StatusCode.Should().Be(HttpStatusCode.Created);
-        var categoryId = (await categoryResponse.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
-
-        var productResponse = await client.PostAsJsonAsync("/api/catalog/products", new
-        {
-            sku = $"SKU-{Guid.NewGuid():N}"[..20],
-            name,
-            categoryId,
-            currentPrice = price,
-            currency = "BRL",
-        });
-        productResponse.StatusCode.Should().Be(HttpStatusCode.Created);
-        var product = await productResponse.Content.ReadFromJsonAsync<JsonElement>(Json);
-        var productId = product.GetProperty("id").GetGuid();
-
-        (await client.PostAsync($"/api/catalog/products/{productId}/publish", null)).StatusCode.Should().Be(HttpStatusCode.NoContent);
-
-        return (productId, product.GetProperty("slug").GetString()!);
-    }
-
-    private async Task SeedStockAsync(Guid productId, int quantity)
-    {
-        await using var inventoryDb = new InventoryDbContext(Options<InventoryDbContext>(_postgres.GetConnectionString()));
-        var stockItems = new EfStockItemRepository(inventoryDb);
-        var unitOfWork = new InventoryUnitOfWork(
-            inventoryDb, stockItems, new EfInventoryReservationRepository(inventoryDb), new NoOpDomainEventDispatcher());
-        await stockItems.AddAsync(StockItem.Create(productId, quantity, null, DateTimeOffset.UtcNow), CancellationToken.None);
-        await unitOfWork.SaveChangesAsync(CancellationToken.None);
-    }
-
-    private static Task<HttpResponseMessage> CheckoutAsync(
-        HttpClient client, Guid addressId, Guid productId, int quantity, string idempotencyKey)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/orders/checkout")
-        {
-            Content = JsonContent.Create(new
-            {
-                items = new[] { new { productId, quantity } },
-                shippingAddressId = addressId,
-                billingAddressId = addressId,
-                paymentMethod = "Pix",
-            }),
-        };
-        request.Headers.Add("Idempotency-Key", idempotencyKey);
-        return client.SendAsync(request);
     }
 
     private static async Task<JsonElement> PostJsonAsync(HttpClient client, string url, object body)
@@ -338,11 +179,5 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
 
             await Task.Delay(TimeSpan.FromMilliseconds(500));
         }
-    }
-
-    private sealed class NoOpDomainEventDispatcher : IDomainEventDispatcher
-    {
-        public Task DispatchAsync(IReadOnlyCollection<IDomainEvent> events, CancellationToken cancellationToken) =>
-            Task.CompletedTask;
     }
 }
