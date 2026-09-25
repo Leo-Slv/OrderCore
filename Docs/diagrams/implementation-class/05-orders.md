@@ -31,6 +31,7 @@ Adicionado pelo backoffice (`Docs/specs/backoffice/backoffice-api.md`, decisões
 
 - **Atendimento.** `StartProcessing`/`Ship`/`Deliver` passaram a disparar `OrderProcessingStarted`/`OrderShipped`/`OrderDelivered`, que o `OrderStatusHistoryProjector` grava no histórico. `FulfilOrderUseCase` (um caso de uso, três métodos) move o pedido pelos passos; **enviar captura o pagamento antes** (`IPaymentGateway.CaptureForOrderAsync`) — se o provider recusar, o pedido fica em `Processing` e o admin recebe `409 payment_capture_failed`. `Order.EnsureCanShip`/`EnsureCanBeCancelled` checam a regra antes de qualquer efeito colateral.
 - **Cancelamento com acerto do pagamento.** `CancelOrderUseCase` agora, nesta ordem: confere se pode cancelar, acerta o pagamento (`SettleForCancellationAsync`: void de uma autorização, estorno de uma captura), libera reservas ainda retidas, devolve ao estoque o que já foi consumido (`ReturnConsumedStockAsync`), cancela e salva. Sem transação entre módulos, então cada passo antes do save é idempotente e repetir o cancelamento termina o serviço. Devolve `OrderPaymentSettlement`; a ação saiu do `OrdersController` para o `OrderFulfilmentController` (mesma rota) e responde 200 com o resultado.
+- **O cliente cancela o próprio pedido** (`POST orders/me/{id}/cancel`, política `Customer`) enquanto a loja não começou a prepará-lo: passa pelo mesmo `CancelOrderUseCase` (acerto do pagamento e devolução do estoque), com `CancelOrderCommand.RequestingCustomerId` — pedido de outro cliente é `order_not_found` (via `OrderAccess`), e a partir de `Processing` `Order.EnsureCustomerCanCancel` responde `order_in_fulfilment`. O audit registra quem cancelou (`cancelledBy`).
 - **Consumidores tolerantes.** `ConfirmOrderUseCase`/`MarkOrderPaymentFailedUseCase` ignoram (com log) um pedido que já não está `PendingPayment` — antes lançavam `invalid_order_state` dentro do publisher do outbox, que nunca marcava a mensagem como processada e travava as seguintes.
 - **Leituras do admin** em `OrdersAdminController` (`admin/…`): `ListOrdersUseCase` (todos os pedidos, filtros por status/cliente/período, com o cliente e o status do pagamento buscados uma vez por página), `GetAdminOrderDetailsUseCase` (o pedido + notas internas, cliente, pagamento completo e reservas) e `GetDashboardUseCase` (pedidos por status, receita por moeda dos confirmados no período, clientes novos, alertas de estoque e pedidos recentes, calculado na hora a partir de cada módulo). `SetOrderInternalNotesUseCase` (até 2000 caracteres; vazio limpa).
 - **Contratos ampliados, sempre com tipos do Orders:** `IPaymentGateway` (`GetPaymentSummariesAsync`, `GetPaymentDetailsAsync`, `CaptureForOrderAsync`, `SettleForCancellationAsync`), `IInventoryService` (`ReturnConsumedStockAsync`, `GetReservationsAsync`, `GetStockAlertCountsAsync`), `ICustomerDirectory` (`GetCustomersAsync`, `CountNewCustomersAsync`); `IOrderRepository` ganhou `ListAsync`, `CountByStatusAsync` e `SumConfirmedTotalsAsync` (total de cada pedido calculado no SQL a partir dos itens, somado por moeda em memória). Migration `AddOrderListIndexes` (`CreatedAt`, `ConfirmedAt`).
@@ -192,6 +193,7 @@ classDiagram
         +Deliver(DateTimeOffset now) void
         +FailPayment(string reason, DateTimeOffset now) void
         +EnsureCanBeCancelled() void
+        +EnsureCustomerCanCancel() void
         +Cancel(string reason, DateTimeOffset now) void
     }
 
@@ -450,6 +452,7 @@ classDiagram
     class CancelOrderCommand {
         +Guid OrderId
         +string Reason
+        +Guid? RequestingCustomerId
     }
 
     class CatalogProductSnapshot {
@@ -850,6 +853,7 @@ classDiagram
         +GetStatusHistoryAsync(Guid id) Task~ActionResult~IReadOnlyList~OrderStatusHistoryEntryResponse~~~
         +ListMineAsync(int page, int pageSize) Task~ActionResult~PagedResponse~OrderSummaryResponse~~~
         +ListByCustomerAsync(Guid customerId, int page, int pageSize) Task~ActionResult~PagedResponse~OrderSummaryResponse~~~
+        +CancelMineAsync(Guid id, CancelMyOrderRequest request) Task~ActionResult~CancelOrderResponse~~
     }
 
     class OrderFulfilmentController {
