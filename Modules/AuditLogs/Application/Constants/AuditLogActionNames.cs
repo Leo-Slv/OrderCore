@@ -16,6 +16,10 @@ public static class AuditLogActionNames
     public const string OrderConfirmed = "OrderConfirmed";
     public const string OrderCancelled = "OrderCancelled";
     public const string OrderPaymentFailed = "OrderPaymentFailed";
+    public const string OrderProcessingStarted = "OrderProcessingStarted";
+    public const string OrderShipped = "OrderShipped";
+    public const string OrderDelivered = "OrderDelivered";
+    public const string OrderInternalNotesChanged = "OrderInternalNotesChanged";
 
     public const string PaymentAuthorized = "PaymentAuthorized";
     public const string PaymentCaptured = "PaymentCaptured";

@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
+using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
+using OrderCore.Api.Modules.Orders.Domain.Enums;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Mappers;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Models;
 using OrderCore.Api.Shared.Application.Abstractions;
@@ -58,6 +60,82 @@ public sealed class EfOrderRepository : IOrderRepository
         var model = await Query().FirstOrDefaultAsync(
             o => o.CustomerId == customerId && o.CheckoutIdempotencyKey == idempotencyKey, cancellationToken);
         return model is null ? null : Track(model);
+    }
+
+    public async Task<(IReadOnlyList<Order> Items, int TotalCount)> ListAsync(ListOrdersFilter filter, CancellationToken cancellationToken)
+    {
+        var query = _dbContext.Orders.AsNoTracking();
+
+        if (filter.Status is { } status)
+        {
+            var statusName = status.ToString();
+            query = query.Where(o => o.Status == statusName);
+        }
+
+        if (filter.CustomerId is { } customerId)
+        {
+            query = query.Where(o => o.CustomerId == customerId);
+        }
+
+        if (filter.CreatedFrom is { } from)
+        {
+            query = query.Where(o => o.CreatedAt >= from);
+        }
+
+        if (filter.CreatedTo is { } to)
+        {
+            query = query.Where(o => o.CreatedAt < to);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var models = await query
+            .OrderByDescending(o => o.CreatedAt)
+            .ThenBy(o => o.Id)
+            .Include(o => o.Items)
+            .AsSplitQuery()
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
+            .ToListAsync(cancellationToken);
+
+        return (models.Select(OrderMapper.ToDomain).ToList(), totalCount);
+    }
+
+    public async Task<IReadOnlyDictionary<OrderStatus, int>> CountByStatusAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+    {
+        var counts = await _dbContext.Orders
+            .Where(o => o.CreatedAt >= from && o.CreatedAt < to)
+            .GroupBy(o => o.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        return Enum.GetValues<OrderStatus>().ToDictionary(
+            status => status,
+            status => counts.FirstOrDefault(c => c.Status == status.ToString())?.Count ?? 0);
+    }
+
+    /// <summary>
+    /// The total isn't stored (it is computed from the items, like
+    /// <c>Order.TotalAmount</c>), so each order's total is computed in SQL and
+    /// the per-currency sums here — one row per order in the period, which
+    /// is fine for a dashboard computed on demand.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, decimal>> SumConfirmedTotalsAsync(
+        DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<OrderStatus> statuses, CancellationToken cancellationToken)
+    {
+        var statusNames = statuses.Select(s => s.ToString()).ToList();
+
+        var totals = await _dbContext.Orders
+            .Where(o => o.ConfirmedAt >= from && o.ConfirmedAt < to && statusNames.Contains(o.Status))
+            .Select(o => new
+            {
+                o.Currency,
+                Total = o.Items.Sum(i => (i.UnitPrice * i.Quantity) - i.DiscountAmount)
+                    - o.DiscountAmount + o.ShippingAmount + o.TaxAmount,
+            })
+            .ToListAsync(cancellationToken);
+
+        return totals.GroupBy(t => t.Currency).ToDictionary(g => g.Key, g => g.Sum(t => t.Total));
     }
 
     public async Task AddAsync(Order order, CancellationToken cancellationToken)

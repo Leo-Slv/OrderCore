@@ -3,6 +3,7 @@ using OrderCore.Api.Modules.Inventory.Application.DTOs;
 using OrderCore.Api.Modules.Inventory.Application.UseCases;
 using OrderCore.Api.Modules.Inventory.Domain.Enums;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
+using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 
 namespace OrderCore.Api.Modules.Orders.Infrastructure.Adapters;
@@ -27,19 +28,28 @@ public sealed class InventoryServiceAdapter : IInventoryService
     private readonly ConsumeReservationUseCase _consumeReservation;
     private readonly GetStockAvailabilityUseCase _getStockAvailability;
     private readonly IInventoryReservationRepository _reservations;
+    private readonly ReturnOrderStockUseCase _returnOrderStock;
+    private readonly ListReservationsUseCase _listReservations;
+    private readonly GetStockSummaryUseCase _getStockSummary;
 
     public InventoryServiceAdapter(
         ReserveStockUseCase reserveStock,
         ReleaseReservationUseCase releaseReservation,
         ConsumeReservationUseCase consumeReservation,
         GetStockAvailabilityUseCase getStockAvailability,
-        IInventoryReservationRepository reservations)
+        IInventoryReservationRepository reservations,
+        ReturnOrderStockUseCase returnOrderStock,
+        ListReservationsUseCase listReservations,
+        GetStockSummaryUseCase getStockSummary)
     {
         _reserveStock = reserveStock;
         _releaseReservation = releaseReservation;
         _consumeReservation = consumeReservation;
         _getStockAvailability = getStockAvailability;
         _reservations = reservations;
+        _returnOrderStock = returnOrderStock;
+        _listReservations = listReservations;
+        _getStockSummary = getStockSummary;
     }
 
     /// <summary>
@@ -110,5 +120,20 @@ public sealed class InventoryServiceAdapter : IInventoryService
         {
             await _consumeReservation.ExecuteAsync(reservation.Id, cancellationToken);
         }
+    }
+
+    public Task<int> ReturnConsumedStockAsync(Guid orderId, CancellationToken cancellationToken) =>
+        _returnOrderStock.ExecuteAsync(orderId, cancellationToken);
+
+    public async Task<IReadOnlyList<OrderReservationSummary>> GetReservationsAsync(Guid orderId, CancellationToken cancellationToken) =>
+        (await _listReservations.ForOrderAsync(orderId, cancellationToken))
+            .Select(r => new OrderReservationSummary(
+                r.Id, r.ProductId, r.Quantity, r.Status, r.ReservedAt, r.ReleasedAt, r.ConsumedAt, r.ReturnedAt))
+            .ToList();
+
+    public async Task<StockAlertCounts> GetStockAlertCountsAsync(CancellationToken cancellationToken)
+    {
+        var summary = await _getStockSummary.ExecuteAsync(cancellationToken);
+        return new StockAlertCounts(summary.LowStockCount, summary.OutOfStockCount);
     }
 }

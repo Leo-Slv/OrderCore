@@ -38,6 +38,8 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<OrderPersisten
         builder.Property(o => o.BillingCountry).HasMaxLength(100);
 
         builder.HasIndex(o => o.CustomerId);
+        builder.HasIndex(o => o.CreatedAt);
+        builder.HasIndex(o => o.ConfirmedAt);
         builder.HasIndex(o => o.OrderNumber).IsUnique();
 
         // Postgres treats NULLs as distinct, so any number of orders without

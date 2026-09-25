@@ -31,3 +31,14 @@ public sealed record OrderPaymentFailed(Guid EventId, DateTimeOffset OccurredAt,
 /// </summary>
 public sealed record OrderPaymentRequested(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)
     : IDomainEvent;
+
+/// <summary>An admin started preparing a confirmed order (backoffice).</summary>
+public sealed record OrderProcessingStarted(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)
+    : IDomainEvent;
+
+/// <summary>The order left for delivery; its payment was captured just before (backoffice decision 1).</summary>
+public sealed record OrderShipped(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)
+    : IDomainEvent;
+
+public sealed record OrderDelivered(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)
+    : IDomainEvent;

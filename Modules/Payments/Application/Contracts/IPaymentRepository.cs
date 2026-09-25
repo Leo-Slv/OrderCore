@@ -16,6 +16,9 @@ public interface IPaymentRepository
 
     Task<Payment?> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken);
 
+    /// <summary>Read-only; orders without a payment are simply absent.</summary>
+    Task<IReadOnlyList<Payment>> ListByOrderIdsAsync(IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken);
+
     /// <summary>One page of payments, newest first, plus how many match in total.</summary>
     Task<(IReadOnlyList<Payment> Items, int TotalCount)> ListAsync(ListPaymentsFilter filter, CancellationToken cancellationToken);
 

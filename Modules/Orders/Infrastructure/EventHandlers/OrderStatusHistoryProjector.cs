@@ -19,7 +19,8 @@ namespace OrderCore.Api.Modules.Orders.Infrastructure.EventHandlers;
 /// short of Shipped/Delivered/Cancelled), so `FromStatus` is only filled
 /// in where the state machine makes it unambiguous (`OrderPaymentRequested`
 /// only ever transitions from `Created`, `OrderConfirmed`/
-/// `OrderPaymentFailed` only from `PendingPayment`) and
+/// `OrderPaymentFailed` only from `PendingPayment`, and the fulfilment
+/// steps Confirmed → Processing → Shipped → Delivered one after another) and
 /// left null otherwise, rather than guessed or looked up separately.
 /// </summary>
 public sealed class OrderStatusHistoryProjector :
@@ -27,7 +28,10 @@ public sealed class OrderStatusHistoryProjector :
     IDomainEventHandler<OrderPaymentRequested>,
     IDomainEventHandler<OrderConfirmed>,
     IDomainEventHandler<OrderCancelled>,
-    IDomainEventHandler<OrderPaymentFailed>
+    IDomainEventHandler<OrderPaymentFailed>,
+    IDomainEventHandler<OrderProcessingStarted>,
+    IDomainEventHandler<OrderShipped>,
+    IDomainEventHandler<OrderDelivered>
 {
     private readonly OrdersDbContext _dbContext;
 
@@ -55,6 +59,18 @@ public sealed class OrderStatusHistoryProjector :
         RecordAsync(
             domainEvent.OrderId, fromStatus: "PendingPayment", toStatus: "PaymentFailed", domainEvent.Reason, domainEvent.OccurredAt,
             cancellationToken);
+
+    public Task HandleAsync(OrderProcessingStarted domainEvent, CancellationToken cancellationToken) =>
+        RecordAsync(
+            domainEvent.OrderId, fromStatus: "Confirmed", toStatus: "Processing", reason: null, domainEvent.OccurredAt, cancellationToken);
+
+    public Task HandleAsync(OrderShipped domainEvent, CancellationToken cancellationToken) =>
+        RecordAsync(
+            domainEvent.OrderId, fromStatus: "Processing", toStatus: "Shipped", reason: null, domainEvent.OccurredAt, cancellationToken);
+
+    public Task HandleAsync(OrderDelivered domainEvent, CancellationToken cancellationToken) =>
+        RecordAsync(
+            domainEvent.OrderId, fromStatus: "Shipped", toStatus: "Delivered", reason: null, domainEvent.OccurredAt, cancellationToken);
 
     private async Task RecordAsync(
         Guid orderId, string? fromStatus, string toStatus, string? reason, DateTimeOffset changedAt, CancellationToken cancellationToken)

@@ -36,6 +36,12 @@ public sealed class EfPaymentRepository : IPaymentRepository
         return model is null ? null : Track(model);
     }
 
+    public async Task<IReadOnlyList<Payment>> ListByOrderIdsAsync(IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken)
+    {
+        var models = await Query().AsNoTracking().Where(p => orderIds.Contains(p.OrderId)).ToListAsync(cancellationToken);
+        return models.Select(PaymentMapper.ToDomain).ToList();
+    }
+
     public async Task<(IReadOnlyList<Payment> Items, int TotalCount)> ListAsync(ListPaymentsFilter filter, CancellationToken cancellationToken)
     {
         var query = _dbContext.Payments.AsNoTracking();

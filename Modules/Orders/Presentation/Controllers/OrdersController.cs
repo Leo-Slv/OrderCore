@@ -34,7 +34,6 @@ public sealed class OrdersController : ControllerBase
     private readonly GetOrderDetailsUseCase _getOrderDetailsUseCase;
     private readonly GetOrderStatusHistoryUseCase _getOrderStatusHistoryUseCase;
     private readonly ListCustomerOrdersUseCase _listCustomerOrdersUseCase;
-    private readonly CancelOrderUseCase _cancelOrderUseCase;
     private readonly CheckoutUseCase _checkoutUseCase;
     private readonly QuoteCartUseCase _quoteCartUseCase;
     private readonly ICurrentUser _currentUser;
@@ -47,7 +46,6 @@ public sealed class OrdersController : ControllerBase
         GetOrderDetailsUseCase getOrderDetailsUseCase,
         GetOrderStatusHistoryUseCase getOrderStatusHistoryUseCase,
         ListCustomerOrdersUseCase listCustomerOrdersUseCase,
-        CancelOrderUseCase cancelOrderUseCase,
         CheckoutUseCase checkoutUseCase,
         QuoteCartUseCase quoteCartUseCase,
         ICurrentUser currentUser)
@@ -59,7 +57,6 @@ public sealed class OrdersController : ControllerBase
         _getOrderDetailsUseCase = getOrderDetailsUseCase;
         _getOrderStatusHistoryUseCase = getOrderStatusHistoryUseCase;
         _listCustomerOrdersUseCase = listCustomerOrdersUseCase;
-        _cancelOrderUseCase = cancelOrderUseCase;
         _checkoutUseCase = checkoutUseCase;
         _quoteCartUseCase = quoteCartUseCase;
         _currentUser = currentUser;
@@ -238,17 +235,5 @@ public sealed class OrdersController : ControllerBase
             new ListCustomerOrdersInput { CustomerId = customerId, Page = page, PageSize = pageSize }, cancellationToken);
 
         return Ok(OrderPresenter.ToResponse(orders));
-    }
-
-    [HttpPost("{id:guid}/cancel")]
-    [Authorize(Policy = AuthorizationPolicies.Admin)]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> CancelAsync(Guid id, [FromBody] CancelOrderRequest request, CancellationToken cancellationToken)
-    {
-        await _cancelOrderUseCase.ExecuteAsync(new CancelOrderCommand(id, request.Reason), cancellationToken);
-
-        return NoContent();
     }
 }

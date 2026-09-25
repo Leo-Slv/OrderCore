@@ -13,6 +13,8 @@ namespace OrderCore.Api.Modules.Orders.Domain.Entities;
 /// </summary>
 public sealed class Order : AggregateRoot<Guid>
 {
+    public const int MaxInternalNotesLength = 2000;
+
     public const int MaxCheckoutIdempotencyKeyLength = 100;
 
     private readonly List<OrderItem> _items = new();
@@ -207,9 +209,15 @@ public sealed class Order : AggregateRoot<Guid>
         IncrementVersion();
     }
 
+    /// <summary>Staff-only notes, never shown to the customer. Blank clears them.</summary>
     public void SetInternalNotes(string? notes)
     {
-        InternalNotes = notes;
+        if (notes?.Length > MaxInternalNotesLength)
+        {
+            throw new ArgumentException($"Internal notes can have at most {MaxInternalNotesLength} characters.", nameof(notes));
+        }
+
+        InternalNotes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
         IncrementVersion();
     }
 
@@ -280,15 +288,24 @@ public sealed class Order : AggregateRoot<Guid>
 
         Status = OrderStatus.Processing;
         IncrementVersion();
+        Raise(new OrderProcessingStarted(Guid.NewGuid(), now, Id));
     }
+
+    /// <summary>
+    /// Checked before shipping's side effect (capturing the payment), so a
+    /// payment is never captured for an order that can't be shipped.
+    /// </summary>
+    public void EnsureCanShip() =>
+        EnsureStatus(OrderStatus.Processing, $"Cannot ship an order in status '{Status}'.");
 
     public void Ship(DateTimeOffset now)
     {
-        EnsureStatus(OrderStatus.Processing, $"Cannot ship an order in status '{Status}'.");
+        EnsureCanShip();
 
         Status = OrderStatus.Shipped;
         ShippedAt = now;
         IncrementVersion();
+        Raise(new OrderShipped(Guid.NewGuid(), now, Id));
     }
 
     public void Deliver(DateTimeOffset now)
@@ -298,6 +315,7 @@ public sealed class Order : AggregateRoot<Guid>
         Status = OrderStatus.Delivered;
         DeliveredAt = now;
         IncrementVersion();
+        Raise(new OrderDelivered(Guid.NewGuid(), now, Id));
     }
 
     public void FailPayment(string reason, DateTimeOffset now)
@@ -310,16 +328,26 @@ public sealed class Order : AggregateRoot<Guid>
     }
 
     /// <summary>
+    /// Checked before cancelling's side effects (settling the payment,
+    /// returning stock), so they never happen for an order that can't be
+    /// cancelled. Same rule <see cref="Cancel"/> applies.
+    /// </summary>
+    public void EnsureCanBeCancelled()
+    {
+        if (Status is OrderStatus.Delivered or OrderStatus.Shipped or OrderStatus.Cancelled)
+        {
+            throw new DomainRuleViolationException("invalid_order_state", $"Cannot cancel an order in status '{Status}'.");
+        }
+    }
+
+    /// <summary>
     /// Cancellation is only allowed from states where no irreversible
     /// fulfillment step has happened yet. In particular, a Delivered order
     /// can never transition back to any earlier state (section 10).
     /// </summary>
     public void Cancel(string reason, DateTimeOffset now)
     {
-        if (Status is OrderStatus.Delivered or OrderStatus.Shipped or OrderStatus.Cancelled)
-        {
-            throw new DomainRuleViolationException("invalid_order_state", $"Cannot cancel an order in status '{Status}'.");
-        }
+        EnsureCanBeCancelled();
 
         Status = OrderStatus.Cancelled;
         CancelledAt = now;

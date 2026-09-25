@@ -1,3 +1,4 @@
+using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 
 namespace OrderCore.Api.Modules.Orders.Application.Contracts;
@@ -28,4 +29,14 @@ public interface IInventoryService
     Task ReleaseReservationsAsync(Guid orderId, CancellationToken cancellationToken);
 
     Task ConsumeReservationsAsync(Guid orderId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Puts back on hand what a cancelled order had already consumed.
+    /// Idempotent. Returns the number of units returned.
+    /// </summary>
+    Task<int> ReturnConsumedStockAsync(Guid orderId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<OrderReservationSummary>> GetReservationsAsync(Guid orderId, CancellationToken cancellationToken);
+
+    Task<StockAlertCounts> GetStockAlertCountsAsync(CancellationToken cancellationToken);
 }
