@@ -24,9 +24,9 @@ public sealed class AuthenticationUseCaseTests
 
     private SignUpCustomerUseCase SignUp() => new(_accounts, _customers, _hasher, _refreshTokens, _accessTokens, _auditLog, _clock);
 
-    private SignInUseCase SignIn() => new(_accounts, _hasher, _refreshTokens, _accessTokens, _clock);
+    private SignInUseCase SignIn() => new(_accounts, _hasher, _refreshTokens, _accessTokens, _customers, _clock);
 
-    private RefreshSessionUseCase Refresh() => new(_accounts, _refreshTokens, _accessTokens, _auditLog, _clock);
+    private RefreshSessionUseCase Refresh() => new(_accounts, _refreshTokens, _accessTokens, _auditLog, _customers, _clock);
 
     private SignOutUseCase SignOut() => new(_accounts, _refreshTokens, _clock);
 
@@ -213,5 +213,35 @@ public sealed class AuthenticationUseCaseTests
         var act = () => SeedAdmin().ExecuteAsync("admin@example.com", "weak", CancellationToken.None);
 
         await act.Should().ThrowAsync<DomainRuleViolationException>().Where(e => e.Code == "weak_password");
+    }
+
+    [Fact]
+    public async Task SignIn_refuses_a_customer_an_admin_deactivated_and_accepts_them_once_reactivated()
+    {
+        await SignUpJaneAsync();
+        var customerId = _customers.Registered.Single().Id;
+        _customers.Inactive.Add(customerId);
+
+        var act = () => SignIn().ExecuteAsync(new SignInCommand("jane@example.com", Password), CancellationToken.None);
+        await act.Should().ThrowAsync<UnauthorizedException>().Where(e => e.Code == "invalid_credentials");
+
+        _customers.Inactive.Remove(customerId);
+        var tokens = await SignIn().ExecuteAsync(new SignInCommand("jane@example.com", Password), CancellationToken.None);
+        tokens.CustomerId.Should().Be(customerId);
+    }
+
+    [Fact]
+    public async Task Refresh_refuses_a_customer_an_admin_deactivated_without_revoking_the_session()
+    {
+        var tokens = await SignUpJaneAsync();
+        var customerId = _customers.Registered.Single().Id;
+        _customers.Inactive.Add(customerId);
+
+        var act = () => Refresh().ExecuteAsync(tokens.RefreshToken, CancellationToken.None);
+        await act.Should().ThrowAsync<UnauthorizedException>().Where(e => e.Code == "invalid_refresh_token");
+
+        _customers.Inactive.Remove(customerId);
+        var refreshed = await Refresh().ExecuteAsync(tokens.RefreshToken, CancellationToken.None);
+        refreshed.CustomerId.Should().Be(customerId);
     }
 }

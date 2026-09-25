@@ -4,11 +4,17 @@ namespace OrderCore.UnitTests.Customers;
 
 public sealed class FakeAuditLogService : IAuditLogService
 {
+    public List<string> Actions { get; } = new();
+
     public Task RecordAsync(
         string action,
         string entityName,
         Guid? entityId,
         IReadOnlyDictionary<string, string?>? metadata,
         Guid? userId,
-        CancellationToken cancellationToken) => Task.CompletedTask;
+        CancellationToken cancellationToken)
+    {
+        Actions.Add(action);
+        return Task.CompletedTask;
+    }
 }

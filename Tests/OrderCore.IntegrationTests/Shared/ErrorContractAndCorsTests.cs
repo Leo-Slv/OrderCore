@@ -137,5 +137,15 @@ public sealed class ErrorContractAndCorsTests : IClassFixture<OrderCoreApiFactor
         public Task AddAsync(Customer customer, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<(IReadOnlyList<Customer> Items, int TotalCount)> ListAsync(
+            string? searchTerm, int page, int pageSize, CancellationToken cancellationToken) =>
+            Task.FromResult<(IReadOnlyList<Customer>, int)>(([], 0));
+
+        public Task<IReadOnlyList<Customer>> ListByIdsAsync(IReadOnlyCollection<Guid> customerIds, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<Customer>>([]);
+
+        public Task<int> CountCreatedBetweenAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken) =>
+            Task.FromResult(0);
     }
 }
