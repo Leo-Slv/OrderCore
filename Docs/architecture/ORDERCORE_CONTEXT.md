@@ -557,7 +557,9 @@ máquina de estados é alcançável pela API: o checkout leva a
 `Delivered` (`OrderFulfilmentController`). Enviar **captura o pagamento
 antes** de mudar o estado; se o provedor recusar, o pedido continua em
 `Processing`. O admin pode cancelar qualquer pedido ainda não enviado
-(`Created`, `PendingPayment`, `Confirmed`, `Processing`); o cancelamento
+(`Created`, `PendingPayment`, `Confirmed`, `Processing`), e o próprio
+cliente pode cancelar o seu enquanto a loja não começou a prepará-lo
+(antes de `Processing`, `orders/me/{id}/cancel`); o cancelamento
 **acerta o pagamento** (libera uma autorização ou estorna uma captura) e
 devolve o estoque, cada passo repetível sem efeito duplicado, já que não
 há transação entre módulos (seções 26 e 27). Cada transição fica no
@@ -1642,7 +1644,7 @@ não ser que esteja marcado como público. As classes de acesso são:
 | Acesso | Endpoints |
 |---|---|
 | Público | navegação do catálogo (listagem, produto por slug, categorias), cotação do carrinho, `auth/sign-up`, `sign-in`, `refresh`, health, docs |
-| Cliente | checkout, `customers/me` (perfil e endereços), `orders/me` |
+| Cliente | checkout, `customers/me` (perfil e endereços), `orders/me` (e cancelar o próprio pedido, `orders/me/{id}/cancel`) |
 | Cliente dono ou admin | `orders/{id}` e o histórico de status |
 | Admin | todo o resto (escrita no catálogo, estoque, pagamentos, audit logs, clientes, pedidos por id, e o backoffice em `admin/…`) |
 

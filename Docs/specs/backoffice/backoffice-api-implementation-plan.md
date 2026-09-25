@@ -74,6 +74,7 @@ own commit(s).
   backoffice uses.
 - **Customer self-cancel stays out.** The settlement it depended on now
   exists, but the spec doesn't ask for it; it's a small follow-up.
+  (Done afterwards — see "Follow-ups" at the end.)
 
 ## Stage 1 — AuditLogs: persistence and filters
 
@@ -486,3 +487,26 @@ The spec's new decisions (5–7) and this plan go first as
   seconds before the outbox confirms it, so the test would be timing
   dependent. It is covered by the Orders unit tests, including the
   `payment_in_progress` refusal.
+
+## Follow-ups (applied after the feature, on request)
+
+- **A deactivated customer is told why sign-in fails.** Sign-in answers
+  `401 account_inactive` instead of `invalid_credentials`, but only once
+  the password is right: a wrong password still gets the generic answer,
+  so someone who doesn't know the password learns nothing about the
+  e-mail. Refresh keeps answering `invalid_refresh_token` (a leaked or
+  rotated refresh token shouldn't reveal the account's state); the
+  storefront then sends the customer to sign in, which explains.
+- **Customers cancel their own order** — `POST orders/me/{id}/cancel`
+  (Customer policy, optional reason, "Cancelled by the customer" by
+  default). It goes through the same `CancelOrderUseCase` as the admin,
+  so the payment is voided or refunded and the stock returned the same
+  way. Decided window: until the store starts preparing the order
+  (`Created`, `PendingPayment`, `Confirmed`, and an already failed
+  `PaymentFailed`); from `Processing` on it is `400 order_in_fulfilment`
+  and only an admin can cancel. Someone else's order is
+  `404 order_not_found`, as everywhere else. The audit entry records
+  `cancelledBy` (`Customer`/`Admin`) next to the actor.
+- **Local databases** created before the backoffice are recreated rather
+  than repaired: products published before it may lack a stock record,
+  which nothing repairs automatically.

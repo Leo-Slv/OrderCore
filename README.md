@@ -121,7 +121,7 @@ em Development).
 | Minha conta | `GET`/`PUT /api/customers/me`, `GET`/`POST /api/customers/me/addresses`, `PUT`/`DELETE /api/customers/me/addresses/{addressId}`, `POST …/{addressId}/default-shipping` e `…/default-billing` |
 | Checkout | `GET /api/customers/me/addresses`, depois `POST /api/orders/checkout` com header `Idempotency-Key` → 202 com o pedido já em `PendingPayment` (o cliente vem do token) |
 | Acompanhamento | `GET /api/orders/{id}` (polling até `Confirmed`/`PaymentFailed`) e `GET /api/orders/{id}/status-history` (timeline) — pedido de outro cliente responde 404 |
-| Meus pedidos | `GET /api/orders/me?page=1&pageSize=20` |
+| Meus pedidos | `GET /api/orders/me?page=1&pageSize=20`; `POST /api/orders/me/{id}/cancel` (motivo opcional) cancela o próprio pedido enquanto a loja não começou a prepará-lo — pagamento liberado ou estornado, estoque devolvido; depois disso, `400 order_in_fulfilment` |
 
 O checkout valida, reserva estoque e inicia o pagamento num único caso
 de uso: o front pede "quero criar este pedido" e o OrderCore decide se
@@ -141,6 +141,8 @@ produto por slug), a cotação do carrinho, `auth/sign-up|sign-in|refresh`,
 um token de cliente; os endpoints administrativos (clientes, estoque,
 pagamentos, auditoria, gestão do catálogo) exigem um token de admin.
 Sem token → `401 unauthenticated`; token sem permissão → `403 forbidden`.
+Um cliente desativado pela loja recebe `401 account_inactive` no login
+(só com a senha certa; senha errada continua `invalid_credentials`).
 Os detalhes estão em
 [`Docs/specs/identity/authentication-and-account.md`](Docs/specs/identity/authentication-and-account.md).
 
