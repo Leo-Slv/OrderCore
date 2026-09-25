@@ -155,7 +155,12 @@ now through RabbitMQ; capture and void enqueue their events.
 
 - **Orders** — `Modules/Orders/Contracts/IntegrationEvents`: order
   created, payment requested, confirmed, processing started, shipped,
-  delivered, payment failed, cancelled. `EfOrderRepository.SaveChangesAsync`
+  delivered, payment failed, cancelled. Every one carries the order id and
+  number, the customer id, the new status, total and currency and when
+  it happened (plus the reason for payment failed/cancelled) — what the
+  Tracking feature pushes to the browser without reloading the order.
+  `shipped` gains optional carrier/tracking fields when Tracking adds
+  them (an additive change, same version). `EfOrderRepository.SaveChangesAsync`
   translates the aggregate's domain events into these and writes them to
   `orders_outbox_messages` in the same save (the in-process dispatch of
   domain events to the status history stays as it is).
