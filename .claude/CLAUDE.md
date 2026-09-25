@@ -176,11 +176,11 @@ to a module.
 
 ## Persistence
 
-The project targets PostgreSQL via Entity Framework Core. All five business
-modules (Customers, Catalog, Orders, Inventory, Payments) and the Identity
-technical module have `Infrastructure/Persistence` implemented end to end —
-`AuditLogs` (the other cross-cutting/technical module) is still
-in-memory only. Follow their shape when implementing persistence for another module:
+The project targets PostgreSQL via Entity Framework Core. Every module —
+the five business modules (Customers, Catalog, Orders, Inventory,
+Payments) and both technical ones (Identity, AuditLogs) — has
+`Infrastructure/Persistence` implemented end to end. Follow their shape
+when implementing persistence for a new module:
 
 Domain Entity
     ↕ Mapper
@@ -256,6 +256,31 @@ module dependencies are registered. A module whose use cases only ever
 touch one aggregate root per operation does not need one — keep using each
 repository's own `SaveChangesAsync`, matching `ICustomerRepository`/
 `IProductRepository`/`IOrderRepository`.
+
+### Operations across modules
+
+Each module has its own `DbContext`, so an operation that changes more
+than one module (checkout, cancelling an order, shipping it) is a
+**sequence, not a transaction**. Write it so a failure halfway leaves
+things repairable by repeating the request:
+
+- check every rule before the first side effect (`Order.EnsureCanShip`,
+  `EnsureCanBeCancelled`), so nothing happens for a request that was
+  going to be refused anyway;
+- make every step idempotent — capturing an already-captured payment,
+  voiding a voided one, returning stock already returned are no-ops (see
+  `CapturePaymentUseCase`, `SettlePaymentForCancellationUseCase`,
+  `ReturnOrderStockUseCase`);
+- put the step whose failure matters most first (cancelling settles the
+  money before touching stock) and the owning aggregate's save last.
+
+Integration-event consumers (anything the outbox publisher dispatches)
+must **tolerate state that has moved on**: the publisher retries a
+message until its handler succeeds and publishes nothing after it
+meanwhile, so a handler that throws for a message that can never succeed
+blocks the whole outbox. `ConfirmOrderUseCase`/
+`MarkOrderPaymentFailedUseCase` skip (and log) an order that is no
+longer `PendingPayment` instead of throwing.
 
 ## Cross-Cutting Concerns
 
@@ -348,9 +373,27 @@ otherwise. The OpenAPI document picks the classification up by itself
 - Use cases and services that need to know who is calling ask
   `ICurrentUser`; they don't read HTTP claims. `AuditLogService` already
   fills in the actor from it, so call sites keep passing `userId: null`.
+  Recording is best effort: call sites record *after* their own save,
+  and a failed audit write is logged, never thrown (it would turn a
+  request whose change already committed into a 500).
 - Secrets (`Jwt:SigningKey`, `IdentitySeed:*`) come from the environment
   or user-secrets, never from committed settings; the API refuses to
   start without a signing key.
+
+### Backoffice (admin) routes
+
+Every backoffice endpoint is `Admin`-policy. Commands live on the
+resource they change (`orders/{id}/ship`, `catalog/products/{id}/price`,
+`customers/{id}/deactivate`). A *read* that customers also have but that
+admins need in a richer shape gets its own route under `admin/`
+(`admin/orders`, `admin/orders/{id}`, `admin/catalog/products`,
+`admin/dashboard`), served by an `<Module>AdminController` in the owning
+module: one response shape per route, never one that changes with the
+caller's role — OpenAPI can't describe that. Screens that combine two
+modules are composed in the module that already depends on the other
+(the stock screen is Catalog's admin product list with Inventory's
+numbers) or by the frontend, never by adding a contract in the opposite
+direction.
 
 ### CORS
 
@@ -409,8 +452,12 @@ signing key; `CreateAdminClient`/`CreateCustomerClient` issue real tokens
 for made-up accounts, enough when no database is involved) and
 `ApiDatabase` (a migrated PostgreSQL container, the host with a seeded
 admin, and the shared HTTP steps: sign in as admin, sign a customer up,
-add an address, publish a product, check out). Use `ApiDatabase` as a
-class fixture, or one per test when a test needs an empty database.
+add an address, publish a product, check out, `PollOrderUntilAsync`
+for the outbox to confirm an order). Use `ApiDatabase` as a class
+fixture, or one per test when a test needs an empty database. Creating a
+product also creates its (empty) stock record, so `SeedStockAsync`
+receives units into it; `CreateFactory(FakePaymentProviderMode.CaptureDeclined)`
+gives a provider that authorizes but refuses to capture.
 
 Prefer testing observable behavior and business rules over implementation
 details.

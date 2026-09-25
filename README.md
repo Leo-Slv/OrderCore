@@ -99,8 +99,9 @@ Reserve Inventory
    ↓
 Request Payment
    ↓
-Payment Authorized  →  Confirm Order  →  Processing → Shipped → Delivered
-Payment Failed      →  Release Inventory → Cancel Order
+Payment Authorized  →  Confirm Order  →  Processing → Shipped (captura o pagamento) → Delivered
+Payment Failed      →  Release Inventory → PaymentFailed
+Cancelamento (admin, antes do envio) → acerta o pagamento (void/estorno) → devolve o estoque → Cancelled
 ```
 
 ## API para o storefront
@@ -143,6 +144,27 @@ Sem token → `401 unauthenticated`; token sem permissão → `403 forbidden`.
 Os detalhes estão em
 [`Docs/specs/identity/authentication-and-account.md`](Docs/specs/identity/authentication-and-account.md).
 
+## API para o backoffice
+
+As telas `/admin` do front usam endpoints só para admin, especificados em
+[`Docs/specs/backoffice/backoffice-api.md`](Docs/specs/backoffice/backoffice-api.md).
+Um comando fica na rota do recurso que ele muda; uma leitura que precisa
+de um formato mais completo que o do cliente fica sob `admin/`.
+
+| Tela | Endpoints |
+|---|---|
+| Dashboard | `GET /api/admin/dashboard?from=&to=` → pedidos por status, receita por moeda, clientes novos, estoque baixo/esgotado e pedidos recentes (padrão: últimos 30 dias) |
+| Pedidos | `GET /api/admin/orders?status=&customerId=&createdFrom=&createdTo=` (com cliente e status do pagamento); `GET /api/admin/orders/{id}` (notas internas, cliente, pagamento completo, reservas); `GET /api/orders/{id}/status-history`; `GET /api/audit-logs?entityName=Order&entityId={id}` (linha do tempo) |
+| Atendimento | `POST /api/orders/{id}/start-processing`, `/ship` (captura o pagamento; `409 payment_capture_failed` se o provedor recusar), `/deliver`, `/cancel` (acerta o pagamento e devolve o estoque; responde o que aconteceu com o pagamento); `PUT /api/orders/{id}/internal-notes` |
+| Produtos e estoque | `GET /api/admin/catalog/products?status=&searchTerm=&stock=LowStock` (com os números de estoque); `PUT /api/catalog/products/{id}/price`, `/compare-at-price`; `POST …/discontinue`; `POST`/`DELETE …/images`, `PUT …/images/order`; `POST`/`DELETE …/variants`; `POST /api/inventory/stock-items/{productId}/receive`, `/adjust`; `PUT …/reorder-level`; `GET …/movements`, `…/reservations` |
+| Pagamentos | `GET /api/payments?status=&method=&createdFrom=&createdTo=`; `GET /api/payments/{id}` (com estornos); `POST /api/payments/{id}/refunds` |
+| Clientes | `GET /api/customers?searchTerm=`; `GET /api/customers/{id}` + `GET /api/orders/customers/{id}` (pedidos do cliente); `POST /api/customers/{id}/deactivate`, `/reactivate` (o cliente desativado não faz login nem checkout) |
+
+Criar um produto já cria o registro de estoque dele (com 0 unidades); o
+admin só dá entrada e ajusta. Os pagamentos são capturados quando o
+pedido é enviado, e cancelar um pedido pago nunca deixa o dinheiro retido:
+uma autorização é liberada (`Voided`) e uma captura, estornada.
+
 ## Fluxo de pagamento
 
 O `Payment` tem sua própria máquina de estados, independente da do
@@ -150,15 +172,16 @@ O `Payment` tem sua própria máquina de estados, independente da do
 Authorized` durante uma transição:
 
 ```text
-Pending → Processing → Authorized → Captured
+Pending → Processing → Authorized → Captured (no envio do pedido)
                     ↘ Failed
+Authorized → Voided   (pedido cancelado antes do envio)
 Captured → Refunded
 ```
 
 O domínio depende de uma abstração, `IPaymentProvider`, nunca de um SDK de
 provider diretamente. Hoje existe um `FakePaymentProvider`
 (`Modules/Payments/Infrastructure/Providers/Fake`) capaz de simular
-sucesso, falha, timeout e indisponibilidade, o que permite desenvolver e
+sucesso, recusa (inclusive só da captura, `CaptureDeclined`), timeout e indisponibilidade, o que permite desenvolver e
 testar os caminhos de falha antes de qualquer integração real (ex.:
 Stripe).
 
@@ -265,7 +288,19 @@ As migrations não são aplicadas na inicialização. Bancos locais criados
 antes da autenticação precisam das migrations novas do Identity e do
 Customers (`RemoveCustomerPasswordHash`); clientes antigos não têm conta
 de login, então o mais simples é recriar o banco local
-(`docker compose down -v`) e aplicar as migrations de novo.
+(`docker compose down -v`) e aplicar as migrations de novo. O backoffice
+acrescentou migrations em todos os contextos (inclusive o novo
+`AuditLogsDbContext`); produtos publicados antes dele podem não ter
+registro de estoque, o que também se resolve recriando o banco. Para
+aplicar as migrations de um contexto:
+
+```bash
+dotnet ef database update --context AuditLogsDbContext
+```
+
+(repetir para `CustomersDbContext`, `CatalogDbContext`,
+`InventoryDbContext`, `OrdersDbContext`, `PaymentsDbContext` e
+`IdentityDbContext`).
 
 ## Estado atual do scaffold
 
@@ -273,16 +308,16 @@ de login, então o mais simples é recriar o banco local
 módulos de negócio previstos — estão implementados de ponta a ponta
 (Domain + Application + Infrastructure/EF Core + Presentation) contra
 PostgreSQL real. `AuditLogs`, o módulo técnico/transversal, também está
-implementado (com um `InMemoryAuditLogRepository` — sem persistência EF
-Core, por design). `Identity`, o outro módulo técnico, cuida de contas,
+implementado e persistido no PostgreSQL. `Identity`, o outro módulo técnico, cuida de contas,
 senhas, sessões de refresh e emissão dos JWT, com persistência EF Core
 própria — ver
 [08-identity.md](Docs/diagrams/implementation-class/08-identity.md).
-`AuditLogs` recebe entradas de verdade: os 18 pontos de
-`AuditLogActionNames` (criação/confirmação/cancelamento de pedido,
-autorização/captura/falha/estorno de pagamento, reserva/liberação/consumo/
-expiração de estoque, criação/mudança de preço/publicação de produto,
-cadastro de cliente, criação de conta, reuso de refresh token) chamam `IAuditLogService.RecordAsync` — ver
+`AuditLogs` recebe entradas de verdade: as 27 ações de
+`AuditLogActionNames` (ciclo de vida do pedido, autorização/captura/
+anulação/falha/estorno de pagamento, reserva/liberação/consumo/expiração
+de estoque, produto criado/publicado/com preço ou promoção alterados/
+descontinuado, cliente cadastrado/desativado/reativado, criação de conta,
+reuso de refresh token) chamam `IAuditLogService.RecordAsync` — ver
 [07-auditlogs.md](Docs/diagrams/implementation-class/07-auditlogs.md).
 Ver o topo de cada `Docs/diagrams/implementation-class/0N-*.md` para os
 desvios documentados entre cada diagrama e o código.
@@ -311,9 +346,16 @@ testadas pela API HTTP em `Tests/OrderCore.IntegrationTests/Identity`,
 `Shared/EndpointAccessTests`, `Orders/OrderOwnershipTests` e
 `Customers/MyAccountTests`.
 
-Os endpoints de backoffice (listagem global de
-pedidos e transições de envio, estoque, pagamentos, dashboard), a
-integração com RabbitMQ de verdade (o outbox hoje despacha in-process)
+O backoffice está implementado e testado pela API HTTP real, inclusive os
+fluxos que atravessam módulos (cancelar um pedido confirmado anula o
+pagamento e devolve o estoque; uma captura recusada segura o envio; um
+pedido entregue pode ser estornado):
+`Tests/OrderCore.IntegrationTests/Orders/BackofficeFlowTests.cs`,
+`OrdersBackofficeTests`, `Catalog/CatalogBackofficeTests`,
+`Inventory/InventoryBackofficeTests`, `Payments/PaymentsBackofficeTests`
+e `Customers/CustomersBackofficeTests`.
+
+A integração com RabbitMQ de verdade (o outbox hoje despacha in-process)
 e a extração opcional de `Payments` para `PayCore` ainda não foram
 implementadas — entram conforme as fases descritas em
 [Arquitetura](#arquitetura), com ADR próprio quando a decisão for tomada.

@@ -422,3 +422,67 @@ One or more per stage, e.g.:
 
 The spec's new decisions (5–7) and this plan go first as
 `docs(backoffice): ...`.
+
+## Execution notes (what differed from this plan)
+
+- **Stage 1 (AuditLogs).** The filter criteria are a Domain type
+  (`AuditLogFilter`), since `IAuditLogRepository` lives in the Domain
+  layer; the unused `ListByEntityAsync`/`ListByUserAsync` were folded into
+  `ListPagedAsync`. `EfAuditLogRepository` drops pending entries when a
+  save fails, so one failed write isn't retried by every later record in
+  the same request.
+- **Stage 2 (Payments).** No separate `VoidPaymentUseCase`: the void only
+  happens inside `SettlePaymentForCancellationUseCase`. The payment
+  detail enriched the existing `PaymentResponse` (and `RefundResponse`)
+  with fields instead of adding a new response type. `CapturePaymentUseCase`
+  also refuses to send a non-`Authorized` payment to the provider (it
+  used to call the provider first and let the domain refuse afterwards).
+  `FakePaymentProvider` gained a `CaptureDeclined` mode for the "capture
+  refused on shipping" tests.
+- **Stage 3 (Inventory).** Returning a consumed reservation records its
+  own movement type, `ReservationReturned`, referencing the reservation
+  like the other reservation movements, instead of an `Inbound` movement
+  referencing the order; `StockItem.ReturnConsumed` puts the units back
+  without recording a second movement. Product and order reservations are
+  one use case with two methods (`ListReservationsUseCase`). The reason
+  of a receipt/adjustment is validated in the domain (500 characters,
+  the column's size). The retry-on-conflict of `ReturnOrderStockUseCase`
+  has no unit test: with in-memory fakes nothing is reloaded, so the test
+  would pass without proving anything; it is the same mechanism as
+  `ReserveStockUseCase`'s.
+- **Stage 4 (Catalog).** `IStockAvailabilityProvider` was not renamed:
+  the backoffice needs are a separate contract, `IStockLevels`,
+  implemented by the same adapter. Image and variant operations are two
+  use cases with several methods (`ManageProductImagesUseCase`,
+  `ManageProductVariantsUseCase`). The new actions live in two new
+  controllers (`ProductManagementController`, `CatalogAdminController`)
+  instead of the already large `CatalogController`. The domain gained
+  input validation that used to fail only in the database (image URL,
+  variant attributes as a JSON object, lengths, variant SKU unique per
+  product) and a new image is appended at the end of the gallery (every
+  new image used to get position 0). A product published before this
+  feature without a stock record is not repaired automatically
+  (publishing again isn't allowed); recreating the local database does.
+- **Stage 5 (Customers/Identity).** A deactivated customer gets the same
+  answers as a deactivated account — `invalid_credentials` at sign-in,
+  `invalid_refresh_token` at refresh — instead of the planned
+  `account_inactive`, so a sign-in never reveals whether an e-mail exists.
+  Deactivate/reactivate are one use case (`ChangeCustomerStatusUseCase`);
+  Identity asks whether the customer is active through the existing
+  `GetCustomerByIdUseCase` (an unknown customer counts as inactive)
+  rather than a new use case.
+- **Stage 6 (Orders).** Start processing/ship/deliver are one use case
+  (`FulfilOrderUseCase`). Cancelling moved to the new
+  `OrderFulfilmentController` (same route) and now answers 200 with the
+  payment settlement instead of 204. Revenue computes each order's total
+  in SQL from its items and sums per currency in memory. The first full
+  test run failed across the board because the orders indexes had no
+  migration yet (EF Core refuses to migrate with pending model changes);
+  `AddOrderListIndexes` fixed it. The planned unit test for "repeating a
+  cancellation after a failure" was dropped for the same reason as in
+  Stage 3; idempotency is covered step by step in Payments and Inventory.
+- **Stage 7 (HTTP).** Cancelling an order still awaiting payment is not
+  tested over HTTP: the order only stays `PendingPayment` for the few
+  seconds before the outbox confirms it, so the test would be timing
+  dependent. It is covered by the Orders unit tests, including the
+  `payment_in_progress` refusal.

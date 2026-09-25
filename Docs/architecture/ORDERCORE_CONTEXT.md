@@ -312,7 +312,7 @@ Ele não é um bounded context de negócio como Orders/Payments — é
 infraestrutura de observabilidade (seção 30) consumida pelos demais
 módulos através de uma Application Contract, seguindo a mesma estrutura
 `Modules/AuditLogs/{Application,Domain,Infrastructure,Presentation}` da
-seção 5.1.
+seção 5.1. Desde o backoffice ele é persistido no PostgreSQL (seção 30).
 
 Um segundo módulo técnico, `Identity`, guarda contas, senhas e sessões
 (clientes e administradores) e emite e valida os tokens JWT; veja a
@@ -375,12 +375,20 @@ Contratos entre módulos existentes hoje:
 | Consumidor → dono | Contrato (no consumidor) | Adapter → o que chama no dono |
 |---|---|---|
 | Orders → Catalog | `IProductCatalog` | `ProductCatalogAdapter` → `IProductRepository` |
-| Orders → Inventory | `IInventoryService` | `InventoryServiceAdapter` → `Reserve`/`Release`/`ConsumeReservationUseCase`, `GetStockAvailabilityUseCase` |
-| Orders → Payments | `IPaymentGateway` | `PaymentGatewayAdapter` → `CreatePaymentUseCase`, `GetPaymentByOrderIdUseCase` |
-| Orders → Customers | `ICustomerDirectory` | `CustomerDirectoryAdapter` → `GetCustomerAddressUseCase` |
-| Catalog → Inventory | `IStockAvailabilityProvider` | `InventoryStockAvailabilityAdapter` → `GetStockAvailabilityUseCase` |
-| Identity → Customers | `ICustomerRegistry` | `CustomerRegistryAdapter` → `RegisterCustomerUseCase` |
+| Orders → Inventory | `IInventoryService` | `InventoryServiceAdapter` → `Reserve`/`Release`/`ConsumeReservationUseCase`, `GetStockAvailabilityUseCase`, `ReturnOrderStockUseCase`, `ListReservationsUseCase`, `GetStockSummaryUseCase` |
+| Orders → Payments | `IPaymentGateway` | `PaymentGatewayAdapter` → `CreatePaymentUseCase`, `GetPaymentByOrderIdUseCase`, `GetPaymentsByOrderIdsUseCase`, `CapturePaymentUseCase` (por pedido), `SettlePaymentForCancellationUseCase` |
+| Orders → Customers | `ICustomerDirectory` | `CustomerDirectoryAdapter` → `GetCustomerAddressUseCase`, `GetCustomersByIdsUseCase`, `CountNewCustomersUseCase` |
+| Catalog → Inventory | `IStockAvailabilityProvider` (vitrine) e `IStockLevels` (backoffice) | `InventoryStockAvailabilityAdapter` → `GetStockAvailabilityUseCase`, `EnsureStockItemUseCase`, `GetStockLevelsUseCase`, `ListProductIdsInStockStateUseCase` |
+| Identity → Customers | `ICustomerRegistry` | `CustomerRegistryAdapter` → `RegisterCustomerUseCase`, `GetCustomerByIdUseCase` (cliente ativo?) |
 | Payments → Orders | eventos de integração via outbox | `PaymentAuthorized`/`PaymentFailed` → handlers do Orders |
+
+Todas as dependências seguem uma só direção (Orders → Catalog/Inventory/
+Payments/Customers, Catalog → Inventory, Identity → Customers): quando o
+backoffice precisou de uma tela que juntasse dados de dois módulos na
+direção contrária, a composição foi feita no módulo que já dependia do
+outro (a tela de estoque é a lista de produtos do Catalog com os números
+do Inventory) ou no front (o detalhe do cliente com os pedidos), nunca
+com um contrato de volta.
 
 ---
 
@@ -541,6 +549,19 @@ PendingPayment
    ↓
 Cancelled
 ```
+
+Desde o backoffice (`Docs/specs/backoffice/backoffice-api.md`), toda a
+máquina de estados é alcançável pela API: o checkout leva a
+`PendingPayment`, o outbox confirma (`Confirmed`) ou falha
+(`PaymentFailed`), e o admin move o pedido por `Processing` → `Shipped` →
+`Delivered` (`OrderFulfilmentController`). Enviar **captura o pagamento
+antes** de mudar o estado; se o provedor recusar, o pedido continua em
+`Processing`. O admin pode cancelar qualquer pedido ainda não enviado
+(`Created`, `PendingPayment`, `Confirmed`, `Processing`); o cancelamento
+**acerta o pagamento** (libera uma autorização ou estorna uma captura) e
+devolve o estoque, cada passo repetível sem efeito duplicado, já que não
+há transação entre módulos (seções 26 e 27). Cada transição fica no
+histórico de status (`order_status_history`).
 
 As transições devem ser controladas pelo domínio.
 
@@ -767,6 +788,20 @@ Captured
    ↓
 Refunded
 ```
+
+Cancelamento antes da captura (backoffice):
+
+```text
+Authorized
+   ↓
+Voided
+```
+
+`Voided` é final: a autorização foi liberada e o comprador nunca é
+cobrado. A captura acontece quando o pedido é enviado; um pedido
+cancelado antes disso tem o pagamento anulado, e um já capturado (não
+acontece no fluxo normal, já que pedido enviado não é cancelado) é
+estornado pelo saldo que ainda estiver retido.
 
 O estado de Payment não deve ser confundido com o estado de Order.
 
@@ -1271,6 +1306,17 @@ OrderConfirmed
 
 Idealmente tudo deve ser associado ao mesmo distributed trace.
 
+**Audit log.** O `AuditLogs` guarda cada ação relevante (pedido criado,
+enviado, cancelado; pagamento autorizado, capturado, anulado; produto
+publicado; cliente desativado...) com o autor (o usuário autenticado, ou
+nenhum quando foi o sistema) e é persistido no PostgreSQL
+(`AuditLogsDbContext`), para a linha do tempo do pedido no backoffice
+sobreviver a um restart. A listagem filtra por entidade (a linha do tempo
+de um pedido), autor e ação. Gravar é "melhor esforço": acontece depois
+que a mudança do caso de uso já foi salva, então uma falha vai para o log
+em vez de virar um 500 que convidaria o cliente a repetir uma operação
+que já aconteceu.
+
 ---
 
 # 31. Redis
@@ -1565,7 +1611,8 @@ GET    /api/products/{id}
 GET    /api/customers/{id}
 ```
 
-Endpoints administrativos podem ser adicionados posteriormente.
+Os endpoints administrativos do backoffice estão descritos em
+`Docs/specs/backoffice/backoffice-api.md`.
 
 A lista acima era o ponto de partida. O contrato real é o documento
 OpenAPI gerado (`/openapi/v1.json`, UI em `/scalar/v1`, só em
@@ -1597,9 +1644,19 @@ não ser que esteja marcado como público. As classes de acesso são:
 | Público | navegação do catálogo (listagem, produto por slug, categorias), cotação do carrinho, `auth/sign-up`, `sign-in`, `refresh`, health, docs |
 | Cliente | checkout, `customers/me` (perfil e endereços), `orders/me` |
 | Cliente dono ou admin | `orders/{id}` e o histórico de status |
-| Admin | todo o resto (escrita no catálogo, estoque, pagamentos, audit logs, clientes e pedidos por id) |
+| Admin | todo o resto (escrita no catálogo, estoque, pagamentos, audit logs, clientes, pedidos por id, e o backoffice em `admin/…`) |
 
 Um teste de arquitetura falha se alguma action não estiver classificada.
+
+**Rotas do backoffice.** Um comando fica na rota do recurso que ele muda
+(`orders/{id}/ship`, `catalog/products/{id}/price`,
+`customers/{id}/deactivate`). Uma leitura que o cliente também tem, mas
+que o admin precisa num formato mais completo, ganha uma rota própria
+sob `admin/` (`admin/orders`, `admin/orders/{id}`,
+`admin/catalog/products`, `admin/dashboard`), servida por um
+`<Módulo>AdminController`: cada rota tem um único formato de resposta,
+nunca um que muda conforme quem chama, porque o documento OpenAPI não
+consegue descrever isso.
 
 Quando implementados como controllers (em vez de minimal API), cada
 controller vive em `OrderCore.Api/Modules/{Módulo}/Presentation/Controllers/`
@@ -1637,8 +1694,8 @@ O modelo relacional deve representar as necessidades de persistência do domíni
 
 `Customers`, `Catalog`, `Orders`, `Inventory` e `Payments` têm EF Core de
 fato implementado — todos os módulos de negócio previstos (seção 4) estão
-completos de ponta a ponta (`AuditLogs`, o módulo técnico/transversal,
-ainda é scaffolding). `Customers` (`Modules/Customers/Infrastructure/Persistence`)
+completos de ponta a ponta, assim como os módulos técnicos `Identity` e
+`AuditLogs` (este último só desde o backoffice; antes era em memória). `Customers` (`Modules/Customers/Infrastructure/Persistence`)
 cria `customers`, `customer_addresses` e `customer_payment_methods` via
 `InitialCustomersSchema`; `Catalog` (`Modules/Catalog/Infrastructure/Persistence`)
 cria `products`, `product_images`, `product_variants` e `categories` via
@@ -1662,6 +1719,14 @@ horário).
 A autenticação acrescentou `InitialIdentitySchema` (Identity —
 `user_accounts` e `refresh_sessions`, com e-mail normalizado único) e
 `RemoveCustomerPasswordHash` (Customers — a senha saiu de `customers`).
+O backoffice acrescentou `InitialAuditLogsSchema` (AuditLogs — `audit_logs`,
+com índices pelos filtros da listagem), `AddPaymentVoid` (Payments —
+`payments.VoidedAt`), `AddStockMovementReasonAndReturns` (Inventory —
+`stock_movements.Reason`, `inventory_reservations.ReturnedAt` e o índice
+de movimentos por `(ProductId, CreatedAt)`), `AddCustomerCreatedAtIndex`
+(Customers) e `AddOrderListIndexes` (Orders — `CreatedAt` e `ConfirmedAt`).
+Os status novos (`Voided`, `Returned`) cabem nas colunas de texto que já
+existiam.
 `IProductCatalog` (contrato do próprio Orders) também ganhou sua
 implementação real, `ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`),
 que lê de `IProductRepository` do Catalog — a indireção de "Application
