@@ -35,6 +35,8 @@ public static class AuditLogActionNames
     public const string ProductDiscontinued = "ProductDiscontinued";
 
     public const string CustomerCreated = "CustomerCreated";
+    public const string CustomerDeactivated = "CustomerDeactivated";
+    public const string CustomerReactivated = "CustomerReactivated";
     public const string UserAccountCreated = "UserAccountCreated";
     public const string RefreshTokenReuseDetected = "RefreshTokenReuseDetected";
 }

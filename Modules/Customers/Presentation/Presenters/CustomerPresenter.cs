@@ -2,7 +2,9 @@ using OrderCore.Api.Modules.Customers.Application.DTOs;
 using OrderCore.Api.Modules.Customers.Domain.Entities;
 using OrderCore.Api.Modules.Customers.Presentation.Requests;
 using OrderCore.Api.Modules.Customers.Presentation.Responses;
+using OrderCore.Api.Shared.Application.DTOs;
 using OrderCore.Api.Shared.Domain.ValueObjects;
+using OrderCore.Api.Shared.Presentation.Responses;
 
 namespace OrderCore.Api.Modules.Customers.Presentation.Presenters;
 
@@ -29,7 +31,18 @@ public static class CustomerPresenter
         Id = output.Id,
         Name = output.Name,
         Email = output.Email,
+        Phone = output.Phone,
         Active = output.Active,
+        CreatedAt = output.CreatedAt,
+    };
+
+    public static PagedResponse<CustomerResponse> ToResponse(PagedResult<CustomerOutput> page) => new()
+    {
+        Items = page.Items.Select(ToResponse).ToList(),
+        Page = page.Page,
+        PageSize = page.PageSize,
+        TotalItems = page.TotalItems,
+        TotalPages = page.TotalPages,
     };
 
     public static CustomerAddressResponse ToResponse(CustomerAddress address) => new()

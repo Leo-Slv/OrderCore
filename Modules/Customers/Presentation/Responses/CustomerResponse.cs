@@ -8,5 +8,9 @@ public sealed class CustomerResponse
 
     public string Email { get; init; } = string.Empty;
 
+    public string? Phone { get; init; }
+
     public bool Active { get; init; }
+
+    public DateTimeOffset CreatedAt { get; init; }
 }

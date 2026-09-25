@@ -43,6 +43,6 @@ public sealed class RegisterCustomerUseCase
             userId: null,
             cancellationToken);
 
-        return new CustomerOutput(customer.Id, customer.Name, customer.Email, customer.Active);
+        return CustomerOutput.From(customer);
     }
 }

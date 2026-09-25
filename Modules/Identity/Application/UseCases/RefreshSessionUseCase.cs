@@ -12,7 +12,9 @@ namespace OrderCore.Api.Modules.Identity.Application.UseCases;
 /// token; the presented one stops working. Presenting a token that was
 /// already rotated is treated as theft: the domain revokes the whole
 /// session family, which is saved (and audited) before the request is
-/// refused. Every failure is <c>invalid_refresh_token</c> for the client.
+/// refused. A customer an admin deactivated can't refresh either (the
+/// session is left alone, so reactivating them restores it). Every failure
+/// is <c>invalid_refresh_token</c> for the client.
 /// </summary>
 public sealed class RefreshSessionUseCase
 {
@@ -22,6 +24,7 @@ public sealed class RefreshSessionUseCase
     private readonly IRefreshTokenGenerator _refreshTokens;
     private readonly IAccessTokenIssuer _accessTokens;
     private readonly IAuditLogService _auditLog;
+    private readonly ICustomerRegistry _customers;
     private readonly TimeProvider _timeProvider;
 
     public RefreshSessionUseCase(
@@ -29,12 +32,14 @@ public sealed class RefreshSessionUseCase
         IRefreshTokenGenerator refreshTokens,
         IAccessTokenIssuer accessTokens,
         IAuditLogService auditLog,
+        ICustomerRegistry customers,
         TimeProvider timeProvider)
     {
         _accounts = accounts;
         _refreshTokens = refreshTokens;
         _accessTokens = accessTokens;
         _auditLog = auditLog;
+        _customers = customers;
         _timeProvider = timeProvider;
     }
 
@@ -48,6 +53,11 @@ public sealed class RefreshSessionUseCase
         var presentedHash = _refreshTokens.Hash(refreshToken);
         var account = await _accounts.GetBySessionTokenHashAsync(presentedHash, cancellationToken)
             ?? throw InvalidRefreshToken();
+
+        if (account.CustomerId is { } customerId && !await _customers.IsActiveAsync(customerId, cancellationToken))
+        {
+            throw InvalidRefreshToken();
+        }
 
         var now = _timeProvider.GetUtcNow();
         var replacement = _refreshTokens.Generate();

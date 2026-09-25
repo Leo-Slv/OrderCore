@@ -18,6 +18,6 @@ public sealed class GetCustomerByIdUseCase
         var customer = await _customers.GetByIdAsync(customerId, cancellationToken)
             ?? throw new NotFoundException("customer_not_found", $"Customer '{customerId}' was not found.");
 
-        return new CustomerOutput(customer.Id, customer.Name, customer.Email, customer.Active);
+        return CustomerOutput.From(customer);
     }
 }

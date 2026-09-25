@@ -8,8 +8,9 @@ namespace OrderCore.Api.Modules.Identity.Application.UseCases;
 
 /// <summary>
 /// E-mail and password in, a new session out. An unknown e-mail, a wrong
-/// password, a deactivated account and a customer account whose sign-up
-/// never finished all fail the same way (<c>invalid_credentials</c>). For
+/// password, a deactivated account, a customer account whose sign-up
+/// never finished and a customer an admin deactivated all fail the same
+/// way (<c>invalid_credentials</c>). For
 /// an unknown e-mail a password is still verified against a throwaway
 /// hash, so the response time doesn't reveal which e-mails exist.
 /// </summary>
@@ -24,6 +25,7 @@ public sealed class SignInUseCase
     private readonly IPasswordHasher _passwordHasher;
     private readonly IRefreshTokenGenerator _refreshTokens;
     private readonly IAccessTokenIssuer _accessTokens;
+    private readonly ICustomerRegistry _customers;
     private readonly TimeProvider _timeProvider;
 
     public SignInUseCase(
@@ -31,12 +33,14 @@ public sealed class SignInUseCase
         IPasswordHasher passwordHasher,
         IRefreshTokenGenerator refreshTokens,
         IAccessTokenIssuer accessTokens,
+        ICustomerRegistry customers,
         TimeProvider timeProvider)
     {
         _accounts = accounts;
         _passwordHasher = passwordHasher;
         _refreshTokens = refreshTokens;
         _accessTokens = accessTokens;
+        _customers = customers;
         _timeProvider = timeProvider;
     }
 
@@ -51,6 +55,13 @@ public sealed class SignInUseCase
 
         var check = _passwordHasher.Verify(account.PasswordHash, command.Password);
         if (check == PasswordCheck.Failed || !account.Active || (account.Role == UserRole.Customer && account.CustomerId is null))
+        {
+            throw InvalidCredentials();
+        }
+
+        // Asked only once the password is right, so a wrong password costs no
+        // extra call and the answer is the same either way.
+        if (account.CustomerId is { } customerId && !await _customers.IsActiveAsync(customerId, cancellationToken))
         {
             throw InvalidCredentials();
         }

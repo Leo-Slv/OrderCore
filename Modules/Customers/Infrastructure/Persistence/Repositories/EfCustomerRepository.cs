@@ -64,6 +64,40 @@ public sealed class EfCustomerRepository : ICustomerRepository
         return domain;
     }
 
+    public async Task<(IReadOnlyList<Customer> Items, int TotalCount)> ListAsync(
+        string? searchTerm, int page, int pageSize, CancellationToken cancellationToken)
+    {
+        var query = _dbContext.Customers.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var pattern = $"%{searchTerm.Trim()}%";
+            query = query.Where(c => EF.Functions.ILike(c.Name, pattern) || EF.Functions.ILike(c.Email, pattern));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var models = await query
+            .OrderByDescending(c => c.CreatedAt)
+            .ThenBy(c => c.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Include(c => c.Addresses)
+            .Include(c => c.PaymentMethods)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+
+        return (models.Select(CustomerMapper.ToDomain).ToList(), totalCount);
+    }
+
+    public async Task<IReadOnlyList<Customer>> ListByIdsAsync(IReadOnlyCollection<Guid> customerIds, CancellationToken cancellationToken)
+    {
+        var models = await Query().AsNoTracking().AsSplitQuery().Where(c => customerIds.Contains(c.Id)).ToListAsync(cancellationToken);
+        return models.Select(CustomerMapper.ToDomain).ToList();
+    }
+
+    public Task<int> CountCreatedBetweenAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken) =>
+        _dbContext.Customers.CountAsync(c => c.CreatedAt >= from && c.CreatedAt < to, cancellationToken);
+
     private IQueryable<CustomerPersistenceModel> Query() =>
         _dbContext.Customers.Include(c => c.Addresses).Include(c => c.PaymentMethods);
 }

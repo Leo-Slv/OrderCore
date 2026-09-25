@@ -30,6 +30,10 @@ public static class CustomersDependencyInjection
         services.AddScoped<RemoveCustomerAddressUseCase>();
         services.AddScoped<SetDefaultAddressUseCase>();
         services.AddScoped<GetCustomerByIdUseCase>();
+        services.AddScoped<ListCustomersUseCase>();
+        services.AddScoped<ChangeCustomerStatusUseCase>();
+        services.AddScoped<GetCustomersByIdsUseCase>();
+        services.AddScoped<CountNewCustomersUseCase>();
 
         return services;
     }

@@ -21,6 +21,6 @@ public sealed class UpdateCustomerProfileUseCase
         customer.UpdateProfile(name, phone, customer.DocumentNumber);
         await _customers.SaveChangesAsync(cancellationToken);
 
-        return new CustomerOutput(customer.Id, customer.Name, customer.Email, customer.Active);
+        return CustomerOutput.From(customer);
     }
 }

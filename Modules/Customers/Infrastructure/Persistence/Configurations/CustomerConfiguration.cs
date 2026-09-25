@@ -18,6 +18,7 @@ public sealed class CustomerConfiguration : IEntityTypeConfiguration<CustomerPer
         builder.Property(c => c.DocumentNumber).HasMaxLength(30);
 
         builder.HasIndex(c => c.Email).IsUnique();
+        builder.HasIndex(c => c.CreatedAt);
 
         // Optimistic concurrency (section 11 of the project context):
         // AggregateRoot.Version is mapped as a plain concurrency token here
