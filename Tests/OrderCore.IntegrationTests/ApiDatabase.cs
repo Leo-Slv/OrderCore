@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using OrderCore.Api.Modules.AuditLogs.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Customers.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
@@ -54,6 +55,7 @@ public sealed class ApiDatabase : IAsyncLifetime
         await MigrateAsync<OrdersDbContext>(options => new(options));
         await MigrateAsync<PaymentsDbContext>(options => new(options));
         await MigrateAsync<IdentityDbContext>(options => new(options));
+        await MigrateAsync<AuditLogsDbContext>(options => new(options));
     }
 
     public async Task DisposeAsync() => await _postgres.DisposeAsync();

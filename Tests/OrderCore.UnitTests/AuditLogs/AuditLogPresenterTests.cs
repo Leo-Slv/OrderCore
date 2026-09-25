@@ -10,14 +10,28 @@ namespace OrderCore.UnitTests.AuditLogs;
 public sealed class AuditLogPresenterTests
 {
     [Fact]
-    public void ToInput_maps_page_and_pageSize()
+    public void ToInput_maps_paging_and_filters()
     {
-        var request = new ListAuditLogsRequest { Page = 2, PageSize = 50 };
+        var entityId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var request = new ListAuditLogsRequest
+        {
+            Page = 2,
+            PageSize = 50,
+            EntityName = "Order",
+            EntityId = entityId,
+            UserId = userId,
+            Action = "OrderCancelled",
+        };
 
         var input = AuditLogPresenter.ToInput(request);
 
         input.Page.Should().Be(2);
         input.PageSize.Should().Be(50);
+        input.EntityName.Should().Be("Order");
+        input.EntityId.Should().Be(entityId);
+        input.UserId.Should().Be(userId);
+        input.Action.Should().Be("OrderCancelled");
     }
 
     [Fact]
