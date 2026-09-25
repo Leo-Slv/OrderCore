@@ -8,15 +8,18 @@ namespace OrderCore.Api.Modules.Identity.Application.UseCases;
 
 /// <summary>
 /// E-mail and password in, a new session out. An unknown e-mail, a wrong
-/// password, a deactivated account, a customer account whose sign-up
-/// never finished and a customer an admin deactivated all fail the same
-/// way (<c>invalid_credentials</c>). For
+/// password, a deactivated account and a customer account whose sign-up
+/// never finished all fail the same way (<c>invalid_credentials</c>). A
+/// customer an admin deactivated gets <c>account_inactive</c> instead, so
+/// the storefront can say why — but only once the password is right, so
+/// it still reveals nothing to someone who doesn't know it. For
 /// an unknown e-mail a password is still verified against a throwaway
 /// hash, so the response time doesn't reveal which e-mails exist.
 /// </summary>
 public sealed class SignInUseCase
 {
     public const string InvalidCredentialsCode = "invalid_credentials";
+    public const string AccountInactiveCode = "account_inactive";
 
     private static readonly Lock DecoyHashLock = new();
     private static string? _decoyHash;
@@ -59,11 +62,12 @@ public sealed class SignInUseCase
             throw InvalidCredentials();
         }
 
-        // Asked only once the password is right, so a wrong password costs no
-        // extra call and the answer is the same either way.
+        // Asked only once the password is right: a wrong password costs no
+        // extra call, and only the account's owner learns it is deactivated.
         if (account.CustomerId is { } customerId && !await _customers.IsActiveAsync(customerId, cancellationToken))
         {
-            throw InvalidCredentials();
+            throw new UnauthorizedException(
+                AccountInactiveCode, "This account was deactivated by the store. Contact support to reactivate it.");
         }
 
         var now = _timeProvider.GetUtcNow();

@@ -56,7 +56,10 @@ public sealed class CustomersBackofficeTests : IClassFixture<ApiDatabase>
 
         var signIn = await anonymous.PostAsJsonAsync("/api/auth/sign-in", new { email, password = CustomerPassword });
         signIn.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        (await signIn.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString().Should().Be("invalid_credentials");
+        (await signIn.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString().Should().Be("account_inactive");
+
+        var wrongPassword = await anonymous.PostAsJsonAsync("/api/auth/sign-in", new { email, password = "wrong-pass-9" });
+        (await wrongPassword.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString().Should().Be("invalid_credentials");
 
         var refreshToken = tokens.GetProperty("refreshToken").GetString();
         var refresh = await anonymous.PostAsJsonAsync("/api/auth/refresh", new { refreshToken });

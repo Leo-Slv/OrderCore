@@ -223,11 +223,22 @@ public sealed class AuthenticationUseCaseTests
         _customers.Inactive.Add(customerId);
 
         var act = () => SignIn().ExecuteAsync(new SignInCommand("jane@example.com", Password), CancellationToken.None);
-        await act.Should().ThrowAsync<UnauthorizedException>().Where(e => e.Code == "invalid_credentials");
+        await act.Should().ThrowAsync<UnauthorizedException>().Where(e => e.Code == "account_inactive");
 
         _customers.Inactive.Remove(customerId);
         var tokens = await SignIn().ExecuteAsync(new SignInCommand("jane@example.com", Password), CancellationToken.None);
         tokens.CustomerId.Should().Be(customerId);
+    }
+
+    [Fact]
+    public async Task A_wrong_password_for_a_deactivated_customer_still_reveals_nothing()
+    {
+        await SignUpJaneAsync();
+        _customers.Inactive.Add(_customers.Registered.Single().Id);
+
+        var act = () => SignIn().ExecuteAsync(new SignInCommand("jane@example.com", "wrong-pass1"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<UnauthorizedException>().Where(e => e.Code == "invalid_credentials");
     }
 
     [Fact]
