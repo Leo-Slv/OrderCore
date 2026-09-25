@@ -88,3 +88,13 @@ which is the reason the backoffice exists in the frontend plan at all.
    read-model projections to keep in sync.
 4. **Reorder level is set per stock item by an admin.** It starts at 0
    (never "low") until someone sets it.
+5. **The stock screen is served by the catalog.** The admin product list
+   shows each product's stock figures and filters by low/out of stock,
+   so the screen has names and SKUs without the inventory having to know
+   about products.
+6. **Every product has a stock record automatically.** Creating (or
+   publishing) a product ensures its stock record exists with zero units;
+   admins only receive and adjust stock, never "create" it.
+7. **The audit log is persisted.** The order's event timeline has to
+   survive a restart, so the audit log moves from memory to the database
+   as part of this feature.
