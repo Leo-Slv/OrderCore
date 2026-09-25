@@ -20,6 +20,9 @@ internal sealed class FakePaymentRepository : IPaymentRepository
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<Payment>> ListByOrderIdsAsync(IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Payment>>(_payments.Values.Where(p => orderIds.Contains(p.OrderId)).ToList());
+
     public Task<(IReadOnlyList<Payment> Items, int TotalCount)> ListAsync(ListPaymentsFilter filter, CancellationToken cancellationToken)
     {
         var matching = _payments.Values

@@ -1,4 +1,5 @@
 using OrderCore.Api.Modules.Orders.Application.Contracts;
+using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 
@@ -19,4 +20,16 @@ internal sealed class FakeCustomerDirectory : ICustomerDirectory
         _addresses.TryGetValue((customerId, addressId), out var address)
             ? Task.FromResult(address)
             : throw new NotFoundException("address_not_found", $"Address '{addressId}' was not found.");
+
+    public Dictionary<Guid, OrderCustomerSnapshot> Customers { get; } = new();
+
+    public int NewCustomers { get; set; }
+
+    public Task<IReadOnlyDictionary<Guid, OrderCustomerSnapshot>> GetCustomersAsync(
+        IReadOnlyCollection<Guid> customerIds, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyDictionary<Guid, OrderCustomerSnapshot>>(
+            Customers.Where(c => customerIds.Contains(c.Key)).ToDictionary(c => c.Key, c => c.Value));
+
+    public Task<int> CountNewCustomersAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken) =>
+        Task.FromResult(NewCustomers);
 }

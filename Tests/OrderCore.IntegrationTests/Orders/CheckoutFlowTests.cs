@@ -131,7 +131,11 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
                 new Api.Modules.Inventory.Application.UseCases.ConsumeReservationUseCase(
                     stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
                 new Api.Modules.Inventory.Application.UseCases.GetStockAvailabilityUseCase(stockRepository),
-                reservationRepository);
+                reservationRepository,
+                new Api.Modules.Inventory.Application.UseCases.ReturnOrderStockUseCase(
+                    stockRepository, reservationRepository, inventoryUnitOfWork, TimeProvider.System),
+                new Api.Modules.Inventory.Application.UseCases.ListReservationsUseCase(reservationRepository),
+                new Api.Modules.Inventory.Application.UseCases.GetStockSummaryUseCase(stockRepository));
 
             var orderRepository = new EfOrderRepository(ordersDb, OrdersDispatcher(ordersDb));
             var orderNumbers = new SequentialOrderNumberGenerator(ordersDb, TimeProvider.System);
@@ -144,8 +148,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
             orderId = order.OrderId;
 
             await using var paymentsDb = new PaymentsDbContext(PaymentsOptions());
-            var paymentGateway = new PaymentGatewayAdapter(
-                CreatePaymentUseCase(paymentsDb), new GetPaymentByOrderIdUseCase(new EfPaymentRepository(paymentsDb)));
+            var paymentGateway = PaymentGateway(paymentsDb);
             var requestPayment = new RequestOrderPaymentUseCase(orderRepository, inventoryService, paymentGateway, TimeProvider.System);
 
             await requestPayment.ExecuteAsync(orderId, PaymentMethodChoice.Card, CancellationToken.None);
@@ -240,7 +243,11 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
             new Api.Modules.Inventory.Application.UseCases.ConsumeReservationUseCase(
                 stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
             new Api.Modules.Inventory.Application.UseCases.GetStockAvailabilityUseCase(stockRepository),
-            reservationRepository);
+            reservationRepository,
+            new Api.Modules.Inventory.Application.UseCases.ReturnOrderStockUseCase(
+                stockRepository, reservationRepository, inventoryUnitOfWork, TimeProvider.System),
+            new Api.Modules.Inventory.Application.UseCases.ListReservationsUseCase(reservationRepository),
+            new Api.Modules.Inventory.Application.UseCases.GetStockSummaryUseCase(stockRepository));
 
         var services = new ServiceCollection();
         services.AddSingleton(ordersDb);
@@ -253,6 +260,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
 
         services.AddSingleton<IOrderRepository>(sp => new EfOrderRepository(ordersDb, NoOpDispatcher()));
         services.AddSingleton(TimeProvider.System);
+        services.AddLogging();
         services.AddSingleton<IInventoryService>(inventoryService);
         services.AddSingleton<IAuditLogService>(NoOpAuditLog());
         services.AddSingleton<ConfirmOrderUseCase>();
@@ -260,6 +268,20 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
 
         var provider = services.BuildServiceProvider();
         return new InProcessDomainEventDispatcher(provider);
+    }
+
+    private static PaymentGatewayAdapter PaymentGateway(PaymentsDbContext paymentsDb)
+    {
+        var paymentRepository = new EfPaymentRepository(paymentsDb);
+        var provider = new FakePaymentProvider(Options.Create(new FakePaymentProviderOptions()));
+        var refund = new RequestRefundUseCase(paymentRepository, provider, new OutboxWriter(paymentsDb), NoOpAuditLog(), TimeProvider.System);
+
+        return new PaymentGatewayAdapter(
+            CreatePaymentUseCase(paymentsDb),
+            new GetPaymentByOrderIdUseCase(paymentRepository),
+            new GetPaymentsByOrderIdsUseCase(paymentRepository),
+            new CapturePaymentUseCase(paymentRepository, provider, NoOpAuditLog(), TimeProvider.System),
+            new SettlePaymentForCancellationUseCase(paymentRepository, provider, refund, NoOpAuditLog(), TimeProvider.System));
     }
 
     private static CreatePaymentUseCase CreatePaymentUseCase(PaymentsDbContext paymentsDb)

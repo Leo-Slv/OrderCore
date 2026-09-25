@@ -184,6 +184,31 @@ public sealed class ApiDatabase : IAsyncLifetime
         return customer.SendAsync(request);
     }
 
+    /// <summary>
+    /// The outbox publisher polls every 5 seconds, so a payment outcome can
+    /// take a few seconds to reach the order. This is the same polling the
+    /// storefront does. Works for the order's owner and for an admin.
+    /// </summary>
+    public static async Task<JsonElement> PollOrderUntilAsync(HttpClient client, Guid orderId, Func<string, bool> isDone)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (true)
+        {
+            var order = await client.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}", Json);
+            if (isDone(order.GetProperty("status").GetString()!))
+            {
+                return order;
+            }
+
+            if (DateTimeOffset.UtcNow > deadline)
+            {
+                throw new TimeoutException($"Order {orderId} is still '{order.GetProperty("status").GetString()}'.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+        }
+    }
+
     public static void UseAccessToken(HttpClient client, JsonElement tokens) =>
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", tokens.GetProperty("accessToken").GetString());

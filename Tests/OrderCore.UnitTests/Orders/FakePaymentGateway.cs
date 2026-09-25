@@ -34,4 +34,48 @@ internal sealed class FakePaymentGateway : IPaymentGateway
 
     public Task<OrderPaymentSummary?> GetPaymentSummaryAsync(Guid orderId, CancellationToken cancellationToken) =>
         Task.FromResult(_payments.GetValueOrDefault(orderId));
+
+    /// <summary>Makes the next capture fail, as a refusing provider would.</summary>
+    public Exception? FailNextCaptureWith { get; set; }
+
+    /// <summary>Makes the next settlement fail, e.g. a payment still with the provider.</summary>
+    public Exception? FailNextSettlementWith { get; set; }
+
+    public List<Guid> Captured { get; } = new();
+
+    public List<(Guid OrderId, string Reason)> Settlements { get; } = new();
+
+    public OrderPaymentSettlement SettlementOutcome { get; set; } = OrderPaymentSettlement.Voided;
+
+    public Task<IReadOnlyDictionary<Guid, OrderPaymentSummary>> GetPaymentSummariesAsync(
+        IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyDictionary<Guid, OrderPaymentSummary>>(
+            _payments.Where(p => orderIds.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value));
+
+    public Task<OrderPaymentDetails?> GetPaymentDetailsAsync(Guid orderId, CancellationToken cancellationToken) =>
+        Task.FromResult<OrderPaymentDetails?>(null);
+
+    public Task CaptureForOrderAsync(Guid orderId, CancellationToken cancellationToken)
+    {
+        if (FailNextCaptureWith is { } failure)
+        {
+            FailNextCaptureWith = null;
+            throw failure;
+        }
+
+        Captured.Add(orderId);
+        return Task.CompletedTask;
+    }
+
+    public Task<OrderPaymentSettlement> SettleForCancellationAsync(Guid orderId, string reason, CancellationToken cancellationToken)
+    {
+        if (FailNextSettlementWith is { } failure)
+        {
+            FailNextSettlementWith = null;
+            throw failure;
+        }
+
+        Settlements.Add((orderId, reason));
+        return Task.FromResult(SettlementOutcome);
+    }
 }

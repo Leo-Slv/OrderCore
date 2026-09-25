@@ -157,27 +157,4 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         return await response.Content.ReadFromJsonAsync<JsonElement>(Json);
     }
 
-    /// <summary>
-    /// The outbox publisher polls every 5 seconds, so the outcome can take
-    /// a few seconds to land. This is the same polling the storefront does.
-    /// </summary>
-    private static async Task<JsonElement> PollOrderUntilAsync(HttpClient client, Guid orderId, Func<string, bool> isDone)
-    {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
-        while (true)
-        {
-            var order = await client.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}", Json);
-            if (isDone(order.GetProperty("status").GetString()!))
-            {
-                return order;
-            }
-
-            if (DateTimeOffset.UtcNow > deadline)
-            {
-                throw new TimeoutException($"Order {orderId} is still '{order.GetProperty("status").GetString()}'.");
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
-        }
-    }
 }

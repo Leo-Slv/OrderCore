@@ -1,5 +1,7 @@
 using OrderCore.Api.Modules.Orders.Application.Contracts;
+using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
+using OrderCore.Api.Modules.Orders.Domain.Enums;
 
 namespace OrderCore.UnitTests.Orders;
 
@@ -64,4 +66,30 @@ internal sealed class FakeOrderRepository : IOrderRepository
     }
 
     public void Store(Order order) => _orders[order.Id] = order;
+
+    /// <summary>Applies the filter, newest first, and paging.</summary>
+    public Task<(IReadOnlyList<Order> Items, int TotalCount)> ListAsync(ListOrdersFilter filter, CancellationToken cancellationToken)
+    {
+        var matching = _orders.Values
+            .Where(o => filter.Status is null || o.Status == filter.Status)
+            .Where(o => filter.CustomerId is null || o.CustomerId == filter.CustomerId)
+            .Where(o => filter.CreatedFrom is null || o.CreatedAt >= filter.CreatedFrom)
+            .Where(o => filter.CreatedTo is null || o.CreatedAt < filter.CreatedTo)
+            .OrderByDescending(o => o.CreatedAt)
+            .ToList();
+        IReadOnlyList<Order> pageItems = matching.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize).ToList();
+        return Task.FromResult((pageItems, matching.Count));
+    }
+
+    public Task<IReadOnlyDictionary<OrderStatus, int>> CountByStatusAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyDictionary<OrderStatus, int>>(Enum.GetValues<OrderStatus>().ToDictionary(
+            s => s, s => _orders.Values.Count(o => o.Status == s && o.CreatedAt >= from && o.CreatedAt < to)));
+
+    public Task<IReadOnlyDictionary<string, decimal>> SumConfirmedTotalsAsync(
+        DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<OrderStatus> statuses, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyDictionary<string, decimal>>(_orders.Values
+            .Where(o => o.ConfirmedAt >= from && o.ConfirmedAt < to && statuses.Contains(o.Status))
+            .GroupBy(o => o.Currency)
+            .ToDictionary(g => g.Key, g => g.Sum(o => o.TotalAmount)));
 }
