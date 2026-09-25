@@ -23,8 +23,9 @@ visible as one timeline.
    tolerate state that has moved on (a late `PaymentAuthorized` for a
    cancelled order); this adds protection against the same message twice.
 4. **Stable message contracts.** Events carry an id, a type, a version,
-   when they happened, and a correlation id tying together everything one
-   request caused (the checkout that led to the authorization that led to
+   when they happened, and the trace context (the correlation id is the
+   trace id — decided in `Docs/specs/observability/observability.md`)
+   tying together everything one request caused (the checkout that led to the authorization that led to
    the confirmation). A consumer depends on the message contract, not on
    the publishing module's types — which is what lets Payments leave the
    process later (V4, PayCore) without its consumers changing.

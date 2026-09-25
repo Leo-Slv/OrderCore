@@ -53,13 +53,17 @@ use case ── save ──► module DbContext ┬─ aggregate rows
 ```
 
 - **Envelope.** Every message carries `messageId` (the event id),
-  `type`, `version`, `occurredAt`, `correlationId`, `causationId` (the
-  message that caused it, if any) and the payload, as JSON.
-- **Correlation id.** Read from the `X-Correlation-Id` request header (or
-  generated) by a middleware, echoed in the response, stored with every
-  outbox row, carried as a message header, and restored by the consumer
-  host while it handles a message, so the events a handler publishes keep
-  the same correlation id and name the handled message as their cause.
+  `type`, `version`, `occurredAt`, `causationId` (the message that caused
+  it, if any) and the payload, as JSON, plus the W3C trace context
+  (`traceparent`/`tracestate`) as message headers.
+- **Correlation id = trace id** (decided in the Observability spec). The
+  outbox row stores the trace context of the request (or consumer) that
+  wrote it; the relay sends it as headers; the consumer host continues
+  that trace while it handles the message, so the events a handler
+  publishes stay in the same trace and name the handled message as their
+  cause. There is no separate `X-Correlation-Id`. (The spans themselves
+  and their export are the Observability feature's; this feature only
+  carries the context.)
 - **Outbox per module.** The outbox table lives in the publishing
   module's own `DbContext` — that is what makes "aggregate saved ⇔ event
   recorded" one transaction — with the module's name in the table name
@@ -77,12 +81,11 @@ use case ── save ──► module DbContext ┬─ aggregate rows
   `IDomainEvent`): `EventId`, `Version`, `OccurredAt`.
 - `IIntegrationEventHandler<TEvent>`.
 - `IOutbox` — `Enqueue(IntegrationEvent)` into the current module's
-  unit of work, and `ICorrelationContext` (`CorrelationId`,
-  `CausationId`).
+  unit of work, and `IMessageContext` (the causation id of the message
+  being handled, if any).
 - `Shared/Infrastructure/Messaging`: the outbox and inbox persistence
   models and a `ModelBuilder` extension each module's `DbContext` calls
   to map them under its own table names; `OutboxWriter<TDbContext>`.
-- `Shared/Presentation`: the correlation-id middleware.
 
 **Modules/Messaging:**
 - `Infrastructure/RabbitMq`: connection (the API refuses to start if
@@ -98,8 +101,8 @@ use case ── save ──► module DbContext ┬─ aggregate rows
   the broker confirms; a publish failure is retried on the next poll and
   never stops the service.
 - `ConsumerHostBackgroundService`: one channel per consumer queue,
-  manual acknowledgements, a new DI scope per message, correlation
-  restored, inbox checked and recorded, handler invoked; on an exception
+  manual acknowledgements, a new DI scope per message, trace context
+  and causation restored, inbox checked and recorded, handler invoked; on an exception
   the message goes to the next retry queue (attempt count in a header)
   or, after the fifth attempt, into `failed_messages`, and is
   acknowledged — it never blocks the queue.
@@ -133,7 +136,7 @@ the host.
   `SettlePaymentForCancellationUseCase` in the same save as the payment.
 - Payments' outbox becomes the shared one: migration renames
   `outbox_messages` to `payments_outbox_messages` and adds the
-  correlation/causation columns; `OutboxPublisherBackgroundService`,
+  trace-context/causation columns; `OutboxPublisherBackgroundService`,
   `IntegrationEventTypeRegistry` and the Payments-local `IOutboxWriter`
   are removed.
 - Orders' `PaymentAuthorized`/`PaymentFailed` handlers become
@@ -199,8 +202,8 @@ discarded one is never retried.
 
 - The existing storefront, backoffice and flow tests keep passing on the
   broker.
-- Correlation: one checkout's `X-Correlation-Id` appears on every event
-  it caused, down to the confirmation.
+- Trace context: one checkout's trace id is carried by every event it
+  caused, down to the confirmation.
 - Duplicate delivery: republishing the same `PaymentAuthorized` changes
   nothing (order confirmed once, one timeline entry).
 - Poison message → failed list → replay → processed.
@@ -217,7 +220,7 @@ discarded one is never retried.
   migrations.
 - `CLAUDE.md`: the `Messaging` module, the `Contracts/IntegrationEvents`
   rule, "publish through the outbox, never directly", "every consumer is
-  idempotent", correlation id.
+  idempotent", trace context in messages.
 - `README.md`: running with RabbitMQ (`.env`, management UI), the
   timeline and failed-message endpoints.
 - Execution notes appended to this plan.
@@ -226,7 +229,7 @@ discarded one is never retried.
 
 One or more per stage, e.g.:
 
-1. `feat(messaging): RabbitMQ foundation with outbox relay, inbox, retries and correlation id`
+1. `feat(messaging): RabbitMQ foundation with outbox relay, inbox, retries and trace context`
 2. `feat(payments): publish over RabbitMQ; captured and voided events`
 3. `feat(orders,inventory): publish order lifecycle, reservations and stock alerts`
 4. `feat(orders): order timeline projected from events`
