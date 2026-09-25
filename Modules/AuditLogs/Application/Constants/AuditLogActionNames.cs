@@ -21,6 +21,7 @@ public static class AuditLogActionNames
     public const string PaymentCaptured = "PaymentCaptured";
     public const string PaymentFailed = "PaymentFailed";
     public const string PaymentRefunded = "PaymentRefunded";
+    public const string PaymentVoided = "PaymentVoided";
 
     public const string InventoryReserved = "InventoryReserved";
     public const string InventoryReleased = "InventoryReleased";

@@ -50,6 +50,8 @@ public sealed class Payment : AggregateRoot<Guid>
 
     public DateTimeOffset? CapturedAt { get; private set; }
 
+    public DateTimeOffset? VoidedAt { get; private set; }
+
     public IReadOnlyCollection<Refund> Refunds => _refunds.AsReadOnly();
 
     private Payment()
@@ -126,9 +128,22 @@ public sealed class Payment : AggregateRoot<Guid>
         IncrementVersion();
     }
 
+    /// <summary>
+    /// Releases an authorization that was never captured, so the buyer is
+    /// never charged (backoffice decision 2: cancelling a paid order). A
+    /// captured payment is refunded instead.
+    /// </summary>
+    public void Void(DateTimeOffset now)
+    {
+        EnsureStatus(PaymentStatus.Authorized);
+        Status = PaymentStatus.Voided;
+        VoidedAt = now;
+        IncrementVersion();
+    }
+
     public void Fail(string reason)
     {
-        if (Status is PaymentStatus.Captured or PaymentStatus.Refunded)
+        if (Status is PaymentStatus.Captured or PaymentStatus.Refunded or PaymentStatus.Voided)
         {
             throw new DomainRuleViolationException("invalid_payment_state", $"Cannot fail a payment in status '{Status}'.");
         }
@@ -204,6 +219,7 @@ public sealed class Payment : AggregateRoot<Guid>
         DateTimeOffset updatedAt,
         DateTimeOffset? authorizedAt,
         DateTimeOffset? capturedAt,
+        DateTimeOffset? voidedAt,
         int version,
         IEnumerable<Refund> refunds)
     {
@@ -215,6 +231,7 @@ public sealed class Payment : AggregateRoot<Guid>
             UpdatedAt = updatedAt,
             AuthorizedAt = authorizedAt,
             CapturedAt = capturedAt,
+            VoidedAt = voidedAt,
             Version = version,
         };
 

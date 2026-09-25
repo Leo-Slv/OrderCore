@@ -36,6 +36,9 @@ public static class PaymentsDependencyInjection
         services.AddScoped<FailPaymentUseCase>();
         services.AddScoped<RequestRefundUseCase>();
         services.AddScoped<GetPaymentByOrderIdUseCase>();
+        services.AddScoped<GetPaymentByIdUseCase>();
+        services.AddScoped<ListPaymentsUseCase>();
+        services.AddScoped<SettlePaymentForCancellationUseCase>();
 
         services.AddScoped<PaymentWebhookHandler>();
 

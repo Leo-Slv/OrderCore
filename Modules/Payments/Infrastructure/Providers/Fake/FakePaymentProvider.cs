@@ -26,6 +26,12 @@ public enum FakePaymentProviderMode
 {
     Success,
     Declined,
+
+    /// <summary>
+    /// Authorizes, but refuses to capture: an order is confirmed and then
+    /// can't be shipped. Void and refund still succeed.
+    /// </summary>
+    CaptureDeclined,
     Timeout,
     Unavailable,
 }
@@ -45,7 +51,7 @@ public sealed class FakePaymentProvider : IPaymentProvider
 
         return _options.Mode switch
         {
-            FakePaymentProviderMode.Success => new PaymentAuthorizationResult(
+            FakePaymentProviderMode.Success or FakePaymentProviderMode.CaptureDeclined => new PaymentAuthorizationResult(
                 Succeeded: true,
                 ProviderReference: $"fake_auth_{payment.Id:N}",
                 FailureReason: null),
@@ -72,10 +78,21 @@ public sealed class FakePaymentProvider : IPaymentProvider
     {
         await SimulateLatencyAsync(cancellationToken);
 
-        return _options.Mode == FakePaymentProviderMode.Success
+        return AcceptsReversals
             ? new PaymentRefundResult(Succeeded: true, FailureReason: null)
             : new PaymentRefundResult(Succeeded: false, FailureReason: "refund_failed");
     }
+
+    public async Task<PaymentVoidResult> VoidAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        await SimulateLatencyAsync(cancellationToken);
+
+        return AcceptsReversals
+            ? new PaymentVoidResult(Succeeded: true, FailureReason: null)
+            : new PaymentVoidResult(Succeeded: false, FailureReason: "void_failed");
+    }
+
+    private bool AcceptsReversals => _options.Mode is FakePaymentProviderMode.Success or FakePaymentProviderMode.CaptureDeclined;
 
     private Task SimulateLatencyAsync(CancellationToken cancellationToken) =>
         _options.SimulatedLatency > TimeSpan.Zero

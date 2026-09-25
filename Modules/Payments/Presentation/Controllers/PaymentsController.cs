@@ -6,6 +6,7 @@ using OrderCore.Api.Modules.Payments.Presentation.Presenters;
 using OrderCore.Api.Modules.Payments.Presentation.Requests;
 using OrderCore.Api.Modules.Payments.Presentation.Responses;
 using OrderCore.Api.Shared.Presentation.Authentication;
+using OrderCore.Api.Shared.Presentation.Responses;
 
 namespace OrderCore.Api.Modules.Payments.Presentation.Controllers;
 
@@ -22,15 +23,21 @@ public sealed class PaymentsController : ControllerBase
     private readonly CreatePaymentUseCase _createPaymentUseCase;
     private readonly GetPaymentByOrderIdUseCase _getPaymentByOrderIdUseCase;
     private readonly RequestRefundUseCase _requestRefundUseCase;
+    private readonly ListPaymentsUseCase _listPaymentsUseCase;
+    private readonly GetPaymentByIdUseCase _getPaymentByIdUseCase;
 
     public PaymentsController(
         CreatePaymentUseCase createPaymentUseCase,
         GetPaymentByOrderIdUseCase getPaymentByOrderIdUseCase,
-        RequestRefundUseCase requestRefundUseCase)
+        RequestRefundUseCase requestRefundUseCase,
+        ListPaymentsUseCase listPaymentsUseCase,
+        GetPaymentByIdUseCase getPaymentByIdUseCase)
     {
         _createPaymentUseCase = createPaymentUseCase;
         _getPaymentByOrderIdUseCase = getPaymentByOrderIdUseCase;
         _requestRefundUseCase = requestRefundUseCase;
+        _listPaymentsUseCase = listPaymentsUseCase;
+        _getPaymentByIdUseCase = getPaymentByIdUseCase;
     }
 
     [HttpPost]
@@ -49,6 +56,28 @@ public sealed class PaymentsController : ControllerBase
         var response = PaymentPresenter.ToResponse(payment!);
 
         return CreatedAtAction(nameof(GetByOrderIdAsync), new { orderId = response.OrderId }, response);
+    }
+
+    /// <summary>The backoffice payment list, newest first.</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(PagedResponse<PaymentSummaryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PagedResponse<PaymentSummaryResponse>>> ListAsync(
+        [FromQuery] ListPaymentsFilter filter, CancellationToken cancellationToken)
+    {
+        var page = await _listPaymentsUseCase.ExecuteAsync(filter, cancellationToken);
+
+        return Ok(PaymentPresenter.ToResponse(page));
+    }
+
+    [HttpGet("{id:guid}")]
+    [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PaymentResponse>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var payment = await _getPaymentByIdUseCase.ExecuteAsync(id, cancellationToken);
+
+        return Ok(PaymentPresenter.ToResponse(payment));
     }
 
     [HttpGet("orders/{orderId:guid}")]

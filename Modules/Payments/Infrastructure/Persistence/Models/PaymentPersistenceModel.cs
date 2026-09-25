@@ -39,6 +39,8 @@ public sealed class PaymentPersistenceModel
 
     public DateTimeOffset? CapturedAt { get; set; }
 
+    public DateTimeOffset? VoidedAt { get; set; }
+
     public int Version { get; set; }
 
     public ICollection<RefundPersistenceModel> Refunds { get; set; } = new List<RefundPersistenceModel>();

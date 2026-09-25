@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
+using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Mappers;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Models;
@@ -33,6 +34,46 @@ public sealed class EfPaymentRepository : IPaymentRepository
     {
         var model = await Query().FirstOrDefaultAsync(p => p.OrderId == orderId, cancellationToken);
         return model is null ? null : Track(model);
+    }
+
+    public async Task<(IReadOnlyList<Payment> Items, int TotalCount)> ListAsync(ListPaymentsFilter filter, CancellationToken cancellationToken)
+    {
+        var query = _dbContext.Payments.AsNoTracking();
+
+        if (filter.Status is { } status)
+        {
+            var statusName = status.ToString();
+            query = query.Where(p => p.Status == statusName);
+        }
+
+        if (filter.Method is { } method)
+        {
+            var methodName = method.ToString();
+            query = query.Where(p => p.Method == methodName);
+        }
+
+        if (filter.CreatedFrom is { } from)
+        {
+            query = query.Where(p => p.CreatedAt >= from);
+        }
+
+        if (filter.CreatedTo is { } to)
+        {
+            query = query.Where(p => p.CreatedAt < to);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        // Read-only: the list is never saved back, so the page isn't tracked.
+        var models = await query
+            .Include(p => p.Refunds)
+            .OrderByDescending(p => p.CreatedAt)
+            .ThenByDescending(p => p.Id)
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
+            .ToListAsync(cancellationToken);
+
+        return (models.Select(PaymentMapper.ToDomain).ToList(), totalCount);
     }
 
     public async Task AddAsync(Payment payment, CancellationToken cancellationToken)

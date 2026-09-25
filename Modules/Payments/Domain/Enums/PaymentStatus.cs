@@ -15,4 +15,10 @@ public enum PaymentStatus
     Captured = 3,
     Failed = 4,
     Refunded = 5,
+
+    /// <summary>
+    /// The authorization was released before capture (the order was
+    /// cancelled): the buyer is never charged. Final.
+    /// </summary>
+    Voided = 6,
 }

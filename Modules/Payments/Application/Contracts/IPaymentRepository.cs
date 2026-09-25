@@ -1,3 +1,4 @@
+using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 
 namespace OrderCore.Api.Modules.Payments.Application.Contracts;
@@ -14,6 +15,9 @@ public interface IPaymentRepository
     Task<Payment?> GetByIdAsync(Guid paymentId, CancellationToken cancellationToken);
 
     Task<Payment?> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken);
+
+    /// <summary>One page of payments, newest first, plus how many match in total.</summary>
+    Task<(IReadOnlyList<Payment> Items, int TotalCount)> ListAsync(ListPaymentsFilter filter, CancellationToken cancellationToken);
 
     Task AddAsync(Payment payment, CancellationToken cancellationToken);
 

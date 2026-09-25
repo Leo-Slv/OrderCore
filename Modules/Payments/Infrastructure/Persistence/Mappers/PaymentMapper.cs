@@ -32,6 +32,7 @@ public static class PaymentMapper
             model.UpdatedAt,
             model.AuthorizedAt,
             model.CapturedAt,
+            model.VoidedAt,
             model.Version,
             refunds);
     }
@@ -53,6 +54,7 @@ public static class PaymentMapper
         UpdatedAt = domain.UpdatedAt,
         AuthorizedAt = domain.AuthorizedAt,
         CapturedAt = domain.CapturedAt,
+        VoidedAt = domain.VoidedAt,
         Version = domain.Version,
         Refunds = domain.Refunds.Select(ToPersistence).ToList(),
     };
@@ -65,6 +67,7 @@ public static class PaymentMapper
         model.UpdatedAt = domain.UpdatedAt;
         model.AuthorizedAt = domain.AuthorizedAt;
         model.CapturedAt = domain.CapturedAt;
+        model.VoidedAt = domain.VoidedAt;
         model.Version = domain.Version;
 
         ChildCollectionReconciler.Reconcile(domain.Refunds, model.Refunds, ToPersistence, ApplyChanges, r => r.Id);
