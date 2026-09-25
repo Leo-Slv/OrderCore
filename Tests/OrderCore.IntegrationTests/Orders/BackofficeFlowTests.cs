@@ -89,6 +89,32 @@ public sealed class BackofficeFlowTests : IClassFixture<ApiDatabase>
     }
 
     [Fact]
+    public async Task A_customer_cancels_their_own_order_until_the_store_starts_preparing_it()
+    {
+        await using var factory = _database.CreateFactory();
+        var (admin, customer, productId, orderId) = await ConfirmedOrderAsync(factory, "Regretted Lamp", stock: 4, quantity: 1);
+        var (stranger, _) = await SignUpCustomerAsync(factory);
+
+        (await stranger.PostAsJsonAsync($"/api/orders/me/{orderId}/cancel", new { })).StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var cancel = await customer.PostAsJsonAsync($"/api/orders/me/{orderId}/cancel", new { });
+
+        cancel.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await cancel.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("paymentSettlement").GetString().Should().Be("Voided");
+        (await PaymentStatusAsync(admin, orderId)).Should().Be("Voided");
+        (await OnHandAsync(admin, productId)).Should().Be(4);
+        var history = await customer.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}/status-history", Json);
+        history.EnumerateArray().Last().GetProperty("reason").GetString().Should().Be("Cancelled by the customer");
+
+        // Once the store is preparing an order, only an admin can cancel it.
+        var (_, owner, _, preparing) = await ConfirmedOrderAsync(factory, "Committed Lamp", stock: 1, quantity: 1);
+        (await admin.PostAsync($"/api/orders/{preparing}/start-processing", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var tooLate = await owner.PostAsJsonAsync($"/api/orders/me/{preparing}/cancel", new { reason = "changed my mind" });
+        tooLate.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await tooLate.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString().Should().Be("order_in_fulfilment");
+    }
+
+    [Fact]
     public async Task A_refused_capture_stops_the_shipment_and_the_order_can_still_be_cancelled_without_charge()
     {
         await using var factory = _database.CreateFactory(FakePaymentProviderMode.CaptureDeclined);

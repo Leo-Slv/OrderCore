@@ -96,6 +96,9 @@ public sealed class EndpointAccessTests : IClassFixture<ApiDatabase>, IAsyncLife
     [InlineData(Caller.Customer, "POST", "/api/orders/00000000-0000-0000-0000-000000000001/ship", HttpStatusCode.Forbidden)]
     [InlineData(Caller.Admin, "POST", "/api/orders/00000000-0000-0000-0000-000000000001/ship", HttpStatusCode.NotFound)]
     [InlineData(Caller.Customer, "POST", "/api/orders/00000000-0000-0000-0000-000000000001/cancel", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Anonymous, "POST", "/api/orders/me/00000000-0000-0000-0000-000000000001/cancel", HttpStatusCode.Unauthorized)]
+    [InlineData(Caller.Admin, "POST", "/api/orders/me/00000000-0000-0000-0000-000000000001/cancel", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Customer, "POST", "/api/orders/me/00000000-0000-0000-0000-000000000001/cancel", HttpStatusCode.NotFound)]
     [InlineData(Caller.Customer, "POST", "/api/customers/00000000-0000-0000-0000-000000000001/deactivate", HttpStatusCode.Forbidden)]
     [InlineData(Caller.Customer, "POST", "/api/inventory/stock-items/00000000-0000-0000-0000-000000000001/receive", HttpStatusCode.Forbidden)]
     public async Task Access_matches_the_endpoints_classification(Caller caller, string method, string url, HttpStatusCode expected)

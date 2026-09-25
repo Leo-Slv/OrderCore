@@ -188,6 +188,45 @@ public sealed class OrderBackofficeUseCaseTests
     }
 
     [Fact]
+    public async Task A_customer_cancels_their_own_confirmed_order_with_the_same_settlement_as_an_admin()
+    {
+        var customerId = Guid.NewGuid();
+        var order = await StoredOrderAsync(OrderStatus.Confirmed, customerId);
+
+        var settlement = await Cancel().ExecuteAsync(
+            new CancelOrderCommand(order.Id, "changed my mind", RequestingCustomerId: customerId), CancellationToken.None);
+
+        settlement.Should().Be(OrderPaymentSettlement.Voided);
+        order.Status.Should().Be(OrderStatus.Cancelled);
+        _inventory.ReturnedOrders.Should().Equal(order.Id);
+        _auditLog.Entries.Single(e => e.Action == "OrderCancelled").Metadata!["cancelledBy"].Should().Be("Customer");
+    }
+
+    [Fact]
+    public async Task A_customer_cannot_cancel_once_the_store_started_preparing_the_order()
+    {
+        var customerId = Guid.NewGuid();
+        var order = await StoredOrderAsync(OrderStatus.Processing, customerId);
+
+        var act = () => Cancel().ExecuteAsync(new CancelOrderCommand(order.Id, "too late", customerId), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<DomainRuleViolationException>()).Which.Code.Should().Be("order_in_fulfilment");
+        _payments.Settlements.Should().BeEmpty();
+        order.Status.Should().Be(OrderStatus.Processing);
+    }
+
+    [Fact]
+    public async Task A_customer_cannot_cancel_someone_elses_order_and_learns_nothing_about_it()
+    {
+        var order = await StoredOrderAsync(OrderStatus.Confirmed, customerId: Guid.NewGuid());
+
+        var act = () => Cancel().ExecuteAsync(new CancelOrderCommand(order.Id, "mine?", Guid.NewGuid()), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<NotFoundException>()).Which.Code.Should().Be("order_not_found");
+        _payments.Settlements.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task A_late_payment_authorization_for_a_cancelled_order_is_skipped()
     {
         var order = await StoredOrderAsync(OrderStatus.PendingPayment);

@@ -34,6 +34,7 @@ public sealed class OrdersController : ControllerBase
     private readonly GetOrderDetailsUseCase _getOrderDetailsUseCase;
     private readonly GetOrderStatusHistoryUseCase _getOrderStatusHistoryUseCase;
     private readonly ListCustomerOrdersUseCase _listCustomerOrdersUseCase;
+    private readonly CancelOrderUseCase _cancelOrderUseCase;
     private readonly CheckoutUseCase _checkoutUseCase;
     private readonly QuoteCartUseCase _quoteCartUseCase;
     private readonly ICurrentUser _currentUser;
@@ -46,6 +47,7 @@ public sealed class OrdersController : ControllerBase
         GetOrderDetailsUseCase getOrderDetailsUseCase,
         GetOrderStatusHistoryUseCase getOrderStatusHistoryUseCase,
         ListCustomerOrdersUseCase listCustomerOrdersUseCase,
+        CancelOrderUseCase cancelOrderUseCase,
         CheckoutUseCase checkoutUseCase,
         QuoteCartUseCase quoteCartUseCase,
         ICurrentUser currentUser)
@@ -57,6 +59,7 @@ public sealed class OrdersController : ControllerBase
         _getOrderDetailsUseCase = getOrderDetailsUseCase;
         _getOrderStatusHistoryUseCase = getOrderStatusHistoryUseCase;
         _listCustomerOrdersUseCase = listCustomerOrdersUseCase;
+        _cancelOrderUseCase = cancelOrderUseCase;
         _checkoutUseCase = checkoutUseCase;
         _quoteCartUseCase = quoteCartUseCase;
         _currentUser = currentUser;
@@ -171,6 +174,8 @@ public sealed class OrdersController : ControllerBase
     /// customer only their own. A signed-in account that is neither gets an
     /// id that owns nothing, so it sees nothing.
     /// </summary>
+    private const string CustomerCancellationReason = "Cancelled by the customer";
+
     private Guid? RequestingCustomerId => _currentUser.IsAdmin ? null : _currentUser.CustomerId ?? Guid.Empty;
 
     /// <summary>
@@ -215,6 +220,29 @@ public sealed class OrdersController : ControllerBase
         [FromQuery] int page = ListCustomerOrdersInput.DefaultPage,
         [FromQuery] int pageSize = ListCustomerOrdersInput.DefaultPageSize) =>
         ListOrdersOfAsync(_currentUser.CustomerId!.Value, page, pageSize, cancellationToken);
+
+    /// <summary>
+    /// The signed-in customer cancels their own order, until the store starts
+    /// preparing it (<c>400 order_in_fulfilment</c> after that). Same effect
+    /// as an admin cancellation: the payment is released or refunded and the
+    /// stock goes back. Someone else's order is <c>404 order_not_found</c>;
+    /// <c>409 payment_in_progress</c> while the provider hasn't answered yet.
+    /// </summary>
+    [HttpPost("me/{id:guid}/cancel")]
+    [Authorize(Policy = AuthorizationPolicies.Customer)]
+    [ProducesResponseType(typeof(CancelOrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<CancelOrderResponse>> CancelMineAsync(
+        Guid id, [FromBody] CancelMyOrderRequest request, CancellationToken cancellationToken)
+    {
+        var reason = string.IsNullOrWhiteSpace(request.Reason) ? CustomerCancellationReason : request.Reason;
+        var settlement = await _cancelOrderUseCase.ExecuteAsync(
+            new CancelOrderCommand(id, reason, RequestingCustomerId: _currentUser.CustomerId!.Value), cancellationToken);
+
+        return Ok(new CancelOrderResponse { PaymentSettlement = settlement.ToString() });
+    }
 
     /// <summary>Any customer's orders, newest first (backoffice).</summary>
     [HttpGet("customers/{customerId:guid}")]

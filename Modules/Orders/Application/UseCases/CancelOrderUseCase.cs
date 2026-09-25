@@ -9,7 +9,9 @@ namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 
 /// <summary>
 /// Cancels an order and leaves nothing held for it (backoffice decision 2),
-/// in this order:
+/// whether an admin cancels it or its own customer does (until the store
+/// starts preparing it, see <c>Order.EnsureCustomerCanCancel</c>), in this
+/// order:
 /// <list type="number">
 /// <item>check it can be cancelled at all (not shipped, delivered or already cancelled);</item>
 /// <item>settle the payment: void an authorization, refund a capture — money first,
@@ -53,10 +55,16 @@ public sealed class CancelOrderUseCase
             throw new ArgumentException("A reason is required to cancel an order.", nameof(command));
         }
 
-        var order = await _orderRepository.GetByIdAsync(command.OrderId, cancellationToken)
-            ?? throw new NotFoundException("order_not_found", $"Order '{command.OrderId}' was not found.");
+        var order = await OrderAccess.LoadVisibleToAsync(_orderRepository, command.OrderId, command.RequestingCustomerId, cancellationToken);
 
-        order.EnsureCanBeCancelled();
+        if (command.RequestingCustomerId is null)
+        {
+            order.EnsureCanBeCancelled();
+        }
+        else
+        {
+            order.EnsureCustomerCanCancel();
+        }
 
         var settlement = await _paymentGateway.SettleForCancellationAsync(command.OrderId, command.Reason, cancellationToken);
         await _inventoryService.ReleaseReservationsAsync(command.OrderId, cancellationToken);
@@ -72,6 +80,7 @@ public sealed class CancelOrderUseCase
             new Dictionary<string, string?>
             {
                 ["reason"] = command.Reason,
+                ["cancelledBy"] = command.RequestingCustomerId is null ? "Admin" : "Customer",
                 ["payment"] = settlement.ToString(),
                 ["returnedUnits"] = returnedUnits.ToString(CultureInfo.InvariantCulture),
             },

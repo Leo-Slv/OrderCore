@@ -341,6 +341,22 @@ public sealed class Order : AggregateRoot<Guid>
     }
 
     /// <summary>
+    /// A customer may cancel their own order only until the store starts
+    /// preparing it; from <see cref="OrderStatus.Processing"/> on, only an
+    /// admin can (and after shipping, nobody).
+    /// </summary>
+    public void EnsureCustomerCanCancel()
+    {
+        if (Status is OrderStatus.Processing)
+        {
+            throw new DomainRuleViolationException(
+                "order_in_fulfilment", "The store has started preparing this order; contact support to cancel it.");
+        }
+
+        EnsureCanBeCancelled();
+    }
+
+    /// <summary>
     /// Cancellation is only allowed from states where no irreversible
     /// fulfillment step has happened yet. In particular, a Delivered order
     /// can never transition back to any earlier state (section 10).
