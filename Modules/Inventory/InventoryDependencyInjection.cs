@@ -30,6 +30,7 @@ public static class InventoryDependencyInjection
         services.AddScoped<EfInventoryReservationRepository>();
         services.AddScoped<IInventoryReservationRepository>(sp => sp.GetRequiredService<EfInventoryReservationRepository>());
         services.AddScoped<IUnitOfWork, InventoryUnitOfWork>();
+        services.AddScoped<IStockMovementReader, EfStockMovementReader>();
 
         services.AddScoped<IDomainEventHandler<InventoryStockMovementRecorded>, StockMovementRecorder>();
 
@@ -40,6 +41,16 @@ public static class InventoryDependencyInjection
         services.AddScoped<AdjustStockUseCase>();
         services.AddScoped<GetStockByProductIdUseCase>();
         services.AddScoped<GetStockAvailabilityUseCase>();
+        services.AddScoped<EnsureStockItemUseCase>();
+        services.AddScoped<ReceiveStockUseCase>();
+        services.AddScoped<SetReorderLevelUseCase>();
+        services.AddScoped<ReturnOrderStockUseCase>();
+        services.AddScoped<ListStockItemsUseCase>();
+        services.AddScoped<GetStockLevelsUseCase>();
+        services.AddScoped<ListProductIdsInStockStateUseCase>();
+        services.AddScoped<GetStockSummaryUseCase>();
+        services.AddScoped<ListStockMovementsUseCase>();
+        services.AddScoped<ListReservationsUseCase>();
 
         return services;
     }

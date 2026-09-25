@@ -21,6 +21,7 @@ public static class InventoryReservationMapper
         model.ExpiresAt,
         model.ReleasedAt,
         model.ConsumedAt,
+        model.ReturnedAt,
         model.Version);
 
     public static InventoryReservationPersistenceModel ToPersistence(InventoryReservation domain) => new()
@@ -35,6 +36,7 @@ public static class InventoryReservationMapper
         ExpiresAt = domain.ExpiresAt,
         ReleasedAt = domain.ReleasedAt,
         ConsumedAt = domain.ConsumedAt,
+        ReturnedAt = domain.ReturnedAt,
         Version = domain.Version,
     };
 
@@ -44,6 +46,7 @@ public static class InventoryReservationMapper
         model.ExpiresAt = domain.ExpiresAt;
         model.ReleasedAt = domain.ReleasedAt;
         model.ConsumedAt = domain.ConsumedAt;
+        model.ReturnedAt = domain.ReturnedAt;
         model.Version = domain.Version;
     }
 }

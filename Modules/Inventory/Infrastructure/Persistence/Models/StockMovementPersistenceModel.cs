@@ -14,5 +14,7 @@ public sealed class StockMovementPersistenceModel
 
     public Guid? ReferenceId { get; set; }
 
+    public string? Reason { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }

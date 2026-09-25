@@ -38,6 +38,8 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
 
     public DateTimeOffset? ConsumedAt { get; private set; }
 
+    public DateTimeOffset? ReturnedAt { get; private set; }
+
     private InventoryReservation()
     {
     }
@@ -105,6 +107,22 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
     }
 
     /// <summary>
+    /// The order was cancelled after its stock was consumed: the units go
+    /// back on hand (<see cref="StockItem.ReturnConsumed"/>) and the
+    /// return is recorded here, referencing this reservation like the
+    /// other reservation movements.
+    /// </summary>
+    public void Return(DateTimeOffset now)
+    {
+        EnsureStatus(ReservationStatus.Consumed);
+        Status = ReservationStatus.Returned;
+        ReturnedAt = now;
+        IncrementVersion();
+        Raise(new InventoryStockMovementRecorded(
+            Guid.NewGuid(), now, ProductId, StockMovementType.ReservationReturned, Quantity, nameof(InventoryReservation), Id));
+    }
+
+    /// <summary>
     /// No `now` parameter: the diagram's own "Paridade" note says there is
     /// no separate `expired_at` column — the `Expired` status is enough.
     /// </summary>
@@ -143,6 +161,7 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
         DateTimeOffset? expiresAt,
         DateTimeOffset? releasedAt,
         DateTimeOffset? consumedAt,
+        DateTimeOffset? returnedAt,
         int version)
     {
         return new InventoryReservation(id, productId, orderId, orderItemId, quantity, reservedAt)
@@ -151,6 +170,7 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
             ExpiresAt = expiresAt,
             ReleasedAt = releasedAt,
             ConsumedAt = consumedAt,
+            ReturnedAt = returnedAt,
             Version = version,
         };
     }

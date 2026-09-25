@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Models;
 
 namespace OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Configurations;
@@ -14,7 +15,8 @@ public sealed class StockMovementConfiguration : IEntityTypeConfiguration<StockM
 
         builder.Property(m => m.MovementType).HasMaxLength(30).IsRequired();
         builder.Property(m => m.ReferenceType).HasMaxLength(100);
+        builder.Property(m => m.Reason).HasMaxLength(StockItem.MaxReasonLength);
 
-        builder.HasIndex(m => m.ProductId);
+        builder.HasIndex(m => new { m.ProductId, m.CreatedAt });
     }
 }

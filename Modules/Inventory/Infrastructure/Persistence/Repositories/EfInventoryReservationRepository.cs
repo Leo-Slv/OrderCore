@@ -32,6 +32,22 @@ public sealed class EfInventoryReservationRepository : IInventoryReservationRepo
         return models.Select(Track).ToList();
     }
 
+    public async Task<(IReadOnlyList<InventoryReservation> Items, int TotalCount)> ListByProductIdAsync(
+        Guid productId, int page, int pageSize, CancellationToken cancellationToken)
+    {
+        var query = _dbContext.Reservations.AsNoTracking().Where(r => r.ProductId == productId);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var models = await query
+            .OrderByDescending(r => r.ReservedAt)
+            .ThenByDescending(r => r.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (models.Select(InventoryReservationMapper.ToDomain).ToList(), totalCount);
+    }
+
     public async Task AddAsync(InventoryReservation reservation, CancellationToken cancellationToken)
     {
         var model = InventoryReservationMapper.ToPersistence(reservation);

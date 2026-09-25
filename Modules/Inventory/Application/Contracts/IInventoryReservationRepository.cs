@@ -11,5 +11,9 @@ public interface IInventoryReservationRepository
 
     Task<IReadOnlyList<InventoryReservation>> ListByOrderIdAsync(Guid orderId, CancellationToken cancellationToken);
 
+    /// <summary>One page of a product's reservations, newest first. Read-only.</summary>
+    Task<(IReadOnlyList<InventoryReservation> Items, int TotalCount)> ListByProductIdAsync(
+        Guid productId, int page, int pageSize, CancellationToken cancellationToken);
+
     Task AddAsync(InventoryReservation reservation, CancellationToken cancellationToken);
 }

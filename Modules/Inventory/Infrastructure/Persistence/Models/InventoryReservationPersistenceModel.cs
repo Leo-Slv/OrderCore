@@ -29,5 +29,7 @@ public sealed class InventoryReservationPersistenceModel
 
     public DateTimeOffset? ConsumedAt { get; set; }
 
+    public DateTimeOffset? ReturnedAt { get; set; }
+
     public int Version { get; set; }
 }

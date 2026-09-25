@@ -1,5 +1,7 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
+using OrderCore.Api.Modules.Inventory.Application.DTOs;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Mappers;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Models;
@@ -59,6 +61,47 @@ public sealed class EfStockItemRepository : IStockItemRepository, IPendingChange
 
         return models.Select(StockItemMapper.ToDomain).ToList();
     }
+
+    public async Task<(IReadOnlyList<StockItem> Items, int TotalCount)> ListAsync(
+        StockState? state, int page, int pageSize, CancellationToken cancellationToken)
+    {
+        var query = _dbContext.StockItems.AsNoTracking();
+        if (state is { } wanted)
+        {
+            query = query.Where(InState(wanted));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var models = await query
+            .OrderByDescending(s => s.UpdatedAt)
+            .ThenBy(s => s.ProductId)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (models.Select(StockItemMapper.ToDomain).ToList(), totalCount);
+    }
+
+    public async Task<IReadOnlyList<Guid>> ListProductIdsInStateAsync(StockState state, CancellationToken cancellationToken) =>
+        await _dbContext.StockItems.AsNoTracking().Where(InState(state)).Select(s => s.ProductId).ToListAsync(cancellationToken);
+
+    public Task<int> CountInStateAsync(StockState state, CancellationToken cancellationToken) =>
+        _dbContext.StockItems.Where(InState(state)).CountAsync(cancellationToken);
+
+    /// <summary>
+    /// <c>StockItemOutput.StateOf</c> translated to SQL over the stored
+    /// columns (available is computed, not stored). The repository tests
+    /// check the two agree.
+    /// </summary>
+    private static Expression<Func<StockItemPersistenceModel, bool>> InState(StockState state) => state switch
+    {
+        StockState.OutOfStock => s => s.QuantityOnHand - s.QuantityReserved <= 0,
+        StockState.LowStock => s => s.QuantityOnHand - s.QuantityReserved > 0
+            && s.QuantityOnHand - s.QuantityReserved <= s.ReorderLevel,
+        StockState.InStock => s => s.QuantityOnHand - s.QuantityReserved > 0
+            && s.QuantityOnHand - s.QuantityReserved > s.ReorderLevel,
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Unknown stock state."),
+    };
 
     public async Task AddAsync(StockItem stockItem, CancellationToken cancellationToken)
     {

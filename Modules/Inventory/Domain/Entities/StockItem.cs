@@ -1,3 +1,5 @@
+using OrderCore.Api.Modules.Inventory.Domain.Enums;
+using OrderCore.Api.Modules.Inventory.Domain.Events;
 using OrderCore.Api.Shared.Domain;
 using OrderCore.Api.Shared.Domain.Exceptions;
 
@@ -13,6 +15,9 @@ namespace OrderCore.Api.Modules.Inventory.Domain.Entities;
 /// </summary>
 public sealed class StockItem : AggregateRoot<Guid>
 {
+    /// <summary>Longest reason a receipt or adjustment can carry into the movement history.</summary>
+    public const int MaxReasonLength = 500;
+
     public Guid ProductId { get; private set; }
 
     public Guid? ProductVariantId { get; private set; }
@@ -24,9 +29,9 @@ public sealed class StockItem : AggregateRoot<Guid>
     public int QuantityAvailable => QuantityOnHand - QuantityReserved;
 
     /// <summary>
-    /// Threshold used to flag low stock. No method sets it yet — nothing
-    /// in 04-inventory.md exposes a way to change it after creation, so it
-    /// stays at its default (0) until a "reorder alert" feature adds one.
+    /// Threshold used to flag low stock, set per item by an admin
+    /// (<see cref="SetReorderLevel"/>, backoffice decision 4). Starts at 0,
+    /// which never flags anything.
     /// </summary>
     public int ReorderLevel { get; private set; }
 
@@ -65,14 +70,50 @@ public sealed class StockItem : AggregateRoot<Guid>
 
         var stockItem = new StockItem(Guid.NewGuid(), productId, productVariantId, initialQuantity, now);
         stockItem.IncrementVersion();
+
+        if (initialQuantity > 0)
+        {
+            stockItem.RecordMovement(StockMovementType.Inbound, initialQuantity, reason: null, now);
+        }
+
         return stockItem;
     }
 
-    public void Receive(int quantity)
+    /// <summary>New units arrived (a delivery from a supplier).</summary>
+    public void Receive(int quantity, string? reason, DateTimeOffset now)
+    {
+        RequirePositive(quantity);
+        RequireReasonWithinLimit(reason);
+
+        QuantityOnHand += quantity;
+        UpdatedAt = now;
+        IncrementVersion();
+        RecordMovement(StockMovementType.Inbound, quantity, reason, now);
+    }
+
+    /// <summary>
+    /// Puts back on hand units a cancelled order had already consumed.
+    /// Records no movement itself: the reservation being returned does
+    /// (<see cref="InventoryReservation.Return"/>).
+    /// </summary>
+    public void ReturnConsumed(int quantity, DateTimeOffset now)
     {
         RequirePositive(quantity);
 
         QuantityOnHand += quantity;
+        UpdatedAt = now;
+        IncrementVersion();
+    }
+
+    public void SetReorderLevel(int reorderLevel, DateTimeOffset now)
+    {
+        if (reorderLevel < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(reorderLevel), "Reorder level cannot be negative.");
+        }
+
+        ReorderLevel = reorderLevel;
+        UpdatedAt = now;
         IncrementVersion();
     }
 
@@ -123,7 +164,7 @@ public sealed class StockItem : AggregateRoot<Guid>
         IncrementVersion();
     }
 
-    public void Adjust(int quantity, string reason)
+    public void Adjust(int quantity, string reason, DateTimeOffset now)
     {
         if (quantity == 0)
         {
@@ -135,6 +176,8 @@ public sealed class StockItem : AggregateRoot<Guid>
             throw new ArgumentException("A reason is required.", nameof(reason));
         }
 
+        RequireReasonWithinLimit(reason);
+
         var newQuantityOnHand = QuantityOnHand + quantity;
         if (newQuantityOnHand < QuantityReserved)
         {
@@ -142,7 +185,21 @@ public sealed class StockItem : AggregateRoot<Guid>
         }
 
         QuantityOnHand = newQuantityOnHand;
+        UpdatedAt = now;
         IncrementVersion();
+        RecordMovement(StockMovementType.Adjustment, quantity, reason, now);
+    }
+
+    private void RecordMovement(StockMovementType type, int quantity, string? reason, DateTimeOffset now) =>
+        Raise(new InventoryStockMovementRecorded(
+            Guid.NewGuid(), now, ProductId, type, quantity, nameof(StockItem), Id, string.IsNullOrWhiteSpace(reason) ? null : reason.Trim()));
+
+    private static void RequireReasonWithinLimit(string? reason)
+    {
+        if (reason is not null && reason.Trim().Length > MaxReasonLength)
+        {
+            throw new ArgumentException($"A reason can have at most {MaxReasonLength} characters.", nameof(reason));
+        }
     }
 
     private static void RequirePositive(int quantity)

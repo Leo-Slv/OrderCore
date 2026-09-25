@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Shared.Application.Abstractions;
@@ -17,6 +18,9 @@ namespace OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 /// </summary>
 public sealed class InventoryUnitOfWork : IUnitOfWork
 {
+    /// <summary>The unique index on <c>stock_items.ProductId</c> (one stock record per product).</summary>
+    private const string StockItemProductIndex = "IX_stock_items_ProductId";
+
     private readonly InventoryDbContext _dbContext;
     private readonly EfStockItemRepository _stockItemRepository;
     private readonly EfInventoryReservationRepository _reservationRepository;
@@ -51,6 +55,12 @@ public sealed class InventoryUnitOfWork : IUnitOfWork
             stockItemTracker.ForgetTrackedEntries();
             reservationTracker.ForgetTrackedEntries();
             throw new StockConcurrencyConflictException("A concurrent update changed the stock item.", ex);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: StockItemProductIndex })
+        {
+            stockItemTracker.ForgetTrackedEntries();
+            reservationTracker.ForgetTrackedEntries();
+            throw new DuplicateStockItemException("The product already has a stock record.", ex);
         }
 
         var events = stockItemTracker.CollectAndClearDomainEvents()

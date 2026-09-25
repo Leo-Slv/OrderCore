@@ -38,6 +38,7 @@ public sealed class StockMovementRecorder : IDomainEventHandler<InventoryStockMo
             Quantity = domainEvent.Quantity,
             ReferenceType = domainEvent.ReferenceType,
             ReferenceId = domainEvent.ReferenceId,
+            Reason = domainEvent.Reason,
             CreatedAt = domainEvent.OccurredAt,
         };
 
