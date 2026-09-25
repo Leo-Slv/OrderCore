@@ -73,6 +73,41 @@ public sealed class PaymentTests
     }
 
     [Fact]
+    public void Void_releases_an_authorization_and_sets_VoidedAt()
+    {
+        var payment = CreatePayment();
+        payment.MarkProcessing();
+        payment.Authorize("provider-ref", Now);
+
+        payment.Void(Now);
+
+        payment.Status.Should().Be(PaymentStatus.Voided);
+        payment.VoidedAt.Should().Be(Now);
+    }
+
+    [Fact]
+    public void Void_after_Captured_throws()
+    {
+        var payment = CreateCapturedPayment();
+
+        var act = () => payment.Void(Now);
+
+        act.Should().Throw<DomainRuleViolationException>().Which.Code.Should().Be("invalid_payment_state");
+    }
+
+    [Fact]
+    public void A_voided_payment_can_be_neither_captured_nor_failed()
+    {
+        var payment = CreatePayment();
+        payment.MarkProcessing();
+        payment.Authorize("provider-ref", Now);
+        payment.Void(Now);
+
+        payment.Invoking(p => p.Capture(Now)).Should().Throw<DomainRuleViolationException>();
+        payment.Invoking(p => p.Fail("late")).Should().Throw<DomainRuleViolationException>();
+    }
+
+    [Fact]
     public void Fail_after_Captured_throws()
     {
         var payment = CreateCapturedPayment();

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Infrastructure.Outbox;
@@ -200,6 +201,83 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
             var reloaded = await new EfPaymentRepository(dbContext).GetByOrderIdAsync(orderId, CancellationToken.None);
 
             reloaded!.Refunds.Should().ContainSingle(r => r.Amount == 40m);
+        }
+    }
+
+    [Fact]
+    public async Task Voiding_an_already_saved_payment_persists_the_status_and_VoidedAt()
+    {
+        var orderId = Guid.NewGuid();
+        var voidedAt = new DateTimeOffset(2026, 9, 25, 10, 0, 0, TimeSpan.Zero);
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfPaymentRepository(dbContext);
+            var payment = Payment.Create(orderId, 100m, "BRL", PaymentMethod.Card, "idem-void", "Fake", null, DateTimeOffset.UtcNow);
+            payment.MarkProcessing();
+            payment.Authorize("provider-ref", DateTimeOffset.UtcNow);
+            await repository.AddAsync(payment, CancellationToken.None);
+            await repository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfPaymentRepository(dbContext);
+            var payment = await repository.GetByOrderIdAsync(orderId, CancellationToken.None);
+            payment!.Void(voidedAt);
+            await repository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var reloaded = await new EfPaymentRepository(dbContext).GetByOrderIdAsync(orderId, CancellationToken.None);
+
+            reloaded!.Status.Should().Be(PaymentStatus.Voided);
+            reloaded.VoidedAt.Should().Be(voidedAt);
+        }
+    }
+
+    [Fact]
+    public async Task ListAsync_filters_by_status_method_and_created_range_newest_first()
+    {
+        var start = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfPaymentRepository(dbContext);
+            for (var day = 0; day < 4; day++)
+            {
+                var method = day % 2 == 0 ? PaymentMethod.Card : PaymentMethod.Pix;
+                var payment = Payment.Create(Guid.NewGuid(), 10m + day, "BRL", method, $"idem-list-{day}", "Fake", null, start.AddDays(day));
+                payment.MarkProcessing();
+                payment.Authorize("ref", start.AddDays(day));
+                await repository.AddAsync(payment, CancellationToken.None);
+            }
+
+            var failed = Payment.Create(Guid.NewGuid(), 99m, "BRL", PaymentMethod.Card, "idem-list-failed", "Fake", null, start.AddDays(1));
+            failed.Fail("card_declined");
+            await repository.AddAsync(failed, CancellationToken.None);
+            await repository.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfPaymentRepository(dbContext);
+
+            var (authorizedCards, cardTotal) = await repository.ListAsync(
+                new ListPaymentsFilter { Status = PaymentStatus.Authorized, Method = PaymentMethod.Card }, CancellationToken.None);
+            cardTotal.Should().Be(2);
+            authorizedCards.Select(p => p.Amount).Should().Equal(12m, 10m);
+
+            var (inRange, rangeTotal) = await repository.ListAsync(
+                new ListPaymentsFilter { CreatedFrom = start.AddDays(1), CreatedTo = start.AddDays(3) }, CancellationToken.None);
+            rangeTotal.Should().Be(3);
+            inRange.Select(p => p.CreatedAt).Should().BeInDescendingOrder();
+
+            var (secondPage, allTotal) = await repository.ListAsync(
+                new ListPaymentsFilter { Page = 2, PageSize = 2 }, CancellationToken.None);
+            allTotal.Should().Be(5);
+            secondPage.Should().HaveCount(2);
         }
     }
 }
