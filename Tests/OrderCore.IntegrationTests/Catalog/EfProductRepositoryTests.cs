@@ -147,7 +147,7 @@ public sealed class EfProductRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var (items, totalCount) = await new EfProductRepository(dbContext)
-                .ListAsync(new ListProductsFilter { Page = 2, PageSize = 2 }, CancellationToken.None);
+                .ListAsync(new ListProductsFilter { Page = 2, PageSize = 2 }, publishedOnly: false, CancellationToken.None);
 
             totalCount.Should().Be(3);
             items.Select(p => p.Name).Should().Equal("Charlie");
@@ -172,7 +172,7 @@ public sealed class EfProductRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var (items, _) = await new EfProductRepository(dbContext)
-                .ListAsync(new ListProductsFilter { Sort = sort }, CancellationToken.None);
+                .ListAsync(new ListProductsFilter { Sort = sort }, publishedOnly: false, CancellationToken.None);
 
             items.Select(p => p.Name).Should().Equal(expectedNames);
         }
@@ -192,8 +192,10 @@ public sealed class EfProductRepositoryTests : IAsyncLifetime
         {
             var repository = new EfProductRepository(dbContext);
 
-            var (onSale, onSaleCount) = await repository.ListAsync(new ListProductsFilter { OnSale = true }, CancellationToken.None);
-            var (notOnSale, _) = await repository.ListAsync(new ListProductsFilter { OnSale = false }, CancellationToken.None);
+            var (onSale, onSaleCount) = await repository.ListAsync(
+                new ListProductsFilter { OnSale = true }, publishedOnly: false, CancellationToken.None);
+            var (notOnSale, _) = await repository.ListAsync(
+                new ListProductsFilter { OnSale = false }, publishedOnly: false, CancellationToken.None);
 
             onSaleCount.Should().Be(1);
             onSale.Select(p => p.Name).Should().Equal("Alpha");
@@ -285,6 +287,36 @@ public sealed class EfProductRepositoryTests : IAsyncLifetime
 
             reloaded!.Images.Should().ContainSingle();
             reloaded.Variants.Should().ContainSingle();
+        }
+    }
+
+    [Fact]
+    public async Task ListAsync_published_only_ignores_drafts_and_deactivated_products_whatever_the_filter_says()
+    {
+        Guid publishedId;
+        await using (var dbContext = CreateDbContext())
+        {
+            publishedId = await SeedAsync(dbContext, "SKU-A", "Published", 10m);
+            await SeedAsync(dbContext, "SKU-B", "Draft", 10m);
+            await dbContext.Products
+                .Where(p => p.Id == publishedId)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, "Active"));
+        }
+
+        await using (var dbContext = CreateDbContext())
+        {
+            var repository = new EfProductRepository(dbContext);
+
+            var (published, publishedCount) = await repository.ListAsync(
+                new ListProductsFilter { Active = false }, publishedOnly: true, CancellationToken.None);
+            var (all, _) = await repository.ListAsync(new ListProductsFilter(), publishedOnly: false, CancellationToken.None);
+
+            publishedCount.Should().Be(0, "the filter's Active=false can't widen what a published-only listing shows");
+            published.Should().BeEmpty();
+            all.Should().HaveCount(2);
+
+            var (onlyPublished, _) = await repository.ListAsync(new ListProductsFilter(), publishedOnly: true, CancellationToken.None);
+            onlyPublished.Select(p => p.Id).Should().Equal(publishedId);
         }
     }
 }

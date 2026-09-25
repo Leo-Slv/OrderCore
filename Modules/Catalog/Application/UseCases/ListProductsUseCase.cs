@@ -20,7 +20,12 @@ public sealed class ListProductsUseCase
         _availability = availability;
     }
 
-    public async Task<PagedResult<ProductSummaryOutput>> ExecuteAsync(ListProductsFilter filter, CancellationToken cancellationToken)
+    /// <param name="includeUnpublished">
+    /// Only for admins: drafts, discontinued and deactivated products are
+    /// listed too. Everyone else sees published, active products only.
+    /// </param>
+    public async Task<PagedResult<ProductSummaryOutput>> ExecuteAsync(
+        ListProductsFilter filter, bool includeUnpublished, CancellationToken cancellationToken)
     {
         if (filter.Page < 1)
         {
@@ -34,7 +39,7 @@ public sealed class ListProductsUseCase
                 $"PageSize must be between 1 and {ListProductsFilter.MaximumPageSize}.");
         }
 
-        var (products, totalCount) = await _products.ListAsync(filter, cancellationToken);
+        var (products, totalCount) = await _products.ListAsync(filter, publishedOnly: !includeUnpublished, cancellationToken);
         var availability = await _availability.GetAvailabilityAsync(products.Select(p => p.Id).ToList(), cancellationToken);
 
         return new PagedResult<ProductSummaryOutput>

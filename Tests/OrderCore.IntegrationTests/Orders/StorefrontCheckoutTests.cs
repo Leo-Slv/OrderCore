@@ -99,7 +99,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     {
         await using var factory = CreateFactory();
         var admin = await SignInAsAdminAsync(factory);
-        var (client, customerId, addressId) = await SignUpBuyerWithAddressAsync(factory, admin);
+        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory);
         var product = await CreatePublishedProductAsync(admin, "Wireless Mouse", price: 150m);
         await SeedStockAsync(product.Id, quantity: 5);
 
@@ -150,7 +150,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         history.EnumerateArray().Select(h => h.GetProperty("toStatus").GetString())
             .Should().Equal("Created", "PendingPayment", "Confirmed");
 
-        var myOrders = await admin.GetFromJsonAsync<JsonElement>($"/api/orders/customers/{customerId}", Json);
+        var myOrders = await client.GetFromJsonAsync<JsonElement>("/api/orders/me", Json);
         myOrders.GetProperty("totalItems").GetInt32().Should().Be(1);
         myOrders.GetProperty("items")[0].GetProperty("itemCount").GetInt32().Should().Be(2);
 
@@ -168,7 +168,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     {
         await using var factory = CreateFactory(FakePaymentProviderMode.Declined);
         var admin = await SignInAsAdminAsync(factory);
-        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory, admin);
+        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory);
         var product = await CreatePublishedProductAsync(admin, "Mechanical Keyboard", price: 400m);
         await SeedStockAsync(product.Id, quantity: 1);
 
@@ -185,7 +185,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
     {
         await using var factory = CreateFactory();
         var admin = await SignInAsAdminAsync(factory);
-        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory, admin);
+        var (client, _, addressId) = await SignUpBuyerWithAddressAsync(factory);
         var product = await CreatePublishedProductAsync(admin, "Monitor", price: 900m);
         await SeedStockAsync(product.Id, quantity: 1);
 
@@ -224,13 +224,9 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         return client;
     }
 
-    /// <summary>
-    /// Signs a new buyer up (a real account and customer). The address is
-    /// added through the admin endpoint until customers can manage their
-    /// own addresses.
-    /// </summary>
+    /// <summary>Signs a new buyer up (a real account and customer), who then saves an address.</summary>
     private static async Task<(HttpClient Buyer, Guid CustomerId, Guid AddressId)> SignUpBuyerWithAddressAsync(
-        WebApplicationFactory<Program> factory, HttpClient admin)
+        WebApplicationFactory<Program> factory)
     {
         var buyer = factory.CreateClient();
         var signUp = await buyer.PostAsJsonAsync("/api/auth/sign-up", new
@@ -245,7 +241,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         buyer.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", tokens.GetProperty("accessToken").GetString());
 
-        var addressResponse = await admin.PostAsJsonAsync($"/api/customers/{customerId}/addresses", new
+        var addressResponse = await buyer.PostAsJsonAsync("/api/customers/me/addresses", new
         {
             label = "Home",
             recipientName = "Jane Doe",
@@ -259,8 +255,8 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         });
         addressResponse.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var addresses = await admin.GetFromJsonAsync<JsonElement>($"/api/customers/{customerId}/addresses", Json);
-        return (buyer, customerId, addresses[0].GetProperty("id").GetGuid());
+        var address = await addressResponse.Content.ReadFromJsonAsync<JsonElement>(Json);
+        return (buyer, customerId, address.GetProperty("id").GetGuid());
     }
 
     private static async Task<(Guid Id, string Slug)> CreatePublishedProductAsync(HttpClient client, string name, decimal price)

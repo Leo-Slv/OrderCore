@@ -101,7 +101,7 @@ public sealed class OrdersController : ControllerBase
         // The Customer policy guarantees a customer_id claim.
         var command = OrderPresenter.ToCommand(request, _currentUser.CustomerId!.Value, idempotencyKey);
         var orderId = await _checkoutUseCase.ExecuteAsync(command, cancellationToken);
-        var details = await _getOrderDetailsUseCase.ExecuteAsync(orderId, cancellationToken);
+        var details = await _getOrderDetailsUseCase.ExecuteAsync(orderId, command.CustomerId, cancellationToken);
 
         return AcceptedAtAction(nameof(GetByIdAsync), new { id = orderId }, OrderPresenter.ToResponse(details));
     }
@@ -170,8 +170,16 @@ public sealed class OrdersController : ControllerBase
     }
 
     /// <summary>
+    /// Whose orders the caller may see: an admin sees any order (null); a
+    /// customer only their own. A signed-in account that is neither gets an
+    /// id that owns nothing, so it sees nothing.
+    /// </summary>
+    private Guid? RequestingCustomerId => _currentUser.IsAdmin ? null : _currentUser.CustomerId ?? Guid.Empty;
+
+    /// <summary>
     /// The order with its payment status. The tracking screen polls this
-    /// while the payment outcome is on its way.
+    /// while the payment outcome is on its way. A customer can only see
+    /// their own orders (someone else's is 404); an admin sees any.
     /// </summary>
     [HttpGet("{id:guid}")]
     [Authorize]
@@ -179,12 +187,15 @@ public sealed class OrdersController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OrderResponse>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
-        var details = await _getOrderDetailsUseCase.ExecuteAsync(id, cancellationToken);
+        var details = await _getOrderDetailsUseCase.ExecuteAsync(id, RequestingCustomerId, cancellationToken);
 
         return Ok(OrderPresenter.ToResponse(details));
     }
 
-    /// <summary>Recorded status transitions, oldest first: the tracking timeline.</summary>
+    /// <summary>
+    /// Recorded status transitions, oldest first: the tracking timeline.
+    /// Same visibility as <see cref="GetByIdAsync"/>.
+    /// </summary>
     [HttpGet("{id:guid}/status-history")]
     [Authorize]
     [ProducesResponseType(typeof(IReadOnlyList<OrderStatusHistoryEntryResponse>), StatusCodes.Status200OK)]
@@ -192,21 +203,36 @@ public sealed class OrdersController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<OrderStatusHistoryEntryResponse>>> GetStatusHistoryAsync(
         Guid id, CancellationToken cancellationToken)
     {
-        var history = await _getOrderStatusHistoryUseCase.ExecuteAsync(id, cancellationToken);
+        var history = await _getOrderStatusHistoryUseCase.ExecuteAsync(id, RequestingCustomerId, cancellationToken);
 
         return Ok(OrderPresenter.ToResponse(history));
     }
 
-    /// <summary>A customer's orders, newest first.</summary>
+    /// <summary>The signed-in customer's own orders, newest first.</summary>
+    [HttpGet("me")]
+    [Authorize(Policy = AuthorizationPolicies.Customer)]
+    [ProducesResponseType(typeof(PagedResponse<OrderSummaryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public Task<ActionResult<PagedResponse<OrderSummaryResponse>>> ListMineAsync(
+        CancellationToken cancellationToken,
+        [FromQuery] int page = ListCustomerOrdersInput.DefaultPage,
+        [FromQuery] int pageSize = ListCustomerOrdersInput.DefaultPageSize) =>
+        ListOrdersOfAsync(_currentUser.CustomerId!.Value, page, pageSize, cancellationToken);
+
+    /// <summary>Any customer's orders, newest first (backoffice).</summary>
     [HttpGet("customers/{customerId:guid}")]
     [Authorize(Policy = AuthorizationPolicies.Admin)]
     [ProducesResponseType(typeof(PagedResponse<OrderSummaryResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<PagedResponse<OrderSummaryResponse>>> ListByCustomerAsync(
+    public Task<ActionResult<PagedResponse<OrderSummaryResponse>>> ListByCustomerAsync(
         Guid customerId,
         CancellationToken cancellationToken,
         [FromQuery] int page = ListCustomerOrdersInput.DefaultPage,
-        [FromQuery] int pageSize = ListCustomerOrdersInput.DefaultPageSize)
+        [FromQuery] int pageSize = ListCustomerOrdersInput.DefaultPageSize) =>
+        ListOrdersOfAsync(customerId, page, pageSize, cancellationToken);
+
+    private async Task<ActionResult<PagedResponse<OrderSummaryResponse>>> ListOrdersOfAsync(
+        Guid customerId, int page, int pageSize, CancellationToken cancellationToken)
     {
         var orders = await _listCustomerOrdersUseCase.ExecuteAsync(
             new ListCustomerOrdersInput { CustomerId = customerId, Page = page, PageSize = pageSize }, cancellationToken);

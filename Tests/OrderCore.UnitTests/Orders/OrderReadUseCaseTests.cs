@@ -1,4 +1,5 @@
 using FluentAssertions;
+using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
@@ -31,11 +32,11 @@ public sealed class OrderReadUseCaseTests
         var order = StoredOrder(orders, DateTimeOffset.UtcNow);
         var useCase = new GetOrderDetailsUseCase(orders, payments);
 
-        (await useCase.ExecuteAsync(order.Id, CancellationToken.None)).Payment.Should().BeNull();
+        (await useCase.ExecuteAsync(order.Id, requestingCustomerId: null, CancellationToken.None)).Payment.Should().BeNull();
 
         await payments.RequestPaymentAsync(order.Id, 10m, "BRL", PaymentMethodChoice.Card, order.Id.ToString(), CancellationToken.None);
 
-        var details = await useCase.ExecuteAsync(order.Id, CancellationToken.None);
+        var details = await useCase.ExecuteAsync(order.Id, requestingCustomerId: null, CancellationToken.None);
         details.Order.Id.Should().Be(order.Id);
         details.Payment!.Method.Should().Be(PaymentMethodChoice.Card);
     }
@@ -44,9 +45,27 @@ public sealed class OrderReadUseCaseTests
     public async Task GetOrderDetails_for_unknown_order_throws_order_not_found()
     {
         var act = () => new GetOrderDetailsUseCase(new FakeOrderRepository(), new FakePaymentGateway())
-            .ExecuteAsync(Guid.NewGuid(), CancellationToken.None);
+            .ExecuteAsync(Guid.NewGuid(), requestingCustomerId: null, CancellationToken.None);
 
         await act.Should().ThrowAsync<NotFoundException>().Where(e => e.Code == "order_not_found");
+    }
+
+    [Fact]
+    public async Task A_customer_sees_their_own_order_and_not_someone_elses()
+    {
+        var orders = new FakeOrderRepository();
+        var order = StoredOrder(orders, DateTimeOffset.UtcNow);
+        var details = new GetOrderDetailsUseCase(orders, new FakePaymentGateway());
+        var history = new GetOrderStatusHistoryUseCase(orders, new EmptyStatusHistoryReader());
+
+        (await details.ExecuteAsync(order.Id, CustomerId, CancellationToken.None)).Order.Id.Should().Be(order.Id);
+
+        var otherCustomer = Guid.NewGuid();
+        var readDetails = () => details.ExecuteAsync(order.Id, otherCustomer, CancellationToken.None);
+        var readHistory = () => history.ExecuteAsync(order.Id, otherCustomer, CancellationToken.None);
+
+        await readDetails.Should().ThrowAsync<NotFoundException>().Where(e => e.Code == "order_not_found");
+        await readHistory.Should().ThrowAsync<NotFoundException>().Where(e => e.Code == "order_not_found");
     }
 
     [Fact]
@@ -80,5 +99,11 @@ public sealed class OrderReadUseCaseTests
             new ListCustomerOrdersInput { CustomerId = CustomerId, Page = page, PageSize = pageSize }, CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    private sealed class EmptyStatusHistoryReader : IOrderStatusHistoryReader
+    {
+        public Task<IReadOnlyList<OrderStatusHistoryEntry>> ListAsync(Guid orderId, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<OrderStatusHistoryEntry>>([]);
     }
 }

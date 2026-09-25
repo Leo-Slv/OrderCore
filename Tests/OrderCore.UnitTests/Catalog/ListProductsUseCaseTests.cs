@@ -29,7 +29,7 @@ public sealed class ListProductsUseCaseTests
         availability.Set(second.Id, StockAvailability.OutOfStock);
 
         var result = await new ListProductsUseCase(products, availability)
-            .ExecuteAsync(new ListProductsFilter { Page = 1, PageSize = 2 }, CancellationToken.None);
+            .ExecuteAsync(new ListProductsFilter { Page = 1, PageSize = 2 }, includeUnpublished: true, CancellationToken.None);
 
         result.TotalItems.Should().Be(3);
         result.TotalPages.Should().Be(2);
@@ -47,7 +47,7 @@ public sealed class ListProductsUseCaseTests
         product.AddImage("https://img/primary.png", null, isPrimary: true, Now);
 
         var result = await new ListProductsUseCase(products, new FakeStockAvailabilityProvider())
-            .ExecuteAsync(new ListProductsFilter(), CancellationToken.None);
+            .ExecuteAsync(new ListProductsFilter(), includeUnpublished: true, CancellationToken.None);
 
         result.Items.Single().PrimaryImageUrl.Should().Be("https://img/primary.png");
     }
@@ -60,8 +60,24 @@ public sealed class ListProductsUseCaseTests
     {
         var useCase = new ListProductsUseCase(new FakeProductRepository(), new FakeStockAvailabilityProvider());
 
-        var act = () => useCase.ExecuteAsync(new ListProductsFilter { Page = page, PageSize = pageSize }, CancellationToken.None);
+        var act = () => useCase.ExecuteAsync(
+            new ListProductsFilter { Page = page, PageSize = pageSize }, includeUnpublished: true, CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_for_the_public_lists_only_published_products()
+    {
+        var products = new FakeProductRepository();
+        var published = await AddProductAsync(products, "SKU-1");
+        published.Publish(Now);
+        await AddProductAsync(products, "SKU-2");
+
+        var result = await new ListProductsUseCase(products, new FakeStockAvailabilityProvider())
+            .ExecuteAsync(new ListProductsFilter(), includeUnpublished: false, CancellationToken.None);
+
+        result.Items.Should().ContainSingle().Which.Id.Should().Be(published.Id);
+        result.TotalItems.Should().Be(1);
     }
 }

@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Catalog.Application.UseCases;
 using OrderCore.Api.Modules.Catalog.Presentation.Presenters;
 using OrderCore.Api.Modules.Catalog.Presentation.Requests;
 using OrderCore.Api.Modules.Catalog.Presentation.Responses;
+using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Presentation.Authentication;
 using OrderCore.Api.Shared.Presentation.Responses;
 
@@ -33,6 +34,7 @@ public sealed class CatalogController : ControllerBase
     private readonly ListProductsUseCase _listProductsUseCase;
     private readonly CreateCategoryUseCase _createCategoryUseCase;
     private readonly ListCategoriesUseCase _listCategoriesUseCase;
+    private readonly ICurrentUser _currentUser;
 
     public CatalogController(
         CreateProductUseCase createProductUseCase,
@@ -42,7 +44,8 @@ public sealed class CatalogController : ControllerBase
         GetProductBySlugUseCase getProductBySlugUseCase,
         ListProductsUseCase listProductsUseCase,
         CreateCategoryUseCase createCategoryUseCase,
-        ListCategoriesUseCase listCategoriesUseCase)
+        ListCategoriesUseCase listCategoriesUseCase,
+        ICurrentUser currentUser)
     {
         _createProductUseCase = createProductUseCase;
         _updateProductUseCase = updateProductUseCase;
@@ -52,6 +55,7 @@ public sealed class CatalogController : ControllerBase
         _listProductsUseCase = listProductsUseCase;
         _createCategoryUseCase = createCategoryUseCase;
         _listCategoriesUseCase = listCategoriesUseCase;
+        _currentUser = currentUser;
     }
 
     [HttpPost("products")]
@@ -124,9 +128,9 @@ public sealed class CatalogController : ControllerBase
     }
 
     /// <summary>
-    /// Returns every product matching the filter, drafts included. The
-    /// storefront passes <c>active=true</c>; hiding drafts from public
-    /// callers entirely waits for authentication (V2).
+    /// Public callers and customers only ever see published, active
+    /// products, whatever the query string says; an admin sees every
+    /// product matching the filter, drafts included.
     /// </summary>
     [HttpGet("products")]
     [AllowAnonymous]
@@ -136,7 +140,8 @@ public sealed class CatalogController : ControllerBase
         [FromQuery] ListProductsFilter filter,
         CancellationToken cancellationToken)
     {
-        var products = await _listProductsUseCase.ExecuteAsync(filter, cancellationToken);
+        var products = await _listProductsUseCase.ExecuteAsync(
+            filter, includeUnpublished: _currentUser.IsAdmin, cancellationToken);
 
         return Ok(ProductPresenter.ToResponse(products));
     }

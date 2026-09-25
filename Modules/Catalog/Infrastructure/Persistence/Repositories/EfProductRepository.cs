@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
+using OrderCore.Api.Modules.Catalog.Domain.Enums;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Mappers;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Models;
 using OrderCore.Api.Shared.Domain.ValueObjects;
@@ -16,6 +17,8 @@ namespace OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Repositories;
 /// </summary>
 public sealed class EfProductRepository : IProductRepository
 {
+    private static readonly string PublishedStatus = ProductStatus.Active.ToString();
+
     private readonly CatalogDbContext _dbContext;
     private readonly Dictionary<Guid, (Product Domain, ProductPersistenceModel Model)> _tracked = new();
 
@@ -48,9 +51,15 @@ public sealed class EfProductRepository : IProductRepository
         return models.Select(Track).ToList();
     }
 
-    public async Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken)
+    public async Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(
+        ListProductsFilter filter, bool publishedOnly, CancellationToken cancellationToken)
     {
         IQueryable<ProductPersistenceModel> query = _dbContext.Products;
+
+        if (publishedOnly)
+        {
+            query = query.Where(p => p.Status == PublishedStatus && p.Active);
+        }
 
         if (filter.CategoryId is { } categoryId)
         {

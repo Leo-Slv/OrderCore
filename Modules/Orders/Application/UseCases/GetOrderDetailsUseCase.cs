@@ -1,6 +1,5 @@
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
-using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 
@@ -20,10 +19,14 @@ public sealed class GetOrderDetailsUseCase
         _paymentGateway = paymentGateway;
     }
 
-    public async Task<OrderDetailsOutput> ExecuteAsync(Guid orderId, CancellationToken cancellationToken)
+    /// <param name="requestingCustomerId">
+    /// The customer asking, or null for an admin. A customer asking for
+    /// someone else's order gets <c>order_not_found</c>, the same as for an
+    /// order that doesn't exist.
+    /// </param>
+    public async Task<OrderDetailsOutput> ExecuteAsync(Guid orderId, Guid? requestingCustomerId, CancellationToken cancellationToken)
     {
-        var order = await _orderRepository.GetByIdAsync(orderId, cancellationToken)
-            ?? throw new NotFoundException("order_not_found", $"Order '{orderId}' was not found.");
+        var order = await OrderAccess.LoadVisibleToAsync(_orderRepository, orderId, requestingCustomerId, cancellationToken);
 
         var payment = await _paymentGateway.GetPaymentSummaryAsync(orderId, cancellationToken);
 

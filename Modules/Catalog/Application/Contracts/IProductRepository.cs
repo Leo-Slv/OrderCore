@@ -24,9 +24,13 @@ public interface IProductRepository
     /// <summary>
     /// One page of the filtered products, in <see cref="ListProductsFilter.Sort"/>
     /// order, plus the total number of matches across all pages. Same
-    /// shape as <c>IAuditLogRepository.ListPagedAsync</c>.
+    /// shape as <c>IAuditLogRepository.ListPagedAsync</c>. With
+    /// <paramref name="publishedOnly"/> only published, active products are
+    /// considered, whatever the filter says. It is a separate argument, not
+    /// part of the filter, so it can never be set from a query string.
     /// </summary>
-    Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken);
+    Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(
+        ListProductsFilter filter, bool publishedOnly, CancellationToken cancellationToken);
 
     Task AddAsync(Product product, CancellationToken cancellationToken);
 

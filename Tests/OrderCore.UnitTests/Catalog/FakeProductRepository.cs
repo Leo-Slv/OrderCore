@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.DTOs;
 using OrderCore.Api.Modules.Catalog.Domain.Entities;
+using OrderCore.Api.Modules.Catalog.Domain.Enums;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 
 namespace OrderCore.UnitTests.Catalog;
@@ -27,13 +28,15 @@ internal sealed class FakeProductRepository : IProductRepository
         Task.FromResult<IReadOnlyList<Product>>(_products.Values.Where(p => productIds.Contains(p.Id)).ToList());
 
     /// <summary>
-    /// Ignores filtering and sorting, which are covered by the EF
-    /// repository's integration tests; only paging is applied.
+    /// Ignores the filter and sorting, which are covered by the EF
+    /// repository's integration tests; applies publishedOnly and paging.
     /// </summary>
-    public Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(ListProductsFilter filter, CancellationToken cancellationToken)
+    public Task<(IReadOnlyList<Product> Items, int TotalCount)> ListAsync(
+        ListProductsFilter filter, bool publishedOnly, CancellationToken cancellationToken)
     {
-        var page = _products.Values.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize).ToList();
-        return Task.FromResult<(IReadOnlyList<Product>, int)>((page, _products.Count));
+        var matching = _products.Values.Where(p => !publishedOnly || (p.Status == ProductStatus.Active && p.Active)).ToList();
+        var page = matching.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize).ToList();
+        return Task.FromResult<(IReadOnlyList<Product>, int)>((page, matching.Count));
     }
 
     public Task AddAsync(Product product, CancellationToken cancellationToken)
