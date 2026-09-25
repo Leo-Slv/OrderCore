@@ -15,6 +15,11 @@ Diferenças entre este diagrama e o código, todas documentadas nos comentários
 - `PaymentWebhookHandler` não tem rota de controller — fica pronto para quando existir um provedor real de webhook (Stripe), sem uma rota HTTP hoje para receber nada.
 - **Forma de pagamento** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, decisão 1): `PaymentMethod` (`Card`/`Pix`) é gravado no `Payment` por `Create` e é diferente de `Provider` (quem processa) — os dois métodos passam hoje pelo mesmo `FakePaymentProvider`. A migração `AddPaymentMethod` preenche `Card` nos pagamentos já existentes. `CreatePaymentRequest.Method` é obrigatório (sem ele, 400, em vez de assumir o primeiro valor do enum); `PaymentResponse` ganhou `Method`, `Currency`, `FailureReason`, `CreatedAt` e `AuthorizedAt`.
 - `RefundPersistenceModel.Id` é configurado com `ValueGeneratedNever()`: o id vem do domínio, e sem isso o EF Core tratava um reembolso novo num pagamento já salvo como linha existente (UPDATE que não afetava nada).
+- **Backoffice** (`Docs/specs/backoffice/backoffice-api.md`, decisões 1 e 2):
+  - `Payment.Void(now)` e o status final `Voided` (coluna `VoidedAt`, migration `AddPaymentVoid`): libera uma autorização nunca capturada; `Fail` também recusa um pagamento `Voided`. `IPaymentProvider.VoidAsync` e o modo `CaptureDeclined` do `FakePaymentProvider` (autoriza, recusa capturar; void/refund funcionam).
+  - `CapturePaymentUseCase` ficou idempotente (um pagamento já `Captured` volta como está, sem ir ao provider), nunca manda ao provider um pagamento que não está `Authorized`, e ganhou `ExecuteForOrderAsync` — o que o Orders chama ao enviar o pedido.
+  - `SettlePaymentForCancellationUseCase` (chamado pelo Orders ao cancelar): `Authorized` → void, `Captured` → estorno do saldo ainda retido via `RequestRefundUseCase`, `Pending`/`Processing` → `409 payment_in_progress`, o resto → nada. Idempotente. Não existe um `VoidPaymentUseCase` separado: o void só acontece aqui.
+  - Leitura para o backoffice: `ListPaymentsUseCase` (`GET payments`, filtros por status/forma/período), `GetPaymentByIdUseCase` (`GET payments/{id}`) e `GetPaymentsByOrderIdsUseCase` (a lista de pedidos do admin, via adapter do Orders). `PaymentResponse` ganhou provider, referência, datas de captura/void e os estornos; `RefundResponse`, motivo e datas — só campos a mais.
 
 ```mermaid
 
@@ -51,11 +56,13 @@ classDiagram
         +DateTimeOffset UpdatedAt
         +DateTimeOffset? AuthorizedAt
         +DateTimeOffset? CapturedAt
+        +DateTimeOffset? VoidedAt
         +IReadOnlyCollection~Refund~ Refunds
         +Create(Guid orderId, decimal amount, string currency, PaymentMethod method, string idempotencyKey, string provider, Guid? customerPaymentMethodId, DateTimeOffset now)$ Payment
         +MarkProcessing() void
         +Authorize(string providerReference, DateTimeOffset now) void
         +Capture(DateTimeOffset now) void
+        +Void(DateTimeOffset now) void
         +Fail(string reason) void
         +Refund() void
         +RequestRefund(decimal amount, string reason, DateTimeOffset now) Refund
@@ -81,6 +88,7 @@ classDiagram
         Captured
         Failed
         Refunded
+        Voided
     }
 
     class RefundStatus {
@@ -103,6 +111,12 @@ classDiagram
         +AuthorizeAsync(Payment payment) Task~PaymentAuthorizationResult~
         +CaptureAsync(Payment payment) Task~PaymentCaptureResult~
         +RefundAsync(Payment payment) Task~PaymentRefundResult~
+        +VoidAsync(Payment payment) Task~PaymentVoidResult~
+    }
+
+    class PaymentVoidResult {
+        +bool Succeeded
+        +string? FailureReason
     }
 
     class PaymentAuthorizationResult {
@@ -127,12 +141,30 @@ classDiagram
         <<interface>>
         +GetByIdAsync(Guid paymentId) Task~Payment?~
         +GetByOrderIdAsync(Guid orderId) Task~Payment?~
+        +ListByOrderIdsAsync(IReadOnlyCollection~Guid~ orderIds) Task~IReadOnlyList~Payment~~
+        +ListAsync(ListPaymentsFilter filter) Task~(IReadOnlyList~Payment~, int)~
         +AddAsync(Payment payment) Task
         +SaveChangesAsync() Task
     }
 
 
     %% OrderCore.Api.Modules.Payments.Application.DTOs
+    class ListPaymentsFilter {
+        +PaymentStatus? Status
+        +PaymentMethod? Method
+        +DateTimeOffset? CreatedFrom
+        +DateTimeOffset? CreatedTo
+        +int Page
+        +int PageSize
+    }
+
+    class PaymentSettlementOutcome {
+        <<enumeration>>
+        NothingToSettle
+        Voided
+        Refunded
+    }
+
     class CreatePaymentCommand {
         +Guid OrderId
         +decimal Amount
@@ -172,6 +204,29 @@ classDiagram
         -IPaymentRepository payments
         -IPaymentProvider provider
         +ExecuteAsync(Guid paymentId) Task~CreatePaymentResult~
+        +ExecuteForOrderAsync(Guid orderId) Task~CreatePaymentResult~
+    }
+
+    class SettlePaymentForCancellationUseCase {
+        -IPaymentRepository payments
+        -IPaymentProvider provider
+        -RequestRefundUseCase requestRefund
+        +ExecuteAsync(Guid orderId, string reason) Task~PaymentSettlementOutcome~
+    }
+
+    class ListPaymentsUseCase {
+        -IPaymentRepository payments
+        +ExecuteAsync(ListPaymentsFilter filter) Task~PagedResult~Payment~~
+    }
+
+    class GetPaymentByIdUseCase {
+        -IPaymentRepository payments
+        +ExecuteAsync(Guid paymentId) Task~Payment~
+    }
+
+    class GetPaymentsByOrderIdsUseCase {
+        -IPaymentRepository payments
+        +ExecuteAsync(IReadOnlyCollection~Guid~ orderIds) Task~IReadOnlyList~Payment~~
     }
 
     class FailPaymentUseCase {
@@ -245,6 +300,7 @@ classDiagram
         +string Status
         +string IdempotencyKey
         +string? ProviderReference
+        +DateTimeOffset? VoidedAt
         +int Version
         +ICollection~RefundPersistenceModel~ Refunds
     }
@@ -312,6 +368,7 @@ classDiagram
         <<enumeration>>
         Success
         Declined
+        CaptureDeclined
         Timeout
         Unavailable
     }
@@ -321,6 +378,7 @@ classDiagram
         +AuthorizeAsync(Payment payment) Task~PaymentAuthorizationResult~
         +CaptureAsync(Payment payment) Task~PaymentCaptureResult~
         +RefundAsync(Payment payment) Task~PaymentRefundResult~
+        +VoidAsync(Payment payment) Task~PaymentVoidResult~
     }
 
 
@@ -338,6 +396,10 @@ classDiagram
         -CreatePaymentUseCase createPaymentUseCase
         -GetPaymentByOrderIdUseCase getPaymentByOrderIdUseCase
         -RequestRefundUseCase requestRefundUseCase
+        -ListPaymentsUseCase listPaymentsUseCase
+        -GetPaymentByIdUseCase getPaymentByIdUseCase
+        +ListAsync(ListPaymentsFilter filter) Task~ActionResult~PagedResponse~PaymentSummaryResponse~~~
+        +GetByIdAsync(Guid id) Task~ActionResult~PaymentResponse~~
         +CreateAsync(CreatePaymentRequest request) Task~ActionResult~PaymentResponse~~
         +GetByOrderIdAsync(Guid orderId) Task~ActionResult~PaymentResponse~~
         +RequestRefundAsync(Guid id, RequestRefundRequest request) Task~ActionResult~RefundResponse~~
@@ -363,20 +425,41 @@ classDiagram
         +string Currency
         +string Method
         +string Status
+        +string Provider
+        +string? ProviderReference
         +string? FailureReason
         +DateTimeOffset CreatedAt
         +DateTimeOffset? AuthorizedAt
+        +DateTimeOffset? CapturedAt
+        +DateTimeOffset? VoidedAt
+        +IReadOnlyList~RefundResponse~ Refunds
+    }
+
+    class PaymentSummaryResponse {
+        +Guid Id
+        +Guid OrderId
+        +decimal Amount
+        +decimal RefundedAmount
+        +string Currency
+        +string Method
+        +string Status
+        +DateTimeOffset CreatedAt
     }
 
     class RefundResponse {
         +Guid Id
         +decimal Amount
+        +string Reason
         +string Status
+        +DateTimeOffset RequestedAt
+        +DateTimeOffset? ProcessedAt
     }
 
     class PaymentPresenter {
         +ToResponse(Payment payment) PaymentResponse
         +ToResponse(Refund refund) RefundResponse
+        +ToSummaryResponse(Payment payment) PaymentSummaryResponse
+        +ToResponse(PagedResult~Payment~ page) PagedResponse~PaymentSummaryResponse~
     }
 
 
@@ -405,6 +488,15 @@ classDiagram
     RequestRefundUseCase --> IPaymentProvider
     RequestRefundUseCase --> IOutboxWriter
     GetPaymentByOrderIdUseCase --> IPaymentRepository
+    SettlePaymentForCancellationUseCase --> IPaymentRepository
+    SettlePaymentForCancellationUseCase --> IPaymentProvider
+    SettlePaymentForCancellationUseCase --> RequestRefundUseCase : refunds a capture
+    SettlePaymentForCancellationUseCase ..> PaymentSettlementOutcome
+    ListPaymentsUseCase --> IPaymentRepository
+    ListPaymentsUseCase ..> ListPaymentsFilter
+    GetPaymentByIdUseCase --> IPaymentRepository
+    GetPaymentsByOrderIdsUseCase --> IPaymentRepository
+    IPaymentProvider ..> PaymentVoidResult
 
     IPaymentRepository <|.. EfPaymentRepository
     EfPaymentRepository --> PaymentsDbContext
@@ -438,6 +530,9 @@ classDiagram
     PaymentsController --> CreatePaymentUseCase
     PaymentsController --> GetPaymentByOrderIdUseCase
     PaymentsController --> RequestRefundUseCase
+    PaymentsController --> ListPaymentsUseCase
+    PaymentsController --> GetPaymentByIdUseCase
+    PaymentPresenter --> PaymentSummaryResponse
     PaymentsController --> PaymentPresenter
     PaymentPresenter --> PaymentResponse
     PaymentPresenter --> RefundResponse

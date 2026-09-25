@@ -9,7 +9,7 @@ Como [02-customers.md](02-customers.md), este módulo já está **implementado**
 - Nenhuma delas tem um campo de `Slug`: `CreateProductUseCase`/`CreateCategoryUseCase` derivam o slug do nome via `Slug.GenerateFrom` (novo método no shared kernel), em vez do chamador enviar um.
 - `ProductPersistenceModel`/`CategoryPersistenceModel` guardam todos os campos das respectivas entidades de domínio (não só o subconjunto abreviado do diagrama), pela mesma razão de `CustomerAddressPersistenceModel`.
 - `CategoryMapper` ganhou um `ApplyChanges` que o diagrama não lista — sem ele, `Rename`/`ChangeDisplayOrder`/`Activate`/`Deactivate` nunca seriam persistidos.
-- `ChangeProductPriceUseCase` não tem endpoint em `CatalogController`: o diagrama nunca liga esse caso de uso a uma rota, então nenhuma foi criada.
+- `ChangeProductPriceUseCase` não tinha endpoint no desenho original; desde o backoffice ele é `PUT catalog/products/{id}/price`, no `ProductManagementController` (ver abaixo).
 
 Adicionado pelo MVP do storefront (`Docs/specs/storefront/storefront-api-mvp.md`, etapa 3):
 
@@ -20,6 +20,11 @@ Adicionado pelo MVP do storefront (`Docs/specs/storefront/storefront-api-mvp.md`
 - `ProductOutput`/`ProductResponse` ganharam slug, descrições, marca, categoria, moeda, imagens ordenadas (`ProductImageOutput`/`ProductImageResponse`), variantes ativas (`ProductVariantOutput`/`ProductVariantResponse`, com `AttributesJson` convertido num mapa nome/valor pelo presenter) e disponibilidade; `ImageUrls` foi substituído por `Images`.
 - `IProductRepository.ListByIdsAsync` existe para o `ProductCatalogAdapter` do Orders buscar vários produtos de uma vez (cotação do carrinho e checkout).
 - `ProductImagePersistenceModel.Id`/`ProductVariantPersistenceModel.Id` usam `ValueGeneratedNever()`: sem isso o EF Core tratava uma imagem/variante nova num produto já salvo como linha existente (UPDATE que não afetava nada).
+- **Backoffice** (`Docs/specs/backoffice/backoffice-api.md`, decisões 5 e 6):
+  - **Registro de estoque automático** — novo contrato `IStockLevels` (Catalog → Inventory, a mesma direção de antes), implementado pelo mesmo `InventoryStockAvailabilityAdapter`: `CreateProductUseCase` e `PublishProductUseCase` chamam `EnsureStockRecordAsync` depois de salvar o produto (publicar de novo conserta um produto cuja criação falhou entre os dois passos). O `IStockAvailabilityProvider` da vitrine não foi renomeado: os dois contratos convivem.
+  - **Lista do admin (também a tela de estoque)** — `GET admin/catalog/products` (`CatalogAdminController`, `ListAdminProductsUseCase`, `IProductRepository.ListForAdminAsync`): todos os status, busca por nome ou SKU, os números de estoque de cada produto (`ProductStockLevel`, tipo do próprio Catalog) e o filtro `stock=LowStock|OutOfStock|InStock`, que pergunta ao Inventory quais produtos estão naquele estado e pagina os produtos do Catalog entre eles.
+  - **Operações do admin** — `ProductManagementController` (`catalog/products/{id}/…`): preço (o `ChangeProductPriceUseCase`, que antes não tinha rota), preço "de" (`SetCompareAtPriceUseCase`), descontinuar (`DiscontinueProductUseCase`), imagens (`ManageProductImagesUseCase`: adicionar, remover, reordenar) e variações (`ManageProductVariantsUseCase`: adicionar, remover).
+  - **Regras novas no domínio** — `SetCompareAtPrice` (maior que o preço; `null` encerra a promoção) e `ChangePrice` limpa um preço "de" que deixou de ser maior; uma imagem nova vai para o fim da galeria; `ReorderImages` exige todas as imagens uma vez; `ProductImage` exige URL http(s) absoluta (até 2000) e alt text até 200; `ProductVariant` exige atributos como objeto JSON, SKU até 50 e nome até 200, e SKU único dentro do produto. Entrada inválida responde 400 em vez de estourar como 500 no banco.
 
 ```mermaid
 
@@ -74,18 +79,21 @@ classDiagram
         +IReadOnlyCollection~ProductImage~ Images
         +IReadOnlyCollection~ProductVariant~ Variants
         +Create(string sku, string name, Slug slug, Guid categoryId, decimal currentPrice, string currency, DateTimeOffset now)$ Product
-        +ChangePrice(decimal newPrice) void
+        +ChangePrice(decimal newPrice, DateTimeOffset now) void
+        +SetCompareAtPrice(decimal? compareAtPrice) void
         +UpdateDetails(string name, string? shortDescription, string? description, string? brand) void
         +Publish(DateTimeOffset now) void
         +Discontinue() void
-        +AddImage(string url, string? altText, bool isPrimary) void
+        +AddImage(string url, string? altText, bool isPrimary, DateTimeOffset now) void
         +RemoveImage(Guid imageId) void
         +ReorderImages(IReadOnlyList~Guid~ orderedImageIds) void
-        +AddVariant(string sku, string name, string attributesJson, decimal additionalPrice) void
+        +AddVariant(string sku, string name, string attributesJson, decimal additionalPrice, DateTimeOffset now) void
         +RemoveVariant(Guid variantId) void
     }
 
     class ProductImage {
+        +MaxUrlLength int$
+        +MaxAltTextLength int$
         +string Url
         +string? AltText
         +int DisplayOrder
@@ -98,6 +106,8 @@ classDiagram
     }
 
     class ProductVariant {
+        +MaxSkuLength int$
+        +MaxNameLength int$
         +string Sku
         +string Name
         +string AttributesJson
@@ -151,6 +161,7 @@ classDiagram
         +GetBySlugAsync(Slug slug) Task~Product?~
         +ListByIdsAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyList~Product~~
         +ListAsync(ListProductsFilter filter, bool publishedOnly) Task~ValueTuple~IReadOnlyList~Product~, int~~
+        +ListForAdminAsync(ListAdminProductsFilter filter, IReadOnlyCollection~Guid~? onlyProductIds) Task~ValueTuple~IReadOnlyList~Product~, int~~
         +AddAsync(Product product) Task
         +SaveChangesAsync() Task
     }
@@ -158,6 +169,47 @@ classDiagram
     class IStockAvailabilityProvider {
         <<interface>>
         +GetAvailabilityAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, StockAvailability~~
+    }
+
+    class IStockLevels {
+        <<interface>>
+        +EnsureStockRecordAsync(Guid productId) Task
+        +GetStockLevelsAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, ProductStockLevel~~
+        +ListProductIdsInStateAsync(StockAvailability state) Task~IReadOnlyList~Guid~~
+    }
+
+    class ProductStockLevel {
+        +int QuantityOnHand
+        +int QuantityReserved
+        +int QuantityAvailable
+        +int ReorderLevel
+        +StockAvailability State
+    }
+
+    class ListAdminProductsFilter {
+        +ProductStatus? Status
+        +Guid? CategoryId
+        +string? SearchTerm
+        +StockAvailability? Stock
+        +int Page
+        +int PageSize
+    }
+
+    class AdminProductSummaryOutput {
+        +Guid Id
+        +string Sku
+        +string Slug
+        +string Name
+        +Guid CategoryId
+        +decimal CurrentPrice
+        +decimal? CompareAtPrice
+        +string Currency
+        +ProductStatus Status
+        +bool Active
+        +string? PrimaryImageUrl
+        +DateTimeOffset CreatedAt
+        +DateTimeOffset? PublishedAt
+        +ProductStockLevel? Stock
     }
 
     class ICategoryRepository {
@@ -278,6 +330,7 @@ classDiagram
     class CreateProductUseCase {
         -IProductRepository products
         -IStockAvailabilityProvider availability
+        -IStockLevels stockLevels
         -ICategoryRepository categories
         +ExecuteAsync(CreateProductCommand command) Task~ProductOutput~
         -GenerateUniqueSlugAsync(string name, string sku) Task~Slug~
@@ -298,7 +351,33 @@ classDiagram
     class PublishProductUseCase {
         -IProductRepository products
         -IStockAvailabilityProvider availability
+        -IStockLevels stockLevels
         +ExecuteAsync(Guid productId) Task~ProductOutput~
+    }
+
+    class SetCompareAtPriceUseCase {
+        +ExecuteAsync(Guid productId, decimal? compareAtPrice) Task~ProductOutput~
+    }
+
+    class DiscontinueProductUseCase {
+        +ExecuteAsync(Guid productId) Task~ProductOutput~
+    }
+
+    class ManageProductImagesUseCase {
+        +AddAsync(Guid productId, string url, string? altText, bool isPrimary) Task~ProductOutput~
+        +RemoveAsync(Guid productId, Guid imageId) Task~ProductOutput~
+        +ReorderAsync(Guid productId, IReadOnlyList~Guid~ orderedImageIds) Task~ProductOutput~
+    }
+
+    class ManageProductVariantsUseCase {
+        +AddAsync(Guid productId, string sku, string name, string attributesJson, decimal additionalPrice) Task~ProductOutput~
+        +RemoveAsync(Guid productId, Guid variantId) Task~ProductOutput~
+    }
+
+    class ListAdminProductsUseCase {
+        -IProductRepository products
+        -IStockLevels stockLevels
+        +ExecuteAsync(ListAdminProductsFilter filter) Task~PagedResult~AdminProductSummaryOutput~~
     }
 
     class GetProductByIdUseCase {
@@ -408,6 +487,18 @@ classDiagram
         <<external>>
     }
 
+    class EnsureStockItemUseCase {
+        <<external>>
+    }
+
+    class GetStockLevelsUseCase {
+        <<external>>
+    }
+
+    class ListProductIdsInStockStateUseCase {
+        <<external>>
+    }
+
     class ICurrentUser {
         <<external>>
         <<interface>>
@@ -419,7 +510,13 @@ classDiagram
 
     class InventoryStockAvailabilityAdapter {
         -GetStockAvailabilityUseCase getStockAvailability
+        -EnsureStockItemUseCase ensureStockItem
+        -GetStockLevelsUseCase getStockLevels
+        -ListProductIdsInStockStateUseCase listProductIdsInStockState
         +GetAvailabilityAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, StockAvailability~~
+        +EnsureStockRecordAsync(Guid productId) Task
+        +GetStockLevelsAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, ProductStockLevel~~
+        +ListProductIdsInStateAsync(StockAvailability state) Task~IReadOnlyList~Guid~~
     }
 
 
@@ -442,6 +539,46 @@ classDiagram
         +ListProductsAsync(ListProductsFilter filter) Task~ActionResult~PagedResponse~ProductSummaryResponse~~~
         +CreateCategoryAsync(CreateCategoryRequest request) Task~ActionResult~CategoryResponse~~
         +ListCategoriesAsync() Task~ActionResult~IReadOnlyList~CategoryResponse~~~
+    }
+
+    class ProductManagementController {
+        +ChangePriceAsync(Guid id, ChangeProductPriceRequest request) Task~ActionResult~ProductResponse~~
+        +SetCompareAtPriceAsync(Guid id, SetCompareAtPriceRequest request) Task~ActionResult~ProductResponse~~
+        +DiscontinueAsync(Guid id) Task~ActionResult~ProductResponse~~
+        +AddImageAsync(Guid id, AddProductImageRequest request) Task~ActionResult~ProductResponse~~
+        +RemoveImageAsync(Guid id, Guid imageId) Task~ActionResult~ProductResponse~~
+        +ReorderImagesAsync(Guid id, ReorderProductImagesRequest request) Task~ActionResult~ProductResponse~~
+        +AddVariantAsync(Guid id, AddProductVariantRequest request) Task~ActionResult~ProductResponse~~
+        +RemoveVariantAsync(Guid id, Guid variantId) Task~ActionResult~ProductResponse~~
+    }
+
+    class CatalogAdminController {
+        -ListAdminProductsUseCase listAdminProducts
+        +ListProductsAsync(ListAdminProductsFilter filter) Task~ActionResult~PagedResponse~AdminProductSummaryResponse~~~
+    }
+
+    class AdminProductSummaryResponse {
+        +Guid Id
+        +string Sku
+        +string Name
+        +string Status
+        +decimal CurrentPrice
+        +decimal? CompareAtPrice
+        +ProductStockLevelResponse? Stock
+    }
+
+    class ProductStockLevelResponse {
+        +int QuantityOnHand
+        +int QuantityReserved
+        +int QuantityAvailable
+        +int ReorderLevel
+        +string State
+    }
+
+    class AdminProductPresenter {
+        <<static>>
+        +ToResponse(AdminProductSummaryOutput output)$ AdminProductSummaryResponse
+        +ToResponse(PagedResult~AdminProductSummaryOutput~ output)$ PagedResponse~AdminProductSummaryResponse~
     }
 
     class CreateProductRequest {
@@ -563,7 +700,29 @@ classDiagram
     ProductOutput "1" *-- "*" ProductImageOutput
     ProductOutput "1" *-- "*" ProductVariantOutput
     IStockAvailabilityProvider <|.. InventoryStockAvailabilityAdapter
+    IStockLevels <|.. InventoryStockAvailabilityAdapter
     InventoryStockAvailabilityAdapter --> GetStockAvailabilityUseCase : reads Inventory module
+    InventoryStockAvailabilityAdapter --> EnsureStockItemUseCase
+    InventoryStockAvailabilityAdapter --> GetStockLevelsUseCase
+    InventoryStockAvailabilityAdapter --> ListProductIdsInStockStateUseCase
+    CreateProductUseCase --> IStockLevels : ensures stock record
+    PublishProductUseCase --> IStockLevels : ensures stock record
+    ListAdminProductsUseCase --> IProductRepository
+    ListAdminProductsUseCase --> IStockLevels
+    ListAdminProductsUseCase ..> AdminProductSummaryOutput
+    AdminProductSummaryOutput --> ProductStockLevel
+    SetCompareAtPriceUseCase --> IProductRepository
+    DiscontinueProductUseCase --> IProductRepository
+    ManageProductImagesUseCase --> IProductRepository
+    ManageProductVariantsUseCase --> IProductRepository
+    ProductManagementController --> ChangeProductPriceUseCase
+    ProductManagementController --> SetCompareAtPriceUseCase
+    ProductManagementController --> DiscontinueProductUseCase
+    ProductManagementController --> ManageProductImagesUseCase
+    ProductManagementController --> ManageProductVariantsUseCase
+    CatalogAdminController --> ListAdminProductsUseCase
+    CatalogAdminController --> AdminProductPresenter
+    AdminProductPresenter --> AdminProductSummaryResponse
     CreateCategoryUseCase --> ICategoryRepository
     ListCategoriesUseCase --> ICategoryRepository
 

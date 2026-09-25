@@ -5,7 +5,7 @@ Saldo de estoque (`StockItem`) e reserva explícita por item de pedido (`Invento
 Como [02-customers.md](02-customers.md) e [03-catalog.md](03-catalog.md), este módulo já está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core e Presentation) — não é mais um blueprint futuro. Ver `Docs/specs/inventory/stock-and-reservations.md` para o spec completo e as decisões em aberto resolvidas antes da implementação. Diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
 
 - `StockItem.Create` recebe um `now` explícito (como `Customer.Create`), já que `UpdatedAt` precisa de um valor.
-- **Disponibilidade para outros módulos** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, etapa 2): `GetStockAvailabilityUseCase` devolve, numa só consulta (`IStockItemRepository.ListByProductIdsAsync`, sem rastreamento do EF para não interferir na unidade de trabalho), a quantidade disponível e `StockItem.IsLowStock` (`0 < disponível <= ReorderLevel`) de vários produtos; produto sem registro de estoque sai como 0 disponível. É o único ponto de entrada que Catalog e Orders usam para saber de estoque. Como nada define `ReorderLevel` ainda (fica 0), `IsLowStock` hoje é sempre `false`.
+- **Disponibilidade para outros módulos** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, etapa 2): `GetStockAvailabilityUseCase` devolve, numa só consulta (`IStockItemRepository.ListByProductIdsAsync`, sem rastreamento do EF para não interferir na unidade de trabalho), a quantidade disponível e `StockItem.IsLowStock` (`0 < disponível <= ReorderLevel`) de vários produtos; produto sem registro de estoque sai como 0 disponível. É o único ponto de entrada que Catalog e Orders usam para saber de estoque. Desde o backoffice, `ReorderLevel` é definido por item (`SetReorderLevel`), então `IsLowStock`/`LowStock` passam a acontecer de verdade.
 - `StockConcurrencyConflictException` passou a herdar de `ConflictException` (shared kernel), com código `concurrency_conflict`: esgotadas as tentativas de `ReserveStockUseCase`, chega ao cliente como 409.
 - `IStockItemRepository`/`IInventoryReservationRepository` **não têm** `SaveChangesAsync`: toda operação que muda estado mexe nos dois agregados (`StockItem` e `InventoryReservation`) na mesma chamada, e dois `SaveChangesAsync` separados seriam duas transações SQL diferentes, não uma unidade atômica. Introduzido `IUnitOfWork` (novo, não estava no diagrama) — ver a seção Transactions do `claude.md`.
 - `ExpireReservationUseCase` também depende de `IStockItemRepository`: o diagrama original só listava `IInventoryReservationRepository`, o que deixaria a quantidade reservada presa no `StockItem` para sempre depois de uma reserva expirar.
@@ -13,7 +13,13 @@ Como [02-customers.md](02-customers.md) e [03-catalog.md](03-catalog.md), este m
 - `StockItemMapper`/`InventoryReservationMapper` ganharam um `ApplyChanges` que o diagrama não lista — mesmo motivo de `CategoryMapper`.
 - `EfStockItemRepository`/`EfInventoryReservationRepository` implementam uma interface interna `IPendingChangesTracker` (não estava no diagrama) em vez de expor `SaveChangesAsync` — é o que permite a `InventoryUnitOfWork` coordenar os dois em um único save atômico.
 - `StockMovementRecorder` é um `IDomainEventHandler<InventoryStockMovementRecorded>` de verdade (não um serviço com `RecordAsync` chamado diretamente pelos use cases) — o primeiro handler de domain event real do projeto, despachado por `InventoryUnitOfWork.SaveChangesAsync` através do `InProcessDomainEventDispatcher` do shared kernel, que até esta feature nunca era efetivamente chamado por ninguém.
-- `InventoryStockMovementRecorded` (novo domain event, não estava no diagrama) é levantado por `InventoryReservation.Create`/`Release`/`Consume` — as três operações que o diagrama já ligava a `StockMovementRecorder`. `StockItem.Receive`/`Adjust` não levantam esse evento: não existe `ReceiveStockUseCase` e `AdjustStockUseCase` não tem seta pontilhada para `StockMovementRecorder` no diagrama original — `Inbound`/`Outbound`/`Adjustment` continuam definidos em `StockMovementType` mas não usados por enquanto (mesmo tratamento de `ChangeProductPriceUseCase` sem rota em Catalog).
+- `InventoryStockMovementRecorded` (novo domain event, não estava no diagrama) é levantado por `InventoryReservation.Create`/`Release`/`Consume`/`Return` e, desde o backoffice, também por `StockItem.Create` (com unidades), `Receive` e `Adjust` — com o motivo digitado pelo admin (`Reason`, até `StockItem.MaxReasonLength` = 500). `Outbound` continua definido em `StockMovementType` sem uso.
+- **Backoffice** (`Docs/specs/backoffice/backoffice-api.md`, decisões 2, 4, 5 e 6):
+  - `StockItem.SetReorderLevel`, `Receive(quantity, reason, now)`, `Adjust(quantity, reason, now)` e `ReturnConsumed(quantity, now)` (põe de volta o que um pedido cancelado consumiu, sem registrar movimento: quem registra é a reserva). Os métodos que recebem `now` passaram a atualizar `UpdatedAt`.
+  - `InventoryReservation.Return(now)` e o status final `Returned` (`ReturnedAt`, movimento `ReservationReturned` ligado à própria reserva, como os demais movimentos de reserva). Migration `AddStockMovementReasonAndReturns` (também troca o índice de movimentos por `(ProductId, CreatedAt)`).
+  - `EnsureStockItemUseCase`: cria o registro com 0 unidades se não existir; idempotente, e a corrida pelo índice único `IX_stock_items_ProductId` vira `DuplicateStockItemException` (traduzida pela `InventoryUnitOfWork` a partir do `PostgresException`), tratada como sucesso. Chamado pelo Catalog ao criar e publicar um produto.
+  - `ReturnOrderStockUseCase` (Orders ao cancelar um pedido confirmado): devolve só reservas `Consumed`, um `StockItem` carregado por produto, uma unidade de trabalho, com nova tentativa em conflito de concorrência como a reserva.
+  - Leituras: `ListStockItemsUseCase` (por estado), `GetStockLevelsUseCase`/`ListProductIdsInStockStateUseCase` (para a lista de produtos do admin no Catalog), `GetStockSummaryUseCase` (dashboard), `ListStockMovementsUseCase` via `IStockMovementReader` (mesmo formato do `IOrderStatusHistoryReader`) e `ListReservationsUseCase` (de um produto, paginado, ou de um pedido). O estado (`StockState`) é calculado igual a `IsLowStock`; o repositório repete a regra em SQL, e um teste de integração confere que as duas batem.
 - Corrigido também, ao escrever o teste de concorrência desta feature: `CustomerMapper`/`ProductMapper`/`CategoryMapper`/`OrderMapper.ApplyChanges` nunca sincronizavam `Version` — o token de concorrência otimista nunca incrementava de fato após um update, tornando a checagem do EF Core um no-op em todo o projeto. Corrigido em todos os quatro (commit separado, fora do escopo do Inventory).
 
 ```mermaid
@@ -48,11 +54,14 @@ classDiagram
         +bool IsLowStock
         +DateTimeOffset UpdatedAt
         +Create(Guid productId, int initialQuantity, Guid? productVariantId, DateTimeOffset now)$ StockItem
-        +Receive(int quantity) void
+        +MaxReasonLength int$
+        +Receive(int quantity, string? reason, DateTimeOffset now) void
+        +ReturnConsumed(int quantity, DateTimeOffset now) void
+        +SetReorderLevel(int reorderLevel, DateTimeOffset now) void
         +TryReserve(int quantity) bool
         +Release(int quantity) void
         +Consume(int quantity) void
-        +Adjust(int quantity, string reason) void
+        +Adjust(int quantity, string reason, DateTimeOffset now) void
     }
 
     class InventoryReservation {
@@ -65,9 +74,11 @@ classDiagram
         +DateTimeOffset? ExpiresAt
         +DateTimeOffset? ReleasedAt
         +DateTimeOffset? ConsumedAt
+        +DateTimeOffset? ReturnedAt
         +Create(Guid productId, Guid orderId, Guid orderItemId, int quantity, DateTimeOffset now)$ InventoryReservation
         +Release(DateTimeOffset now) void
         +Consume(DateTimeOffset now) void
+        +Return(DateTimeOffset now) void
         +Expire() void
     }
 
@@ -79,6 +90,7 @@ classDiagram
         Released
         Consumed
         Expired
+        Returned
     }
 
     class StockMovementType {
@@ -89,6 +101,7 @@ classDiagram
         ReservationCreated
         ReservationReleased
         ReservationConsumed
+        ReservationReturned
     }
 
 
@@ -101,6 +114,7 @@ classDiagram
         +int Quantity
         +string ReferenceType
         +Guid ReferenceId
+        +string? Reason
     }
 
 
@@ -109,13 +123,27 @@ classDiagram
         <<interface>>
         +GetByProductIdAsync(Guid productId) Task~StockItem?~
         +ListByProductIdsAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyList~StockItem~~
+        +ListAsync(StockState? state, int page, int pageSize) Task~(IReadOnlyList~StockItem~, int)~
+        +ListProductIdsInStateAsync(StockState state) Task~IReadOnlyList~Guid~~
+        +CountInStateAsync(StockState state) Task~int~
         +AddAsync(StockItem stockItem) Task
+    }
+
+    class IStockMovementReader {
+        <<interface>>
+        +ListByProductIdAsync(Guid productId, int page, int pageSize) Task~(IReadOnlyList~StockMovementOutput~, int)~
+    }
+
+    class DuplicateStockItemException {
+        <<exception>>
+        +string ErrorCode$
     }
 
     class IInventoryReservationRepository {
         <<interface>>
         +GetByIdAsync(Guid reservationId) Task~InventoryReservation?~
         +ListByOrderIdAsync(Guid orderId) Task~IReadOnlyList~InventoryReservation~~
+        +ListByProductIdAsync(Guid productId, int page, int pageSize) Task~(IReadOnlyList~InventoryReservation~, int)~
         +AddAsync(InventoryReservation reservation) Task
     }
 
@@ -152,7 +180,54 @@ classDiagram
     class StockItemOutput {
         +Guid ProductId
         +int QuantityOnHand
+        +int QuantityReserved
         +int QuantityAvailable
+        +int ReorderLevel
+        +StockState State
+        +DateTimeOffset UpdatedAt
+        +StateOf(StockItem stockItem)$ StockState
+    }
+
+    class StockState {
+        <<enumeration>>
+        InStock
+        LowStock
+        OutOfStock
+    }
+
+    class StockMovementOutput {
+        +Guid Id
+        +Guid ProductId
+        +string MovementType
+        +int Quantity
+        +string? ReferenceType
+        +Guid? ReferenceId
+        +string? Reason
+        +DateTimeOffset CreatedAt
+    }
+
+    class ReservationOutput {
+        +Guid Id
+        +Guid ProductId
+        +Guid OrderId
+        +Guid OrderItemId
+        +int Quantity
+        +string Status
+        +DateTimeOffset ReservedAt
+        +DateTimeOffset? ReleasedAt
+        +DateTimeOffset? ConsumedAt
+        +DateTimeOffset? ReturnedAt
+    }
+
+    class StockSummaryOutput {
+        +int LowStockCount
+        +int OutOfStockCount
+    }
+
+    class ListStockItemsFilter {
+        +StockState? State
+        +int Page
+        +int PageSize
     }
 
     class StockAvailabilityOutput {
@@ -194,7 +269,50 @@ classDiagram
     class AdjustStockUseCase {
         -IStockItemRepository stockItems
         -IUnitOfWork unitOfWork
+        -TimeProvider timeProvider
         +ExecuteAsync(Guid productId, int quantity, string reason) Task~StockItemOutput~
+    }
+
+    class EnsureStockItemUseCase {
+        +ExecuteAsync(Guid productId) Task
+    }
+
+    class ReceiveStockUseCase {
+        +ExecuteAsync(Guid productId, int quantity, string? reason) Task~StockItemOutput~
+    }
+
+    class SetReorderLevelUseCase {
+        +ExecuteAsync(Guid productId, int reorderLevel) Task~StockItemOutput~
+    }
+
+    class ReturnOrderStockUseCase {
+        +ExecuteAsync(Guid orderId) Task~int~
+    }
+
+    class ListStockItemsUseCase {
+        +ExecuteAsync(ListStockItemsFilter filter) Task~PagedResult~StockItemOutput~~
+    }
+
+    class GetStockLevelsUseCase {
+        +ExecuteAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyList~StockItemOutput~~
+    }
+
+    class ListProductIdsInStockStateUseCase {
+        +ExecuteAsync(StockState state) Task~IReadOnlyList~Guid~~
+    }
+
+    class GetStockSummaryUseCase {
+        +ExecuteAsync() Task~StockSummaryOutput~
+    }
+
+    class ListStockMovementsUseCase {
+        -IStockMovementReader movements
+        +ExecuteAsync(Guid productId, int page, int pageSize) Task~PagedResult~StockMovementOutput~~
+    }
+
+    class ListReservationsUseCase {
+        +ForProductAsync(Guid productId, int page, int pageSize) Task~PagedResult~ReservationOutput~~
+        +ForOrderAsync(Guid orderId) Task~IReadOnlyList~ReservationOutput~~
     }
 
     class GetStockByProductIdUseCase {
@@ -238,6 +356,7 @@ classDiagram
         +DateTimeOffset? ExpiresAt
         +DateTimeOffset? ReleasedAt
         +DateTimeOffset? ConsumedAt
+        +DateTimeOffset? ReturnedAt
         +int Version
     }
 
@@ -248,7 +367,12 @@ classDiagram
         +int Quantity
         +string? ReferenceType
         +Guid? ReferenceId
+        +string? Reason
         +DateTimeOffset CreatedAt
+    }
+
+    class EfStockMovementReader {
+        -InventoryDbContext dbContext
     }
 
     class StockItemMapper {
@@ -306,8 +430,50 @@ classDiagram
     class InventoryController {
         -GetStockByProductIdUseCase getStockByProductIdUseCase
         -AdjustStockUseCase adjustStockUseCase
+        -ReceiveStockUseCase receiveStockUseCase
+        -SetReorderLevelUseCase setReorderLevelUseCase
+        -ListStockItemsUseCase listStockItemsUseCase
+        -ListStockMovementsUseCase listStockMovementsUseCase
+        -ListReservationsUseCase listReservationsUseCase
+        +ListStockItemsAsync(ListStockItemsFilter filter) Task~ActionResult~PagedResponse~StockItemResponse~~~
         +GetStockByProductIdAsync(Guid productId) Task~ActionResult~StockItemResponse~~
+        +ReceiveStockAsync(Guid productId, ReceiveStockRequest request) Task~ActionResult~StockItemResponse~~
         +AdjustStockAsync(Guid productId, AdjustStockRequest request) Task~ActionResult~StockItemResponse~~
+        +SetReorderLevelAsync(Guid productId, SetReorderLevelRequest request) Task~ActionResult~StockItemResponse~~
+        +ListMovementsAsync(Guid productId, int page, int pageSize) Task~ActionResult~PagedResponse~StockMovementResponse~~~
+        +ListReservationsAsync(Guid productId, int page, int pageSize) Task~ActionResult~PagedResponse~ReservationResponse~~~
+    }
+
+    class ReceiveStockRequest {
+        +int Quantity
+        +string? Reason
+    }
+
+    class SetReorderLevelRequest {
+        +int ReorderLevel
+    }
+
+    class StockMovementResponse {
+        +Guid Id
+        +string MovementType
+        +int Quantity
+        +string? ReferenceType
+        +Guid? ReferenceId
+        +string? Reason
+        +DateTimeOffset CreatedAt
+    }
+
+    class ReservationResponse {
+        +Guid Id
+        +Guid ProductId
+        +Guid OrderId
+        +Guid OrderItemId
+        +int Quantity
+        +string Status
+        +DateTimeOffset ReservedAt
+        +DateTimeOffset? ReleasedAt
+        +DateTimeOffset? ConsumedAt
+        +DateTimeOffset? ReturnedAt
     }
 
     class AdjustStockRequest {
@@ -318,11 +484,17 @@ classDiagram
     class StockItemResponse {
         +Guid ProductId
         +int QuantityOnHand
+        +int QuantityReserved
         +int QuantityAvailable
+        +int ReorderLevel
+        +string State
+        +DateTimeOffset UpdatedAt
     }
 
     class StockItemPresenter {
         +ToResponse(StockItemOutput output) StockItemResponse
+        +ToResponse(StockMovementOutput output) StockMovementResponse
+        +ToResponse(ReservationOutput output) ReservationResponse
     }
 
 
@@ -348,6 +520,26 @@ classDiagram
     AdjustStockUseCase --> IUnitOfWork
     GetStockByProductIdUseCase --> IStockItemRepository
     GetStockAvailabilityUseCase --> IStockItemRepository
+    EnsureStockItemUseCase --> IStockItemRepository
+    EnsureStockItemUseCase --> IUnitOfWork
+    EnsureStockItemUseCase ..> DuplicateStockItemException : race = success
+    ReceiveStockUseCase --> IStockItemRepository
+    ReceiveStockUseCase --> IUnitOfWork
+    SetReorderLevelUseCase --> IStockItemRepository
+    SetReorderLevelUseCase --> IUnitOfWork
+    ReturnOrderStockUseCase --> IStockItemRepository
+    ReturnOrderStockUseCase --> IInventoryReservationRepository
+    ReturnOrderStockUseCase --> IUnitOfWork
+    ListStockItemsUseCase --> IStockItemRepository
+    GetStockLevelsUseCase --> IStockItemRepository
+    ListProductIdsInStockStateUseCase --> IStockItemRepository
+    GetStockSummaryUseCase --> IStockItemRepository
+    ListStockMovementsUseCase --> IStockMovementReader
+    ListReservationsUseCase --> IInventoryReservationRepository
+    StockItemOutput --> StockState
+    IStockMovementReader <|.. EfStockMovementReader
+    EfStockMovementReader --> InventoryDbContext
+    ConflictException <|-- DuplicateStockItemException
     GetStockAvailabilityUseCase ..> StockAvailabilityOutput : returns
     IUnitOfWork ..> StockConcurrencyConflictException : throws on conflict
     ConflictException <|-- StockConcurrencyConflictException
@@ -369,6 +561,11 @@ classDiagram
 
     InventoryController --> GetStockByProductIdUseCase
     InventoryController --> AdjustStockUseCase
+    InventoryController --> ReceiveStockUseCase
+    InventoryController --> SetReorderLevelUseCase
+    InventoryController --> ListStockItemsUseCase
+    InventoryController --> ListStockMovementsUseCase
+    InventoryController --> ListReservationsUseCase
     InventoryController --> StockItemPresenter
     StockItemPresenter --> StockItemResponse
 
@@ -380,5 +577,5 @@ O documento de modelagem de banco já especificava `product_variant_id` em `STOC
 
 ## Consumido por outros módulos
 
-- **Orders** aciona `ReserveStockUseCase`, `ReleaseReservationUseCase`, `ConsumeReservationUseCase` e `GetStockAvailabilityUseCase` de dentro de um `InventoryServiceAdapter` que implementa o `IInventoryService` do próprio módulo Orders — ver [05-orders.md](05-orders.md).
-- **Catalog** chama `GetStockAvailabilityUseCase` de dentro de um `InventoryStockAvailabilityAdapter` (implementa o `IStockAvailabilityProvider` do Catalog) e converte a quantidade em estado (`InStock`/`LowStock`/`OutOfStock`) — ver [03-catalog.md](03-catalog.md). `InventoryReservation.OrderId`/`OrderItemId` guardam apenas os ids, sem referenciar `Order`/`OrderItem` diretamente.
+- **Orders** aciona `ReserveStockUseCase`, `ReleaseReservationUseCase`, `ConsumeReservationUseCase`, `GetStockAvailabilityUseCase` e, desde o backoffice, `ReturnOrderStockUseCase`, `ListReservationsUseCase.ForOrderAsync` e `GetStockSummaryUseCase` de dentro de um `InventoryServiceAdapter` que implementa o `IInventoryService` do próprio módulo Orders — ver [05-orders.md](05-orders.md).
+- **Catalog** chama `GetStockAvailabilityUseCase` (e, desde o backoffice, `EnsureStockItemUseCase`, `GetStockLevelsUseCase` e `ListProductIdsInStockStateUseCase`) de dentro de um `InventoryStockAvailabilityAdapter` (implementa o `IStockAvailabilityProvider` e o `IStockLevels` do Catalog) e converte a quantidade em estado (`InStock`/`LowStock`/`OutOfStock`) — ver [03-catalog.md](03-catalog.md). `InventoryReservation.OrderId`/`OrderItemId` guardam apenas os ids, sem referenciar `Order`/`OrderItem` diretamente.

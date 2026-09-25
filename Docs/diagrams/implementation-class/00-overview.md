@@ -14,17 +14,17 @@ graph LR
     Shared["Shared kernel\n(Entity, AggregateRoot, IDomainEvent, Address, Slug, PagedResult, PagedResponse,\nexceções tipadas + ApiExceptionHandler, CORS,\nICurrentUser + políticas Customer/Admin)"]
 
     Orders -->|IProductCatalog| Catalog
-    Orders -->|IInventoryService| Inventory
-    Orders -->|IPaymentGateway| Payments
-    Orders -->|"ICustomerDirectory (endereços no checkout)"| Customers
-    Catalog -->|"IStockAvailabilityProvider (disponibilidade)"| Inventory
+    Orders -->|"IInventoryService (reservar, liberar, devolver, alertas)"| Inventory
+    Orders -->|"IPaymentGateway (pagar, capturar no envio, acertar no cancelamento)"| Payments
+    Orders -->|"ICustomerDirectory (endereços, clientes do admin, novos clientes)"| Customers
+    Catalog -->|"IStockAvailabilityProvider (vitrine) + IStockLevels (registro e números do admin)"| Inventory
     Payments -.->|IntegrationEvents via Outbox| Orders
     Orders -.->|IAuditLogService| AuditLogs
     Payments -.->|IAuditLogService| AuditLogs
     Inventory -.->|IAuditLogService| AuditLogs
     Catalog -.->|IAuditLogService| AuditLogs
     Customers -.->|IAuditLogService| AuditLogs
-    Identity -->|"ICustomerRegistry (cadastro)"| Customers
+    Identity -->|"ICustomerRegistry (cadastro, cliente ativo?)"| Customers
     Identity -.->|IAuditLogService| AuditLogs
 
     Customers --> Shared
@@ -42,11 +42,11 @@ graph LR
 2. [Customers](02-customers.md) — cliente, endereços, métodos de pagamento salvos.
 3. [Catalog](03-catalog.md) — categorias, produtos, imagens, variações, listagem da vitrine e produto por slug.
 4. [Inventory](04-inventory.md) — saldo de estoque, reservas e consulta de disponibilidade.
-5. [Orders](05-orders.md) — pedido, itens, ciclo de vida, checkout em um passo, cotação do carrinho, adapters para os outros módulos.
-6. [Payments](06-payments.md) — pagamento (com forma de pagamento), estornos, outbox de eventos de integração.
-7. [AuditLogs](07-auditlogs.md) — registro de ações via `IAuditLogService`, listagem paginada.
+5. [Orders](05-orders.md) — pedido, itens, ciclo de vida completo (preparo, envio com captura, entrega, cancelamento com acerto do pagamento), checkout em um passo, cotação do carrinho, lista/detalhe do admin e dashboard, adapters para os outros módulos.
+6. [Payments](06-payments.md) — pagamento (com forma de pagamento), captura, void, estornos, acerto no cancelamento, outbox de eventos de integração.
+7. [AuditLogs](07-auditlogs.md) — registro de ações via `IAuditLogService`, persistido no PostgreSQL, listagem paginada filtrável por entidade, autor e ação.
 8. [Identity](08-identity.md) — contas (cliente/admin), senhas, sessões de refresh e emissão/validação dos JWT.
 
-Todos os diagramas refletem código já implementado; cada um lista, no topo, onde o código difere do desenho original e o que foi acrescentado depois (ex.: o MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`).
+Todos os diagramas refletem código já implementado; cada um lista, no topo, onde o código difere do desenho original e o que foi acrescentado depois (o MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`; a autenticação, `Docs/specs/identity/authentication-and-account.md`; o backoffice, `Docs/specs/backoffice/backoffice-api.md`). Todas as setas novas do backoffice seguem as direções que já existiam: nenhum módulo passou a depender de um que dependa dele.
 
 Cada arquivo é autocontido: quando um módulo depende de outro (ex.: Orders → Catalog), a classe externa aparece como um "stub" marcado `<<external>>`, só com a assinatura que importa para aquele módulo — o detalhe completo dela está no arquivo do módulo dono.

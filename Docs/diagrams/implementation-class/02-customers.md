@@ -11,6 +11,7 @@ Diferente da maioria dos diagramas desta pasta, este módulo já está **impleme
 - **Endereços no checkout** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, etapa 4): `CustomerAddressResponse` devolve o endereço completo (antes só `Label`/`City`/`IsDefaultShipping`), para o checkout poder mostrar e escolher um endereço salvo; `GetCustomerAddressUseCase` resolve um endereço de um cliente para o checkout do Orders — `customer_not_found`, `address_not_found` (também para o endereço de outro cliente) e `customer_inactive` para cliente desativado.
 - `CustomerAddressPersistenceModel.Id`/`CustomerPaymentMethodPersistenceModel.Id` usam `ValueGeneratedNever()`: o id vem do domínio, e sem isso o EF Core tratava um endereço novo num cliente já salvo como linha existente (UPDATE que não afetava nada, 409 na API).
 - **Conta do cliente** (V2, `Docs/specs/identity/authentication-and-account.md`): o `Customer` não guarda mais senha. As credenciais ficam no `UserAccount` do módulo Identity ([08-identity.md](08-identity.md)), que cria o cliente no cadastro chamando `RegisterCustomerUseCase` e guarda o id dele. O `POST customers` público foi removido: todo cliente nasce de um cadastro (`POST auth/sign-up`). O próprio cliente cuida dos seus dados em `MyAccountController` (`customers/me`: perfil e endereços, com `UpdateAddress`, `RemoveCustomerAddressUseCase` e `SetDefaultAddressUseCase`), sempre com o cliente vindo do token (`ICurrentUser`); um endereço de outro cliente responde 404, como um que não existe. `CustomersController` (por id) ficou só para admin. `AddCustomerAddressRequest` virou `CustomerAddressRequest`, usado para criar e editar.
+- **Backoffice** (`Docs/specs/backoffice/backoffice-api.md`): `GET customers` (`ListCustomersUseCase`: do mais novo ao mais antigo, busca por parte do nome ou do e-mail, sem diferenciar maiúsculas) e `POST customers/{id}/deactivate`/`reactivate` (`ChangeCustomerStatusUseCase`, idempotente: pedir o estado em que o cliente já está não grava nem audita nada). Um cliente desativado não faz checkout (`customer_inactive`, já existia) nem login/refresh (o Identity pergunta via `ICustomerRegistry.IsActiveAsync`, que usa `GetCustomerByIdUseCase`). Para outros módulos: `GetCustomersByIdsUseCase` (a lista de pedidos do admin) e `CountNewCustomersUseCase` (dashboard). `CustomerOutput`/`CustomerResponse` ganharam telefone e data de cadastro (`CustomerOutput.From`); migration `AddCustomerCreatedAtIndex`. O detalhe do cliente com os pedidos é montado pelo front (`GET customers/{id}` + `GET orders/customers/{customerId}`): Customers não depende de Orders.
 
 ```mermaid
 
@@ -111,6 +112,9 @@ classDiagram
         <<interface>>
         +GetByIdAsync(Guid customerId) Task~Customer?~
         +GetByEmailAsync(string email) Task~Customer?~
+        +ListAsync(string? searchTerm, int page, int pageSize) Task~(IReadOnlyList~Customer~, int)~
+        +ListByIdsAsync(IReadOnlyCollection~Guid~ customerIds) Task~IReadOnlyList~Customer~~
+        +CountCreatedBetweenAsync(DateTimeOffset from, DateTimeOffset to) Task~int~
         +AddAsync(Customer customer) Task
         +SaveChangesAsync() Task
     }
@@ -150,7 +154,16 @@ classDiagram
         +Guid Id
         +string Name
         +string Email
+        +string? Phone
         +bool Active
+        +DateTimeOffset CreatedAt
+        +From(Customer customer)$ CustomerOutput
+    }
+
+    class ListCustomersFilter {
+        +string? SearchTerm
+        +int Page
+        +int PageSize
     }
 
 
@@ -178,6 +191,27 @@ classDiagram
     class GetCustomerByIdUseCase {
         -ICustomerRepository customers
         +ExecuteAsync(Guid customerId) Task~CustomerOutput~
+    }
+
+    class ListCustomersUseCase {
+        -ICustomerRepository customers
+        +ExecuteAsync(ListCustomersFilter filter) Task~PagedResult~CustomerOutput~~
+    }
+
+    class ChangeCustomerStatusUseCase {
+        -ICustomerRepository customers
+        +DeactivateAsync(Guid customerId) Task~CustomerOutput~
+        +ReactivateAsync(Guid customerId) Task~CustomerOutput~
+    }
+
+    class GetCustomersByIdsUseCase {
+        -ICustomerRepository customers
+        +ExecuteAsync(IReadOnlyCollection~Guid~ customerIds) Task~IReadOnlyList~CustomerOutput~~
+    }
+
+    class CountNewCustomersUseCase {
+        -ICustomerRepository customers
+        +ExecuteAsync(DateTimeOffset from, DateTimeOffset to) Task~int~
     }
 
     class GetCustomerAddressUseCase {
@@ -268,6 +302,11 @@ classDiagram
         -GetCustomerByIdUseCase getCustomerByIdUseCase
         -AddCustomerAddressUseCase addCustomerAddressUseCase
         -ListCustomerAddressesUseCase listCustomerAddressesUseCase
+        -ListCustomersUseCase listCustomersUseCase
+        -ChangeCustomerStatusUseCase changeCustomerStatusUseCase
+        +ListAsync(ListCustomersFilter filter) Task~ActionResult~PagedResponse~CustomerResponse~~~
+        +DeactivateAsync(Guid id) Task~ActionResult~CustomerResponse~~
+        +ReactivateAsync(Guid id) Task~ActionResult~CustomerResponse~~
         +GetByIdAsync(Guid id) Task~ActionResult~CustomerResponse~~
         +AddAddressAsync(Guid id, CustomerAddressRequest request) Task~IActionResult~
         +ListAddressesAsync(Guid id) Task~ActionResult~IReadOnlyList~CustomerAddressResponse~~~
@@ -312,7 +351,9 @@ classDiagram
         +Guid Id
         +string Name
         +string Email
+        +string? Phone
         +bool Active
+        +DateTimeOffset CreatedAt
     }
 
     class CustomerAddressResponse {
@@ -336,6 +377,7 @@ classDiagram
         +ToCommand(Guid customerId, CustomerAddressRequest request) AddCustomerAddressCommand
         +ToCommand(Guid customerId, Guid addressId, CustomerAddressRequest request) UpdateCustomerAddressCommand
         +ToResponse(CustomerOutput output) CustomerResponse
+        +ToResponse(PagedResult~CustomerOutput~ page) PagedResponse~CustomerResponse~
         +ToResponse(CustomerAddress address) CustomerAddressResponse
     }
 
@@ -373,6 +415,12 @@ classDiagram
     CustomersDependencyInjection --> ICustomerRepository : registers
 
     CustomersController --> GetCustomerByIdUseCase
+    CustomersController --> ListCustomersUseCase
+    CustomersController --> ChangeCustomerStatusUseCase
+    ListCustomersUseCase --> ICustomerRepository
+    ChangeCustomerStatusUseCase --> ICustomerRepository
+    GetCustomersByIdsUseCase --> ICustomerRepository
+    CountNewCustomersUseCase --> ICustomerRepository
     CustomersController --> AddCustomerAddressUseCase
     CustomersController --> ListCustomerAddressesUseCase
     CustomersController --> CustomerPresenter
@@ -402,5 +450,5 @@ classDiagram
 ## Consumido por outros módulos
 
 - Nenhum outro módulo referencia `Customer` diretamente — `Order.CustomerId` guarda apenas o id (ver [05-orders.md](05-orders.md)), seguindo a mesma regra de isolamento que já existe entre Orders e Payments no código atual.
-- **Orders** chama `GetCustomerAddressUseCase` de dentro de um `CustomerDirectoryAdapter` (implementa o `ICustomerDirectory` do Orders) no checkout; só o value object `Address` (shared kernel) atravessa a fronteira — ver [05-orders.md](05-orders.md).
-- **Identity** chama `RegisterCustomerUseCase` de dentro de um `CustomerRegistryAdapter` (implementa o `ICustomerRegistry` do Identity) no cadastro, e guarda só o id do cliente criado — ver [08-identity.md](08-identity.md).
+- **Orders** chama `GetCustomerAddressUseCase` de dentro de um `CustomerDirectoryAdapter` (implementa o `ICustomerDirectory` do Orders) no checkout; só o value object `Address` (shared kernel) atravessa a fronteira. Desde o backoffice o mesmo adapter chama `GetCustomersByIdsUseCase` (nome/e-mail na lista de pedidos do admin) e `CountNewCustomersUseCase` (dashboard), traduzindo para o `OrderCustomerSnapshot` do Orders — ver [05-orders.md](05-orders.md).
+- **Identity** chama `RegisterCustomerUseCase` de dentro de um `CustomerRegistryAdapter` (implementa o `ICustomerRegistry` do Identity) no cadastro, e guarda só o id do cliente criado; no login e no refresh chama `GetCustomerByIdUseCase` para saber se o cliente está ativo (`IsActiveAsync`) — ver [08-identity.md](08-identity.md).

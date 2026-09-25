@@ -27,6 +27,14 @@ Adicionado pela autenticação (V2, `Docs/specs/identity/authentication-and-acco
 - **Só o dono vê o pedido.** `GetOrderDetailsUseCase`/`GetOrderStatusHistoryUseCase` recebem o cliente que está pedindo (`null` para admin); `OrderAccess` responde `order_not_found` para o pedido de outro cliente, igual a um pedido que não existe, para ids não poderem ser sondados. É regra de caso de uso, não do controller.
 - **`GET orders/me`**: o histórico do cliente logado. `GET orders/customers/{id}` e os endpoints passo a passo (`POST orders`, `PUT …/addresses`, `request-payment`, `cancel`) ficaram só para admin.
 
+Adicionado pelo backoffice (`Docs/specs/backoffice/backoffice-api.md`, decisões 1 a 3):
+
+- **Atendimento.** `StartProcessing`/`Ship`/`Deliver` passaram a disparar `OrderProcessingStarted`/`OrderShipped`/`OrderDelivered`, que o `OrderStatusHistoryProjector` grava no histórico. `FulfilOrderUseCase` (um caso de uso, três métodos) move o pedido pelos passos; **enviar captura o pagamento antes** (`IPaymentGateway.CaptureForOrderAsync`) — se o provider recusar, o pedido fica em `Processing` e o admin recebe `409 payment_capture_failed`. `Order.EnsureCanShip`/`EnsureCanBeCancelled` checam a regra antes de qualquer efeito colateral.
+- **Cancelamento com acerto do pagamento.** `CancelOrderUseCase` agora, nesta ordem: confere se pode cancelar, acerta o pagamento (`SettleForCancellationAsync`: void de uma autorização, estorno de uma captura), libera reservas ainda retidas, devolve ao estoque o que já foi consumido (`ReturnConsumedStockAsync`), cancela e salva. Sem transação entre módulos, então cada passo antes do save é idempotente e repetir o cancelamento termina o serviço. Devolve `OrderPaymentSettlement`; a ação saiu do `OrdersController` para o `OrderFulfilmentController` (mesma rota) e responde 200 com o resultado.
+- **Consumidores tolerantes.** `ConfirmOrderUseCase`/`MarkOrderPaymentFailedUseCase` ignoram (com log) um pedido que já não está `PendingPayment` — antes lançavam `invalid_order_state` dentro do publisher do outbox, que nunca marcava a mensagem como processada e travava as seguintes.
+- **Leituras do admin** em `OrdersAdminController` (`admin/…`): `ListOrdersUseCase` (todos os pedidos, filtros por status/cliente/período, com o cliente e o status do pagamento buscados uma vez por página), `GetAdminOrderDetailsUseCase` (o pedido + notas internas, cliente, pagamento completo e reservas) e `GetDashboardUseCase` (pedidos por status, receita por moeda dos confirmados no período, clientes novos, alertas de estoque e pedidos recentes, calculado na hora a partir de cada módulo). `SetOrderInternalNotesUseCase` (até 2000 caracteres; vazio limpa).
+- **Contratos ampliados, sempre com tipos do Orders:** `IPaymentGateway` (`GetPaymentSummariesAsync`, `GetPaymentDetailsAsync`, `CaptureForOrderAsync`, `SettleForCancellationAsync`), `IInventoryService` (`ReturnConsumedStockAsync`, `GetReservationsAsync`, `GetStockAlertCountsAsync`), `ICustomerDirectory` (`GetCustomersAsync`, `CountNewCustomersAsync`); `IOrderRepository` ganhou `ListAsync`, `CountByStatusAsync` e `SumConfirmedTotalsAsync` (total de cada pedido calculado no SQL a partir dos itens, somado por moeda em memória). Migration `AddOrderListIndexes` (`CreatedAt`, `ConfirmedAt`).
+
 ```mermaid
 
 classDiagram
@@ -80,6 +88,38 @@ classDiagram
     }
 
     class GetPaymentByOrderIdUseCase {
+        <<external>>
+    }
+
+    class GetPaymentsByOrderIdsUseCase {
+        <<external>>
+    }
+
+    class CapturePaymentUseCase {
+        <<external>>
+    }
+
+    class SettlePaymentForCancellationUseCase {
+        <<external>>
+    }
+
+    class ReturnOrderStockUseCase {
+        <<external>>
+    }
+
+    class ListReservationsUseCase {
+        <<external>>
+    }
+
+    class GetStockSummaryUseCase {
+        <<external>>
+    }
+
+    class GetCustomersByIdsUseCase {
+        <<external>>
+    }
+
+    class CountNewCustomersUseCase {
         <<external>>
     }
 
@@ -139,6 +179,7 @@ classDiagram
         +DecreaseItemQuantity(Guid productId, int quantity) void
         +ApplyItemDiscount(Guid productId, decimal amount) void
         +SetAddresses(Address shippingAddress, Address billingAddress) void
+        +MaxInternalNotesLength int$
         +SetInternalNotes(string? notes) void
         +ApplyDiscount(decimal amount) void
         +SetShippingAmount(decimal amount) void
@@ -146,9 +187,11 @@ classDiagram
         +RequestPayment(DateTimeOffset now) void
         +Confirm(DateTimeOffset now) void
         +StartProcessing(DateTimeOffset now) void
+        +EnsureCanShip() void
         +Ship(DateTimeOffset now) void
         +Deliver(DateTimeOffset now) void
         +FailPayment(string reason, DateTimeOffset now) void
+        +EnsureCanBeCancelled() void
         +Cancel(string reason, DateTimeOffset now) void
     }
 
@@ -216,6 +259,24 @@ classDiagram
         +string Reason
     }
 
+    class OrderProcessingStarted {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid OrderId
+    }
+
+    class OrderShipped {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid OrderId
+    }
+
+    class OrderDelivered {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid OrderId
+    }
+
 
     %% OrderCore.Api.Modules.Orders.Application.Contracts
     class IOrderRepository {
@@ -223,6 +284,9 @@ classDiagram
         +GetByIdAsync(Guid orderId) Task~Order?~
         +ListByCustomerIdAsync(Guid customerId, int page, int pageSize) Task~ValueTuple~IReadOnlyList~Order~, int~~
         +FindByCheckoutIdempotencyKeyAsync(Guid customerId, string idempotencyKey) Task~Order?~
+        +ListAsync(ListOrdersFilter filter) Task~ValueTuple~IReadOnlyList~Order~, int~~
+        +CountByStatusAsync(DateTimeOffset from, DateTimeOffset to) Task~IReadOnlyDictionary~OrderStatus, int~~
+        +SumConfirmedTotalsAsync(DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection~OrderStatus~ statuses) Task~IReadOnlyDictionary~string, decimal~~
         +AddAsync(Order order) Task
         +SaveChangesAsync() Task
     }
@@ -239,17 +303,113 @@ classDiagram
         +GetAvailableQuantitiesAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, int~~
         +ReleaseReservationsAsync(Guid orderId) Task
         +ConsumeReservationsAsync(Guid orderId) Task
+        +ReturnConsumedStockAsync(Guid orderId) Task~int~
+        +GetReservationsAsync(Guid orderId) Task~IReadOnlyList~OrderReservationSummary~~
+        +GetStockAlertCountsAsync() Task~StockAlertCounts~
     }
 
     class IPaymentGateway {
         <<interface>>
         +RequestPaymentAsync(Guid orderId, decimal amount, string currency, PaymentMethodChoice method, string idempotencyKey) Task~Guid~
         +GetPaymentSummaryAsync(Guid orderId) Task~OrderPaymentSummary?~
+        +GetPaymentSummariesAsync(IReadOnlyCollection~Guid~ orderIds) Task~IReadOnlyDictionary~Guid, OrderPaymentSummary~~
+        +GetPaymentDetailsAsync(Guid orderId) Task~OrderPaymentDetails?~
+        +CaptureForOrderAsync(Guid orderId) Task
+        +SettleForCancellationAsync(Guid orderId, string reason) Task~OrderPaymentSettlement~
     }
 
     class ICustomerDirectory {
         <<interface>>
         +GetAddressAsync(Guid customerId, Guid addressId) Task~Address~
+        +GetCustomersAsync(IReadOnlyCollection~Guid~ customerIds) Task~IReadOnlyDictionary~Guid, OrderCustomerSnapshot~~
+        +CountNewCustomersAsync(DateTimeOffset from, DateTimeOffset to) Task~int~
+    }
+
+    class OrderPaymentSettlement {
+        <<enumeration>>
+        NothingToSettle
+        Voided
+        Refunded
+    }
+
+    class OrderCustomerSnapshot {
+        +Guid Id
+        +string Name
+        +string Email
+        +bool Active
+    }
+
+    class OrderPaymentDetails {
+        +Guid PaymentId
+        +string Status
+        +PaymentMethodChoice Method
+        +decimal Amount
+        +string Currency
+        +string Provider
+        +string? ProviderReference
+        +string? FailureReason
+        +DateTimeOffset CreatedAt
+        +DateTimeOffset? AuthorizedAt
+        +DateTimeOffset? CapturedAt
+        +DateTimeOffset? VoidedAt
+        +IReadOnlyList~OrderRefundSummary~ Refunds
+    }
+
+    class OrderRefundSummary {
+        +Guid Id
+        +decimal Amount
+        +string Reason
+        +string Status
+        +DateTimeOffset RequestedAt
+        +DateTimeOffset? ProcessedAt
+    }
+
+    class OrderReservationSummary {
+        +Guid ReservationId
+        +Guid ProductId
+        +int Quantity
+        +string Status
+        +DateTimeOffset ReservedAt
+        +DateTimeOffset? ReleasedAt
+        +DateTimeOffset? ConsumedAt
+        +DateTimeOffset? ReturnedAt
+    }
+
+    class StockAlertCounts {
+        +int LowStock
+        +int OutOfStock
+    }
+
+    class ListOrdersFilter {
+        +OrderStatus? Status
+        +Guid? CustomerId
+        +DateTimeOffset? CreatedFrom
+        +DateTimeOffset? CreatedTo
+        +int Page
+        +int PageSize
+    }
+
+    class AdminOrderSummaryOutput {
+        +OrderSummaryOutput Order
+        +OrderCustomerSnapshot? Customer
+        +string? PaymentStatus
+    }
+
+    class AdminOrderDetailsOutput {
+        +Order Order
+        +OrderCustomerSnapshot? Customer
+        +OrderPaymentDetails? Payment
+        +IReadOnlyList~OrderReservationSummary~ Reservations
+    }
+
+    class DashboardOutput {
+        +DateTimeOffset From
+        +DateTimeOffset To
+        +IReadOnlyDictionary~OrderStatus, int~ OrdersByStatus
+        +IReadOnlyDictionary~string, decimal~ RevenueByCurrency
+        +int NewCustomers
+        +StockAlertCounts Stock
+        +IReadOnlyList~AdminOrderSummaryOutput~ RecentOrders
     }
 
     class IOrderStatusHistoryReader {
@@ -456,6 +616,7 @@ classDiagram
         -IOrderRepository orderRepository
         -IInventoryService inventoryService
         -TimeProvider timeProvider
+        -ILogger logger
         +ExecuteAsync(Guid orderId) Task
     }
 
@@ -463,14 +624,52 @@ classDiagram
         -IOrderRepository orderRepository
         -IInventoryService inventoryService
         -TimeProvider timeProvider
+        -ILogger logger
         +ExecuteAsync(Guid orderId, string reason) Task
     }
 
     class CancelOrderUseCase {
         -IOrderRepository orderRepository
         -IInventoryService inventoryService
+        -IPaymentGateway paymentGateway
         -TimeProvider timeProvider
-        +ExecuteAsync(CancelOrderCommand command) Task
+        +ExecuteAsync(CancelOrderCommand command) Task~OrderPaymentSettlement~
+    }
+
+    class FulfilOrderUseCase {
+        -IOrderRepository orderRepository
+        -IPaymentGateway paymentGateway
+        +StartProcessingAsync(Guid orderId) Task~OrderDetailsOutput~
+        +ShipAsync(Guid orderId) Task~OrderDetailsOutput~
+        +DeliverAsync(Guid orderId) Task~OrderDetailsOutput~
+    }
+
+    class SetOrderInternalNotesUseCase {
+        -IOrderRepository orderRepository
+        +ExecuteAsync(Guid orderId, string? notes) Task
+    }
+
+    class ListOrdersUseCase {
+        -IOrderRepository orderRepository
+        -ICustomerDirectory customerDirectory
+        -IPaymentGateway paymentGateway
+        +ExecuteAsync(ListOrdersFilter filter) Task~PagedResult~AdminOrderSummaryOutput~~
+    }
+
+    class GetAdminOrderDetailsUseCase {
+        -IOrderRepository orderRepository
+        -ICustomerDirectory customerDirectory
+        -IPaymentGateway paymentGateway
+        -IInventoryService inventoryService
+        +ExecuteAsync(Guid orderId) Task~AdminOrderDetailsOutput~
+    }
+
+    class GetDashboardUseCase {
+        -IOrderRepository orderRepository
+        -ICustomerDirectory customerDirectory
+        -IInventoryService inventoryService
+        -ListOrdersUseCase listOrders
+        +ExecuteAsync(DateTimeOffset? from, DateTimeOffset? to) Task~DashboardOutput~
     }
 
     class GetOrderByIdUseCase {
@@ -568,22 +767,39 @@ classDiagram
         -ConsumeReservationUseCase consumeReservation
         -GetStockAvailabilityUseCase getStockAvailability
         -IInventoryReservationRepository reservations
+        -ReturnOrderStockUseCase returnOrderStock
+        -ListReservationsUseCase listReservations
+        -GetStockSummaryUseCase getStockSummary
         +TryReserveOrderItemsAsync(Order order) Task~bool~
         +GetAvailableQuantitiesAsync(IReadOnlyCollection~Guid~ productIds) Task~IReadOnlyDictionary~Guid, int~~
         +ReleaseReservationsAsync(Guid orderId) Task
         +ConsumeReservationsAsync(Guid orderId) Task
+        +ReturnConsumedStockAsync(Guid orderId) Task~int~
+        +GetReservationsAsync(Guid orderId) Task~IReadOnlyList~OrderReservationSummary~~
+        +GetStockAlertCountsAsync() Task~StockAlertCounts~
     }
 
     class PaymentGatewayAdapter {
         -CreatePaymentUseCase createPayment
         -GetPaymentByOrderIdUseCase getPaymentByOrderId
+        -GetPaymentsByOrderIdsUseCase getPaymentsByOrderIds
+        -CapturePaymentUseCase capturePayment
+        -SettlePaymentForCancellationUseCase settlePayment
         +RequestPaymentAsync(Guid orderId, decimal amount, string currency, PaymentMethodChoice method, string idempotencyKey) Task~Guid~
         +GetPaymentSummaryAsync(Guid orderId) Task~OrderPaymentSummary?~
+        +GetPaymentSummariesAsync(IReadOnlyCollection~Guid~ orderIds) Task~IReadOnlyDictionary~Guid, OrderPaymentSummary~~
+        +GetPaymentDetailsAsync(Guid orderId) Task~OrderPaymentDetails?~
+        +CaptureForOrderAsync(Guid orderId) Task
+        +SettleForCancellationAsync(Guid orderId, string reason) Task~OrderPaymentSettlement~
     }
 
     class CustomerDirectoryAdapter {
         -GetCustomerAddressUseCase getCustomerAddress
+        -GetCustomersByIdsUseCase getCustomersByIds
+        -CountNewCustomersUseCase countNewCustomers
         +GetAddressAsync(Guid customerId, Guid addressId) Task~Address~
+        +GetCustomersAsync(IReadOnlyCollection~Guid~ customerIds) Task~IReadOnlyDictionary~Guid, OrderCustomerSnapshot~~
+        +CountNewCustomersAsync(DateTimeOffset from, DateTimeOffset to) Task~int~
     }
 
 
@@ -595,6 +811,9 @@ classDiagram
         +HandleAsync(OrderConfirmed domainEvent) Task
         +HandleAsync(OrderCancelled domainEvent) Task
         +HandleAsync(OrderPaymentFailed domainEvent) Task
+        +HandleAsync(OrderProcessingStarted domainEvent) Task
+        +HandleAsync(OrderShipped domainEvent) Task
+        +HandleAsync(OrderDelivered domainEvent) Task
     }
 
 
@@ -619,7 +838,6 @@ classDiagram
         -GetOrderDetailsUseCase getOrderDetailsUseCase
         -GetOrderStatusHistoryUseCase getOrderStatusHistoryUseCase
         -ListCustomerOrdersUseCase listCustomerOrdersUseCase
-        -CancelOrderUseCase cancelOrderUseCase
         -CheckoutUseCase checkoutUseCase
         -QuoteCartUseCase quoteCartUseCase
         -ICurrentUser currentUser
@@ -632,7 +850,70 @@ classDiagram
         +GetStatusHistoryAsync(Guid id) Task~ActionResult~IReadOnlyList~OrderStatusHistoryEntryResponse~~~
         +ListMineAsync(int page, int pageSize) Task~ActionResult~PagedResponse~OrderSummaryResponse~~~
         +ListByCustomerAsync(Guid customerId, int page, int pageSize) Task~ActionResult~PagedResponse~OrderSummaryResponse~~~
-        +CancelAsync(Guid id, CancelOrderRequest request) Task~IActionResult~
+    }
+
+    class OrderFulfilmentController {
+        <<admin>>
+        -FulfilOrderUseCase fulfilOrder
+        -CancelOrderUseCase cancelOrder
+        -SetOrderInternalNotesUseCase setInternalNotes
+        +StartProcessingAsync(Guid id) Task~ActionResult~OrderResponse~~
+        +ShipAsync(Guid id) Task~ActionResult~OrderResponse~~
+        +DeliverAsync(Guid id) Task~ActionResult~OrderResponse~~
+        +CancelAsync(Guid id, CancelOrderRequest request) Task~ActionResult~CancelOrderResponse~~
+        +SetInternalNotesAsync(Guid id, SetOrderInternalNotesRequest request) Task~IActionResult~
+    }
+
+    class OrdersAdminController {
+        <<admin>>
+        -ListOrdersUseCase listOrders
+        -GetAdminOrderDetailsUseCase getAdminOrderDetails
+        -GetDashboardUseCase getDashboard
+        +ListOrdersAsync(ListOrdersFilter filter) Task~ActionResult~PagedResponse~AdminOrderSummaryResponse~~~
+        +GetOrderAsync(Guid id) Task~ActionResult~AdminOrderDetailsResponse~~
+        +GetDashboardAsync(DateTimeOffset? from, DateTimeOffset? to) Task~ActionResult~DashboardResponse~~
+    }
+
+    class SetOrderInternalNotesRequest {
+        +string? Notes
+    }
+
+    class CancelOrderResponse {
+        +string PaymentSettlement
+    }
+
+    class AdminOrderSummaryResponse {
+        +Guid Id
+        +string OrderNumber
+        +string Status
+        +decimal TotalAmount
+        +OrderCustomerResponse? Customer
+        +string? PaymentStatus
+    }
+
+    class AdminOrderDetailsResponse {
+        +OrderResponse Order
+        +string? InternalNotes
+        +OrderCustomerResponse? Customer
+        +OrderPaymentDetailsResponse? Payment
+        +IReadOnlyList~OrderReservationResponse~ Reservations
+    }
+
+    class DashboardResponse {
+        +DateTimeOffset From
+        +DateTimeOffset To
+        +IReadOnlyDictionary~string, int~ OrdersByStatus
+        +IReadOnlyDictionary~string, decimal~ RevenueByCurrency
+        +int NewCustomers
+        +DashboardStockResponse Stock
+        +IReadOnlyList~AdminOrderSummaryResponse~ RecentOrders
+    }
+
+    class AdminOrderPresenter {
+        <<static>>
+        +ToResponse(AdminOrderSummaryOutput output)$ AdminOrderSummaryResponse
+        +ToResponse(AdminOrderDetailsOutput output)$ AdminOrderDetailsResponse
+        +ToResponse(DashboardOutput output)$ DashboardResponse
     }
 
     class CheckoutItemRequest {
@@ -805,7 +1086,25 @@ classDiagram
     MarkOrderPaymentFailedUseCase --> IOrderRepository
     MarkOrderPaymentFailedUseCase --> IInventoryService
     CancelOrderUseCase --> IOrderRepository
-    CancelOrderUseCase --> IInventoryService
+    CancelOrderUseCase --> IInventoryService : release + return stock
+    CancelOrderUseCase --> IPaymentGateway : settle payment first
+    FulfilOrderUseCase --> IOrderRepository
+    FulfilOrderUseCase --> IPaymentGateway : capture on ship
+    SetOrderInternalNotesUseCase --> IOrderRepository
+    ListOrdersUseCase --> IOrderRepository
+    ListOrdersUseCase --> ICustomerDirectory
+    ListOrdersUseCase --> IPaymentGateway
+    GetAdminOrderDetailsUseCase --> IOrderRepository
+    GetAdminOrderDetailsUseCase --> ICustomerDirectory
+    GetAdminOrderDetailsUseCase --> IPaymentGateway
+    GetAdminOrderDetailsUseCase --> IInventoryService
+    GetDashboardUseCase --> IOrderRepository
+    GetDashboardUseCase --> ICustomerDirectory
+    GetDashboardUseCase --> IInventoryService
+    GetDashboardUseCase --> ListOrdersUseCase : recent orders
+    Order ..> OrderProcessingStarted : raises
+    Order ..> OrderShipped : raises
+    Order ..> OrderDelivered : raises
     GetOrderByIdUseCase --> IOrderRepository
     ListCustomerOrdersUseCase --> IOrderRepository
     CreateOrderCommand "1" *-- "1..*" CreateOrderItem
@@ -852,11 +1151,19 @@ classDiagram
     InventoryServiceAdapter --> ConsumeReservationUseCase
     InventoryServiceAdapter --> IInventoryReservationRepository
     InventoryServiceAdapter --> GetStockAvailabilityUseCase
+    InventoryServiceAdapter --> ReturnOrderStockUseCase
+    InventoryServiceAdapter --> ListReservationsUseCase
+    InventoryServiceAdapter --> GetStockSummaryUseCase
     IPaymentGateway <|.. PaymentGatewayAdapter
     PaymentGatewayAdapter --> CreatePaymentUseCase
     PaymentGatewayAdapter --> GetPaymentByOrderIdUseCase
+    PaymentGatewayAdapter --> GetPaymentsByOrderIdsUseCase
+    PaymentGatewayAdapter --> CapturePaymentUseCase
+    PaymentGatewayAdapter --> SettlePaymentForCancellationUseCase
     ICustomerDirectory <|.. CustomerDirectoryAdapter
     CustomerDirectoryAdapter --> GetCustomerAddressUseCase
+    CustomerDirectoryAdapter --> GetCustomersByIdsUseCase
+    CustomerDirectoryAdapter --> CountNewCustomersUseCase
     IOrderStatusHistoryReader <|.. EfOrderStatusHistoryReader
     EfOrderStatusHistoryReader --> OrdersDbContext
 
@@ -873,7 +1180,13 @@ classDiagram
     OrdersController --> RequestOrderPaymentUseCase
     OrdersController --> GetOrderByIdUseCase
     OrdersController --> ListCustomerOrdersUseCase
-    OrdersController --> CancelOrderUseCase
+    OrderFulfilmentController --> FulfilOrderUseCase
+    OrderFulfilmentController --> CancelOrderUseCase
+    OrderFulfilmentController --> SetOrderInternalNotesUseCase
+    OrdersAdminController --> ListOrdersUseCase
+    OrdersAdminController --> GetAdminOrderDetailsUseCase
+    OrdersAdminController --> GetDashboardUseCase
+    OrdersAdminController --> AdminOrderPresenter
     OrdersController --> CheckoutUseCase
     OrdersController --> QuoteCartUseCase
     OrdersController --> GetOrderDetailsUseCase

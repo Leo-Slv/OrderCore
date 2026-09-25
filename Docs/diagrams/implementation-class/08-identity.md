@@ -8,6 +8,7 @@ Decisões que moldam o módulo:
 - **Sessões são filhas do agregado.** `RefreshSession` pertence ao `UserAccount`. Rotacionar (revogar a sessão atual e criar a sucessora na mesma família) e reagir a um token reapresentado (revogar a família toda) são mudanças num agregado só, salvas de uma vez. Por isso o módulo não precisa de `IUnitOfWork`. Sessões expiradas são removidas a cada nova sessão ou rotação; as revogadas e ainda não expiradas ficam, porque são elas que permitem reconhecer um token reapresentado.
 - **Cadastro com compensação.** `SignUpCustomerUseCase` salva a conta primeiro (o índice único reserva o e-mail), cria o cliente via `ICustomerRegistry` e, se isso falhar, apaga a conta. São dois `DbContext`s, então é uma sequência, não uma transação (o mesmo padrão do checkout).
 - **Erros sem vazar informação.** Qualquer falha de login é `invalid_credentials` (e-mail desconhecido ainda verifica um hash falso, para o tempo de resposta não denunciar quais e-mails existem); qualquer falha de refresh é `invalid_refresh_token`; sign-out com um token desconhecido ou de outra conta não faz nada, em silêncio.
+- **Cliente desativado pelo admin** (backoffice): `SignInUseCase` (depois de a senha conferir) e `RefreshSessionUseCase` (antes de rotacionar) perguntam `ICustomerRegistry.IsActiveAsync`; cliente desativado ou inexistente recebe as mesmas respostas acima. A sessão não é revogada: reativar o cliente devolve o acesso com o mesmo refresh token. Um access token já emitido vale até expirar.
 - **Tokens.** O access token é um JWT HMAC-SHA256 (claims `sub`, `email`, `role`, `customer_id`), de 15 minutos. O refresh token tem 256 bits aleatórios, dura 14 dias e só o SHA-256 dele é guardado. A chave de assinatura vem do ambiente (`Jwt__SigningKey`) ou de user-secrets; a API não sobe sem uma chave de pelo menos 32 bytes.
 - **Primeiro admin.** `AdminSeedHostedService` roda `SeedAdminUseCase` na subida quando `IdentitySeed:AdminEmail`/`AdminPassword` estão configurados; cria só se ainda não existe nenhum admin, e uma falha (ex.: migrações ainda não aplicadas) é registrada no log sem derrubar a API.
 
@@ -27,6 +28,10 @@ classDiagram
     }
 
     class RegisterCustomerUseCase {
+        <<external>>
+    }
+
+    class GetCustomerByIdUseCase {
         <<external>>
     }
 
@@ -162,6 +167,7 @@ classDiagram
     class ICustomerRegistry {
         <<interface>>
         +RegisterAsync(string name, string email, string? phone) Task~Guid~
+        +IsActiveAsync(Guid customerId) Task~bool~
     }
 
 
@@ -213,6 +219,7 @@ classDiagram
         -IPasswordHasher passwordHasher
         -IRefreshTokenGenerator refreshTokens
         -IAccessTokenIssuer accessTokens
+        -ICustomerRegistry customers
         -TimeProvider timeProvider
         +ExecuteAsync(SignInCommand command) Task~AuthTokens~
     }
@@ -222,6 +229,7 @@ classDiagram
         -IRefreshTokenGenerator refreshTokens
         -IAccessTokenIssuer accessTokens
         -IAuditLogService auditLog
+        -ICustomerRegistry customers
         -TimeProvider timeProvider
         +ExecuteAsync(string refreshToken) Task~AuthTokens~
     }
@@ -320,7 +328,9 @@ classDiagram
     %% OrderCore.Api.Modules.Identity.Infrastructure.Adapters / Hosting
     class CustomerRegistryAdapter {
         -RegisterCustomerUseCase registerCustomer
+        -GetCustomerByIdUseCase getCustomerById
         +RegisterAsync(string name, string email, string? phone) Task~Guid~
+        +IsActiveAsync(Guid customerId) Task~bool~
     }
 
     class IdentitySeedOptions {
@@ -393,6 +403,8 @@ classDiagram
 
     SignUpCustomerUseCase --> IUserAccountRepository
     SignUpCustomerUseCase --> ICustomerRegistry
+    SignInUseCase --> ICustomerRegistry : customer still active?
+    RefreshSessionUseCase --> ICustomerRegistry : customer still active?
     SignUpCustomerUseCase --> IPasswordHasher
     SignUpCustomerUseCase --> IRefreshTokenGenerator
     SignUpCustomerUseCase --> IAccessTokenIssuer
@@ -432,6 +444,7 @@ classDiagram
     JwtBearerSetup --> JwtOptions : validates with the same key
     ICustomerRegistry <|.. CustomerRegistryAdapter
     CustomerRegistryAdapter --> RegisterCustomerUseCase : creates the customer
+    CustomerRegistryAdapter --> GetCustomerByIdUseCase : is the customer active
     AdminSeedHostedService --> SeedAdminUseCase
     AdminSeedHostedService --> IdentitySeedOptions
 
@@ -461,7 +474,7 @@ Os tokens vão no corpo JSON, não em cookies definidos pela API. O front (Next.
 
 ## Consome outros módulos
 
-- **Customers**, no cadastro: `ICustomerRegistry` → `CustomerRegistryAdapter` → `RegisterCustomerUseCase` (só a camada Application do Customers). Volta apenas o id do novo cliente.
+- **Customers**, no cadastro: `ICustomerRegistry` → `CustomerRegistryAdapter` → `RegisterCustomerUseCase` (só a camada Application do Customers). Volta apenas o id do novo cliente. No login e no refresh, o mesmo adapter usa `GetCustomerByIdUseCase` para saber se o cliente está ativo (só um sim/não volta).
 - **AuditLogs**: registra `UserAccountCreated` e `RefreshTokenReuseDetected`.
 
 ## Consumido por outros módulos
