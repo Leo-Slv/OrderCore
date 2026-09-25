@@ -60,7 +60,7 @@ public sealed class CustomersController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddAddressAsync(
         Guid id,
-        [FromBody] AddCustomerAddressRequest request,
+        [FromBody] CustomerAddressRequest request,
         CancellationToken cancellationToken)
     {
         var addressId = await _addCustomerAddressUseCase.ExecuteAsync(CustomerPresenter.ToCommand(id, request), cancellationToken);

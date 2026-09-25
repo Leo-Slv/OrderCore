@@ -8,7 +8,7 @@ namespace OrderCore.Api.Modules.Customers.Presentation.Requests;
 /// otherwise a valid <c>Address</c> could never actually be constructed
 /// from this request.
 /// </summary>
-public sealed class AddCustomerAddressRequest
+public sealed class CustomerAddressRequest
 {
     public string Label { get; init; } = string.Empty;
 

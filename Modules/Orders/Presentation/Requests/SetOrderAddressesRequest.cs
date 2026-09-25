@@ -4,7 +4,7 @@ namespace OrderCore.Api.Modules.Orders.Presentation.Requests;
 /// Expanded beyond 05-orders.md's abbreviated Street/City-only shape to
 /// every field <see cref="Shared.Domain.ValueObjects.Address.Create"/>
 /// requires for both addresses — same reasoning as
-/// <c>AddCustomerAddressRequest</c> in Customers.
+/// <c>CustomerAddressRequest</c> in Customers.
 /// </summary>
 public sealed class SetOrderAddressesRequest
 {

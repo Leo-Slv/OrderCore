@@ -8,20 +8,21 @@ namespace OrderCore.Api.Modules.Customers.Presentation.Presenters;
 
 public static class CustomerPresenter
 {
-    public static AddCustomerAddressCommand ToCommand(Guid customerId, AddCustomerAddressRequest request) => new(
-        customerId,
-        request.Label,
-        request.RecipientName,
-        request.Phone,
-        Address.Create(
-            request.Street,
-            request.Number,
-            request.Complement,
-            request.Neighborhood,
-            request.City,
-            request.State,
-            request.PostalCode,
-            request.Country));
+    public static AddCustomerAddressCommand ToCommand(Guid customerId, CustomerAddressRequest request) => new(
+        customerId, request.Label, request.RecipientName, request.Phone, ToAddress(request));
+
+    public static UpdateCustomerAddressCommand ToCommand(Guid customerId, Guid addressId, CustomerAddressRequest request) => new(
+        customerId, addressId, request.Label, request.RecipientName, request.Phone, ToAddress(request));
+
+    private static Address ToAddress(CustomerAddressRequest request) => Address.Create(
+        request.Street,
+        request.Number,
+        request.Complement,
+        request.Neighborhood,
+        request.City,
+        request.State,
+        request.PostalCode,
+        request.Country);
 
     public static CustomerResponse ToResponse(CustomerOutput output) => new()
     {
