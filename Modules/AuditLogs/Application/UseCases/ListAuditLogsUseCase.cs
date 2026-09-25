@@ -27,7 +27,8 @@ public sealed class ListAuditLogsUseCase
                 $"PageSize must be between 1 and {ListAuditLogsInput.MaximumPageSize}.");
         }
 
-        var (items, totalCount) = await _auditLogs.ListPagedAsync(input.Page, input.PageSize, cancellationToken);
+        var filter = new AuditLogFilter(NullIfBlank(input.EntityName), input.EntityId, input.UserId, NullIfBlank(input.Action));
+        var (items, totalCount) = await _auditLogs.ListPagedAsync(filter, input.Page, input.PageSize, cancellationToken);
 
         return new PagedResult<AuditLogOutput>
         {
@@ -38,4 +39,6 @@ public sealed class ListAuditLogsUseCase
             TotalPages = (int)Math.Ceiling(totalCount / (double)input.PageSize),
         };
     }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

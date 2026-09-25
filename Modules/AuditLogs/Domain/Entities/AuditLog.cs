@@ -69,4 +69,19 @@ public sealed class AuditLog : AggregateRoot<Guid>
         auditLog.IncrementVersion();
         return auditLog;
     }
+
+    /// <summary>
+    /// Reconstructs an entry from storage. An entry is never changed after
+    /// it is written, so there is no version to restore: the table has no
+    /// concurrency token.
+    /// </summary>
+    internal static AuditLog Rehydrate(
+        Guid id,
+        Guid? userId,
+        string action,
+        string entityName,
+        Guid? entityId,
+        string? metadataJson,
+        DateTimeOffset createdAt) =>
+        new(id, userId, action, entityName, entityId, metadataJson, createdAt);
 }

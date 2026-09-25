@@ -3,10 +3,9 @@ using OrderCore.Api.Modules.AuditLogs.Domain.Entities;
 namespace OrderCore.Api.Modules.AuditLogs.Domain.Repositories;
 
 /// <summary>
-/// Persistence abstraction the Application layer depends on (section 38 —
-/// justified the same way <c>IOrderRepository</c> is: a real implementation
-/// swap, from the in-memory one used today to EF Core later, and
-/// testability, both exist here).
+/// Persistence abstraction the Application layer depends on, implemented
+/// by <c>EfAuditLogRepository</c>. Entries are append-only: there is no
+/// update or delete.
 /// </summary>
 public interface IAuditLogRepository
 {
@@ -14,14 +13,12 @@ public interface IAuditLogRepository
 
     Task SaveChangesAsync(CancellationToken cancellationToken);
 
-    Task<IReadOnlyCollection<AuditLog>> ListByEntityAsync(
-        string entityName,
-        Guid entityId,
-        CancellationToken cancellationToken);
-
-    Task<IReadOnlyCollection<AuditLog>> ListByUserAsync(Guid userId, CancellationToken cancellationToken);
-
+    /// <summary>
+    /// One page of the entries matching <paramref name="filter"/>, newest
+    /// first, plus how many match in total.
+    /// </summary>
     Task<(IReadOnlyCollection<AuditLog> Items, int TotalCount)> ListPagedAsync(
+        AuditLogFilter filter,
         int page,
         int pageSize,
         CancellationToken cancellationToken);

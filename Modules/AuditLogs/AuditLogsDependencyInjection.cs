@@ -1,6 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.AuditLogs.Application.UseCases;
 using OrderCore.Api.Modules.AuditLogs.Domain.Repositories;
+using OrderCore.Api.Modules.AuditLogs.Infrastructure.Persistence;
 using OrderCore.Api.Modules.AuditLogs.Infrastructure.Persistence.Repositories;
 
 namespace OrderCore.Api.Modules.AuditLogs;
@@ -13,12 +15,12 @@ namespace OrderCore.Api.Modules.AuditLogs;
 /// </summary>
 public static class AuditLogsDependencyInjection
 {
-    public static IServiceCollection AddAuditLogsModule(this IServiceCollection services)
+    public static IServiceCollection AddAuditLogsModule(this IServiceCollection services, IConfiguration configuration)
     {
-        // Singleton: the in-memory store (section 40) must survive across
-        // requests for the duration of the process. Swap for a Scoped
-        // registration when this becomes an EF-backed repository.
-        services.AddSingleton<IAuditLogRepository, InMemoryAuditLogRepository>();
+        services.AddDbContext<AuditLogsDbContext>(options =>
+            options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
+
+        services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<ListAuditLogsUseCase>();
 

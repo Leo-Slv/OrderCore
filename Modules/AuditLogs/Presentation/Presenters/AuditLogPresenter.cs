@@ -12,6 +12,10 @@ public static class AuditLogPresenter
     {
         Page = request.Page,
         PageSize = request.PageSize,
+        EntityName = request.EntityName,
+        EntityId = request.EntityId,
+        UserId = request.UserId,
+        Action = request.Action,
     };
 
     public static AuditLogResponse ToResponse(AuditLogOutput output) => new()

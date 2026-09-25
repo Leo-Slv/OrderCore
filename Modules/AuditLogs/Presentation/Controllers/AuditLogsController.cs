@@ -11,7 +11,8 @@ namespace OrderCore.Api.Modules.AuditLogs.Presentation.Controllers;
 
 /// <summary>
 /// Thin endpoint delegating to <see cref="ListAuditLogsUseCase"/> (section
-/// 39). Admin-only: an audit trail readable by anyone is not one worth
+/// 39). Filtering by entity name + id gives one entity's timeline (the
+/// order detail screen), by user id everything one actor did. Admin-only: an audit trail readable by anyone is not one worth
 /// keeping.
 /// </summary>
 [ApiController]

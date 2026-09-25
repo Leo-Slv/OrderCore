@@ -29,7 +29,7 @@ builder.Services.AddCatalogModule(builder.Configuration);
 builder.Services.AddInventoryModule(builder.Configuration);
 builder.Services.AddOrdersModule(builder.Configuration);
 builder.Services.AddPaymentsModule(builder.Configuration);
-builder.Services.AddAuditLogsModule();
+builder.Services.AddAuditLogsModule(builder.Configuration);
 builder.Services.AddIdentityModule(builder.Configuration);
 
 // Every controller declares only its own segment (e.g. [Route("orders")])
