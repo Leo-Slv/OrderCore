@@ -64,12 +64,13 @@ public sealed class SettlementAndCaptureUseCaseTests
             _payments,
             provider,
             _outbox,
-            new RequestRefundUseCase(_payments, provider, _outbox, new FakeAuditLogService(), TimeProvider.System),
+            new RequestRefundUseCase(_payments, provider, _outbox, new FakeAuditLogService(), TestMetrics.Payments, TimeProvider.System),
             new FakeAuditLogService(),
+            TestMetrics.Payments,
             TimeProvider.System);
 
     private CapturePaymentUseCase Capture(StubPaymentProvider provider) =>
-        new(_payments, provider, _outbox, new FakeAuditLogService(), TimeProvider.System);
+        new(_payments, provider, _outbox, new FakeAuditLogService(), TestMetrics.Payments, TimeProvider.System);
 
     [Fact]
     public async Task Settling_an_authorized_payment_voids_it()

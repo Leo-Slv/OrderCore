@@ -17,7 +17,7 @@ public sealed class CreatePaymentUseCaseTests
     public async Task ExecuteAsync_authorizes_and_enqueues_PaymentAuthorized_when_the_provider_succeeds()
     {
         var outbox = new FakePaymentsOutbox();
-        var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: true), outbox, new FakeAuditLogService(), TimeProvider.System);
+        var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: true), outbox, new FakeAuditLogService(), TestMetrics.Payments, TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(), CancellationToken.None);
 
@@ -29,7 +29,7 @@ public sealed class CreatePaymentUseCaseTests
     public async Task ExecuteAsync_fails_and_enqueues_PaymentFailed_when_the_provider_declines()
     {
         var outbox = new FakePaymentsOutbox();
-        var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: false), outbox, new FakeAuditLogService(), TimeProvider.System);
+        var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: false), outbox, new FakeAuditLogService(), TestMetrics.Payments, TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(), CancellationToken.None);
 
@@ -41,7 +41,7 @@ public sealed class CreatePaymentUseCaseTests
     public async Task ExecuteAsync_records_the_chosen_payment_method()
     {
         var payments = new FakePaymentRepository();
-        var useCase = new CreatePaymentUseCase(payments, new StubPaymentProvider(succeeds: true), new FakePaymentsOutbox(), new FakeAuditLogService(), TimeProvider.System);
+        var useCase = new CreatePaymentUseCase(payments, new StubPaymentProvider(succeeds: true), new FakePaymentsOutbox(), new FakeAuditLogService(), TestMetrics.Payments, TimeProvider.System);
         var command = Command(PaymentMethod.Pix);
 
         await useCase.ExecuteAsync(command, CancellationToken.None);

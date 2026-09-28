@@ -69,9 +69,9 @@ public sealed class OrderBackofficeUseCaseTests
         return order;
     }
 
-    private FulfilOrderUseCase Fulfil() => new(_orders, _payments, _auditLog, TimeProvider.System);
+    private FulfilOrderUseCase Fulfil() => new(_orders, _payments, _auditLog, TestMetrics.Orders, TimeProvider.System);
 
-    private CancelOrderUseCase Cancel() => new(_orders, _inventory, _payments, _auditLog, TimeProvider.System);
+    private CancelOrderUseCase Cancel() => new(_orders, _inventory, _payments, _auditLog, TestMetrics.Orders, TimeProvider.System);
 
     private ListOrdersUseCase ListOrders() => new(_orders, _customers, _payments);
 
@@ -231,9 +231,9 @@ public sealed class OrderBackofficeUseCaseTests
     {
         var order = await StoredOrderAsync(OrderStatus.PendingPayment);
         await Cancel().ExecuteAsync(new CancelOrderCommand(order.Id, "changed mind"), CancellationToken.None);
-        var confirm = new ConfirmOrderUseCase(_orders, _inventory, _auditLog, TimeProvider.System, NullLogger<ConfirmOrderUseCase>.Instance);
+        var confirm = new ConfirmOrderUseCase(_orders, _inventory, _auditLog, TestMetrics.Orders, TimeProvider.System, NullLogger<ConfirmOrderUseCase>.Instance);
         var fail = new MarkOrderPaymentFailedUseCase(
-            _orders, _inventory, _auditLog, TimeProvider.System, NullLogger<MarkOrderPaymentFailedUseCase>.Instance);
+            _orders, _inventory, _auditLog, TestMetrics.Orders, TimeProvider.System, NullLogger<MarkOrderPaymentFailedUseCase>.Instance);
 
         await confirm.Invoking(c => c.ExecuteAsync(order.Id, CancellationToken.None)).Should().NotThrowAsync();
         await fail.Invoking(f => f.ExecuteAsync(order.Id, "declined", CancellationToken.None)).Should().NotThrowAsync();

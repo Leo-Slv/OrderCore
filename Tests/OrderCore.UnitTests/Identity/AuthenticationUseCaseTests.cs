@@ -202,8 +202,8 @@ public sealed class AuthenticationUseCaseTests
         var created = await SeedAdmin().ExecuteAsync("admin@example.com", Password, CancellationToken.None);
         var createdAgain = await SeedAdmin().ExecuteAsync("other-admin@example.com", Password, CancellationToken.None);
 
-        created.Should().BeTrue();
-        createdAgain.Should().BeFalse();
+        created.Should().NotBeNull();
+        createdAgain.Should().BeNull();
         _accounts.Accounts.Should().ContainSingle(a => a.Role == UserRole.Admin && a.CustomerId == null);
     }
 

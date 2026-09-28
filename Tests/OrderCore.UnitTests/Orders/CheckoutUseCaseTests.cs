@@ -26,7 +26,7 @@ public sealed class CheckoutUseCaseTests
     }
 
     private CheckoutUseCase CreateUseCase() => new(
-        _orders, _catalog, _customers, _inventory, _payments, new FakeOrderNumberGenerator(), new FakeAuditLogService(), TimeProvider.System);
+        _orders, _catalog, _customers, _inventory, _payments, new FakeOrderNumberGenerator(), new FakeAuditLogService(), TestMetrics.Orders, TimeProvider.System);
 
     private CatalogProductSnapshot InStockProduct(decimal price = 50m, int stock = 10, string currency = "BRL")
     {

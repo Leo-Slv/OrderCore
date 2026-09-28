@@ -69,7 +69,7 @@ public sealed class EfStockItemRepositoryTests : IAsyncLifetime
         var reservationRepository = new EfInventoryReservationRepository(dbContext);
         var unitOfWork = new InventoryUnitOfWork(dbContext, stockItemRepository, reservationRepository, new NoOpDomainEventDispatcher(), TestOutboxes.Inventory(dbContext));
 
-        return new ReserveStockUseCase(stockItemRepository, reservationRepository, unitOfWork, new NoOpAuditLogService(), TimeProvider.System);
+        return new ReserveStockUseCase(stockItemRepository, reservationRepository, unitOfWork, new NoOpAuditLogService(), TestMetrics.Inventory, TimeProvider.System);
     }
 
     [Fact]

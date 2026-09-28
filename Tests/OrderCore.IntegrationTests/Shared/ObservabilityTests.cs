@@ -5,6 +5,8 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using OpenTelemetry;
+using OpenTelemetry.Logs;
 using OpenTelemetry.Trace;
 using Xunit;
 using static OrderCore.IntegrationTests.ApiDatabase;
@@ -21,6 +23,7 @@ public sealed class ObservabilityTests : IClassFixture<ApiDatabase>, IAsyncLifet
 {
     private readonly ApiDatabase _database;
     private readonly List<Activity> _spans = [];
+    private readonly CapturedLogs _logs = new();
     private WebApplicationFactory<Program> _factory = null!;
 
     public ObservabilityTests(ApiDatabase database)
@@ -31,7 +34,9 @@ public sealed class ObservabilityTests : IClassFixture<ApiDatabase>, IAsyncLifet
     public Task InitializeAsync()
     {
         _factory = _database.CreateFactory().WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
-            services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddInMemoryExporter(_spans))));
+            services
+                .ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddInMemoryExporter(_spans))
+                .ConfigureOpenTelemetryLoggerProvider(logging => logging.AddProcessor(_logs))));
         return Task.CompletedTask;
     }
 
@@ -101,6 +106,25 @@ public sealed class ObservabilityTests : IClassFixture<ApiDatabase>, IAsyncLifet
             s => s.Source.Name == "Npgsql" && s.ParentSpanId == consumer.SpanId, "the confirmation is saved inside the consumer span");
     }
 
+    [Fact]
+    public async Task A_checkout_logs_carry_the_order_id_and_never_the_customer_name_or_email()
+    {
+        var admin = await SignInAsAdminAsync(_factory);
+        var (customer, _) = await SignUpCustomerAsync(_factory, name: "Zelda Privatename");
+        var addressId = await AddAddressAsync(customer);
+        var product = await CreatePublishedProductAsync(admin, "Discreet Desk", 70m);
+        await _database.SeedStockAsync(product.Id, quantity: 3);
+
+        var checkout = await CheckoutAsync(customer, addressId, product.Id, quantity: 1, $"logged-{Guid.NewGuid():N}");
+        var orderId = (await checkout.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        await PollOrderUntilAsync(admin, orderId, status => status == "Confirmed");
+
+        _logs.Lines.Should().Contain(
+            line => line.Attributes.Any(a => a.Key == "order.id" && (string?)a.Value == orderId.ToString()),
+            "the confirmation's logs are tagged with the order they are about");
+        _logs.Lines.Should().NotContain(line => line.Text.Contains("Privatename") || line.Text.Contains("@example.com"));
+    }
+
     private static string TraceIdOf(HttpResponseMessage response)
     {
         response.Headers.TryGetValues("traceparent", out var values).Should().BeTrue("every response carries its traceparent");
@@ -133,5 +157,35 @@ public sealed class ObservabilityTests : IClassFixture<ApiDatabase>, IAsyncLifet
         }
 
         throw new TimeoutException($"No matching span was exported for trace {traceId}.");
+    }
+
+    /// <summary>
+    /// Copies each log line as it is written (after the ids were added):
+    /// OpenTelemetry reuses its log records once exported.
+    /// </summary>
+    private sealed class CapturedLogs : BaseProcessor<LogRecord>
+    {
+        private readonly List<(string Text, List<KeyValuePair<string, object?>> Attributes)> _lines = [];
+
+        public List<(string Text, List<KeyValuePair<string, object?>> Attributes)> Lines
+        {
+            get
+            {
+                lock (_lines)
+                {
+                    return [.. _lines];
+                }
+            }
+        }
+
+        public override void OnEnd(LogRecord data)
+        {
+            var attributes = data.Attributes?.ToList() ?? [];
+            var text = string.Join(" ", [data.FormattedMessage ?? data.Body ?? string.Empty, .. attributes.Select(a => a.Value?.ToString())]);
+            lock (_lines)
+            {
+                _lines.Add((text, attributes));
+            }
+        }
     }
 }
