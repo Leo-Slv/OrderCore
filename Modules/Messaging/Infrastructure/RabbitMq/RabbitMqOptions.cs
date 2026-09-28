@@ -50,6 +50,9 @@ public sealed class MessagingOptions
     /// </summary>
     public TimeSpan PublishTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>How long the client waits between attempts to recover a lost connection.</summary>
+    public TimeSpan ConnectionRecoveryInterval { get; set; } = TimeSpan.FromSeconds(5);
+
     public ushort ConsumerPrefetch { get; set; } = 10;
 
     /// <summary>How long startup waits for the broker before the API refuses to start.</summary>

@@ -9,36 +9,45 @@ namespace OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
 /// before anything else runs; the client recovers it automatically after a
 /// network failure, and callers reopen their channels when they find them
 /// closed.
+/// <para>
+/// Once opened, the connection is never replaced: while it is recovering it
+/// is not open, and a caller asking for a channel then gets an error and
+/// retries later. Replacing it would throw away the recovery — and with it
+/// the consumers, which the client subscribes again only on the connection
+/// it recovers.
+/// </para>
 /// </summary>
 public sealed class RabbitMqConnection : IAsyncDisposable
 {
     private readonly RabbitMqOptions _options;
+    private readonly MessagingOptions _messaging;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private IConnection? _connection;
 
-    public RabbitMqConnection(IOptions<RabbitMqOptions> options)
+    public RabbitMqConnection(IOptions<RabbitMqOptions> options, IOptions<MessagingOptions> messaging)
     {
         _options = options.Value;
+        _messaging = messaging.Value;
     }
 
+    /// <summary>
+    /// The connection, opened on first use. It may be recovering (not open)
+    /// after a network failure; channels asked for meanwhile fail, and the
+    /// caller tries again later.
+    /// </summary>
     public async Task<IConnection> GetAsync(CancellationToken cancellationToken)
     {
-        if (_connection is { IsOpen: true } open)
+        if (_connection is { } existing)
         {
-            return open;
+            return existing;
         }
 
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            if (_connection is { IsOpen: true } opened)
+            if (_connection is { } opened)
             {
                 return opened;
-            }
-
-            if (_connection is not null)
-            {
-                await _connection.DisposeAsync();
             }
 
             var factory = new ConnectionFactory
@@ -50,7 +59,7 @@ public sealed class RabbitMqConnection : IAsyncDisposable
                 Password = _options.Password,
                 ClientProvidedName = "ordercore-api",
                 AutomaticRecoveryEnabled = true,
-                NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
+                NetworkRecoveryInterval = _messaging.ConnectionRecoveryInterval,
             };
 
             _connection = await factory.CreateConnectionAsync(cancellationToken);
