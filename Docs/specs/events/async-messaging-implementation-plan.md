@@ -241,3 +241,68 @@ One or more per stage, e.g.:
 5. `feat(messaging): failed messages in the backoffice`
 6. `test: messaging end to end over HTTP and RabbitMQ`
 7. `docs: ...` (diagrams separately from the rest)
+
+
+## Execution notes (what differed from this plan)
+
+- **Stage 1 (foundation).** `FailedMessage` keeps the contract version as
+  `ContractVersion`, since `Version` is the aggregate's concurrency token.
+  `MessagingOptions` (retry schedule, poll interval, prefetch) is not
+  bound from configuration: the schedule is a decision, and only the test
+  host shortens it. The test host gets its own virtual host on one shared
+  RabbitMQ container per run (created through the management API), so
+  hosts running at the same time never consume each other's messages.
+  The pipeline is tested with a test module of its own (outbox, inbox,
+  handler) rather than a real one.
+- **Stage 2 (Payments).** Several modules publish, so a single `IOutbox`
+  registration would collide: each publishing module has its own outbox
+  interface in `Application/Contracts` (`IPaymentsOutbox : IOutbox`),
+  implemented over `OutboxWriter<TDbContext>` — decided with the user. The
+  rename migration was written by hand (EF scaffolded a drop and create),
+  converting pending rows' CLR type names to contract names.
+  `PaymentRequested` is registered but not published today: the synchronous
+  fake provider authorizes in the same call and only publishes
+  `PaymentAuthorized`/`PaymentFailed`.
+- **Stage 3 (Orders, Inventory).** The events keep the domain event's id.
+  Stock alerts are raised on entering low or out of stock from any change
+  of what is available — including out of stock → low after a small
+  receipt, and raising the reorder level — so `StockItem.TryReserve` and
+  `Release` gained a `now`, and `ExpireReservationUseCase` a
+  `TimeProvider`. `InventoryStockMovementRecorded` gained the reservation's
+  `OrderId`. `InventoryUnitOfWork` collects the domain events before the
+  save (to write them to the outbox in it) and discards unsaved outbox rows
+  when the save fails, since `ReserveStockUseCase` retries in the same
+  scope.
+- **Stage 4 (timeline).** One projector class handles all 18 contracts
+  (registered once: `AddIntegrationEventConsumer` now uses `TryAddScoped`).
+  Details are a JSON object of strings (`amount`/`currency`, `reason`,
+  `productId`/`quantity`), which OpenAPI describes as a string map.
+- **Stage 5 (failed messages).** `FailedMessage` gained `ResolvedAt`
+  (migration `AddFailedMessageResolution`). Replay publishes with
+  `mandatory: true`, so a consumer whose queue is gone makes the replay
+  fail instead of losing the message.
+- **Bugs found on the way.**
+  - A publish whose confirmation never came (a channel the broker closed
+    mid-publish) could stall the relay for good: publishes now time out
+    (`PublishTimeout`, 10 s) and count as failures.
+  - `RabbitMqConnection` replaced a connection that wasn't open with a new
+    one, throwing away the client's automatic recovery — and the consumers,
+    which are subscribed again only on the recovered connection. After a
+    broker blip no payment outcome was handled and orders stayed
+    `PendingPayment`. The connection is now opened once and left to the
+    recovery; the end-to-end test that drops the API's connections fails on
+    the old code.
+  - The broker-refusal test could lose its message: restoring the exchange
+    takes two steps (exchange, then binding), and a publish landing in
+    between is accepted and dropped as unroutable. The test now checks what
+    the relay guarantees (the row is published once the broker accepts it).
+  - A README command had been mangled by shell expansion (`$(openssl …)`),
+    fixed with the docs.
+- **Stage 6.** Duplicate delivery and poison → replay were already covered
+  by stages 4 and 5; this stage added the trace, duplicate-authorization
+  and broker-outage tests over the real storefront flow.
+- **Not done / follow-ups.** One API instance is assumed (the relay would
+  need `FOR UPDATE SKIP LOCKED` to run on several). Stock alerts and
+  `payments.payment-requested` have no consumer yet. Real consumer spans and
+  export are the Observability feature's; this feature only carries the
+  context.
