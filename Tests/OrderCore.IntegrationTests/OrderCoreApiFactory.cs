@@ -48,6 +48,7 @@ public class OrderCoreApiFactory : WebApplicationFactory<Program>
             ];
             options.RelayPollInterval = TimeSpan.FromMilliseconds(100);
             options.PublishTimeout = TimeSpan.FromSeconds(1);
+            options.ConnectionRecoveryInterval = TimeSpan.FromSeconds(1);
         }));
     }
 }

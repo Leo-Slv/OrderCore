@@ -171,7 +171,7 @@ public sealed class ApiDatabase : IAsyncLifetime
     }
 
     public static Task<HttpResponseMessage> CheckoutAsync(
-        HttpClient customer, Guid addressId, Guid productId, int quantity, string idempotencyKey)
+        HttpClient customer, Guid addressId, Guid productId, int quantity, string idempotencyKey, string? traceParent = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/orders/checkout")
         {
@@ -184,6 +184,11 @@ public sealed class ApiDatabase : IAsyncLifetime
             }),
         };
         request.Headers.Add("Idempotency-Key", idempotencyKey);
+        if (traceParent is not null)
+        {
+            request.Headers.Add("traceparent", traceParent);
+        }
+
         return customer.SendAsync(request);
     }
 

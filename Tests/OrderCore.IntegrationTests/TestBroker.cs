@@ -1,6 +1,12 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 using RabbitMQ.Client;
 using Testcontainers.RabbitMq;
 
@@ -37,12 +43,7 @@ public static class TestBroker
         await Started.Value;
         var name = $"test-{Guid.NewGuid():N}";
 
-        using var management = new HttpClient
-        {
-            BaseAddress = new Uri($"http://{Container.Hostname}:{Container.GetMappedPublicPort(ManagementPort)}/api/"),
-        };
-        management.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Username}:{Password}")));
+        using var management = Management();
 
         // The management API answers a little after the broker itself is up.
         for (var attempt = 1; ; attempt++)
@@ -62,6 +63,54 @@ public static class TestBroker
                 $"permissions/{name}/{Username}", new { configure = ".*", write = ".*", read = ".*" }))
             .EnsureSuccessStatusCode();
         return name;
+    }
+
+    /// <summary>
+    /// Drops every connection to <paramref name="virtualHost"/> from the
+    /// broker's side, as a network failure would; returns how many it closed.
+    /// </summary>
+    public static async Task<int> CloseConnectionsAsync(string virtualHost)
+    {
+        using var management = Management();
+        var connections = await management.GetFromJsonAsync<List<JsonElement>>($"vhosts/{virtualHost}/connections") ?? [];
+        foreach (var connection in connections)
+        {
+            var name = Uri.EscapeDataString(connection.GetProperty("name").GetString()!);
+            using var request = new HttpRequestMessage(HttpMethod.Delete, $"connections/{name}");
+            request.Headers.Add("X-Reason", "simulated broker outage");
+            (await management.SendAsync(request)).EnsureSuccessStatusCode();
+        }
+
+        return connections.Count;
+    }
+
+    private static HttpClient Management()
+    {
+        var management = new HttpClient
+        {
+            BaseAddress = new Uri($"http://{Container.Hostname}:{Container.GetMappedPublicPort(ManagementPort)}/api/"),
+        };
+        management.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Username}:{Password}")));
+        return management;
+    }
+
+    /// <summary>
+    /// Publishes an already-published outbox row again into the host's
+    /// virtual host, as the broker does on a redelivery (at least once).
+    /// </summary>
+    public static async Task RedeliverAsync(WebApplicationFactory<Program> factory, OutboxMessage row)
+    {
+        var broker = factory.Services.GetRequiredService<IOptions<RabbitMqOptions>>().Value;
+        await using var connection = await ConnectAsync(broker.VirtualHost);
+        await using var channel = await connection.CreateChannelAsync(
+            new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true));
+        await channel.BasicPublishAsync(
+            broker.Exchange,
+            IntegrationEventRegistry.RoutingKey(row.Type, row.Version),
+            mandatory: false,
+            new BasicProperties { MessageId = row.Id.ToString(), DeliveryMode = DeliveryModes.Persistent },
+            MessageEnvelope.FromOutbox(row).ToBytes());
     }
 
     /// <summary>A connection of the test's own, to inspect or publish into a host's virtual host.</summary>

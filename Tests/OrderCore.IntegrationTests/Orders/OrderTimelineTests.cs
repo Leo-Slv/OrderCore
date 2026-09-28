@@ -2,14 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
-using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
-using OrderCore.Api.Shared.Infrastructure.Messaging;
-using RabbitMQ.Client;
 using Xunit;
 using static OrderCore.IntegrationTests.ApiDatabase;
 using OrderEvents = OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
@@ -100,8 +95,8 @@ public sealed class OrderTimelineTests : IClassFixture<ApiDatabase>
         var before = await TimelineUntilAsync(admin, orderId, entries => entries.Any(e => e.GetProperty("type").GetString() == "orders.order-confirmed"));
 
         // The broker delivers the same two events again (at-least-once delivery).
-        await RedeliverAsync(factory, authorized);
-        await RedeliverAsync(factory, created);
+        await TestBroker.RedeliverAsync(factory, authorized);
+        await TestBroker.RedeliverAsync(factory, created);
         await Task.Delay(TimeSpan.FromSeconds(1));
 
         var after = await TimelineAsync(admin, orderId);
@@ -132,20 +127,5 @@ public sealed class OrderTimelineTests : IClassFixture<ApiDatabase>
 
             await Task.Delay(TimeSpan.FromMilliseconds(200));
         }
-    }
-
-    /// <summary>Publishes an already-published outbox row again, as the broker would on a redelivery.</summary>
-    private static async Task RedeliverAsync(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> factory, OutboxMessage row)
-    {
-        var broker = factory.Services.GetRequiredService<IOptions<RabbitMqOptions>>().Value;
-        await using var connection = await TestBroker.ConnectAsync(broker.VirtualHost);
-        await using var channel = await connection.CreateChannelAsync(
-            new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true));
-        await channel.BasicPublishAsync(
-            broker.Exchange,
-            IntegrationEventRegistry.RoutingKey(row.Type, row.Version),
-            mandatory: false,
-            new BasicProperties { MessageId = row.Id.ToString(), DeliveryMode = DeliveryModes.Persistent },
-            MessageEnvelope.FromOutbox(row).ToBytes());
     }
 }
