@@ -72,7 +72,20 @@ public static class TestBroker
     public static async Task<int> CloseConnectionsAsync(string virtualHost)
     {
         using var management = Management();
-        var connections = await management.GetFromJsonAsync<List<JsonElement>>($"vhosts/{virtualHost}/connections") ?? [];
+
+        // The management API lists a new connection only once its stats are
+        // collected, a few seconds after it opened.
+        List<JsonElement> connections = [];
+        for (var attempt = 0; attempt < 60 && connections.Count == 0; attempt++)
+        {
+            if (attempt > 0)
+            {
+                await Task.Delay(250);
+            }
+
+            connections = await management.GetFromJsonAsync<List<JsonElement>>($"vhosts/{virtualHost}/connections") ?? [];
+        }
+
         foreach (var connection in connections)
         {
             var name = Uri.EscapeDataString(connection.GetProperty("name").GetString()!);
