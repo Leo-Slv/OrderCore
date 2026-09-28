@@ -1,17 +1,23 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Identity.Domain.Entities;
 using OrderCore.Api.Modules.Identity.Infrastructure.Security;
+using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
 
 namespace OrderCore.IntegrationTests;
 
 /// <summary>
-/// The real API host with the setting every test host needs: a JWT signing
-/// key (the API refuses to start without one). Tests needing more (a
-/// database, a seed admin, a fake payment mode) add it with
+/// The real API host with what every test host needs: a JWT signing key and
+/// a message broker (the API refuses to start without either). Every host
+/// built from it gets its own virtual host on the shared
+/// <see cref="TestBroker"/>, and retries measured in milliseconds instead of
+/// minutes (same five attempts) so failure paths run in seconds. Tests
+/// needing more (a database, a seed admin, a fake payment mode) add it with
 /// <c>WithWebHostBuilder</c>, which keeps this configuration.
 /// </summary>
 public class OrderCoreApiFactory : WebApplicationFactory<Program>
@@ -21,6 +27,27 @@ public class OrderCoreApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("Jwt:SigningKey", SigningKey);
+
+        // Blocking is fine while the host is being built; Task.Run keeps it
+        // off the test framework's synchronization context.
+        var virtualHost = Task.Run(TestBroker.CreateVirtualHostAsync).GetAwaiter().GetResult();
+        builder.UseSetting("RabbitMq:Host", TestBroker.Host);
+        builder.UseSetting("RabbitMq:Port", TestBroker.Port.ToString(CultureInfo.InvariantCulture));
+        builder.UseSetting("RabbitMq:VirtualHost", virtualHost);
+        builder.UseSetting("RabbitMq:Username", TestBroker.Username);
+        builder.UseSetting("RabbitMq:Password", TestBroker.Password);
+
+        builder.ConfigureTestServices(services => services.Configure<MessagingOptions>(options =>
+        {
+            options.RetryDelays =
+            [
+                TimeSpan.FromMilliseconds(50),
+                TimeSpan.FromMilliseconds(100),
+                TimeSpan.FromMilliseconds(150),
+                TimeSpan.FromMilliseconds(200),
+            ];
+            options.RelayPollInterval = TimeSpan.FromMilliseconds(100);
+        }));
     }
 }
 

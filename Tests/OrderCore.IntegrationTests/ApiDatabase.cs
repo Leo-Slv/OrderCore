@@ -15,6 +15,7 @@ using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
@@ -56,6 +57,7 @@ public sealed class ApiDatabase : IAsyncLifetime
         await MigrateAsync<PaymentsDbContext>(options => new(options));
         await MigrateAsync<IdentityDbContext>(options => new(options));
         await MigrateAsync<AuditLogsDbContext>(options => new(options));
+        await MigrateAsync<MessagingDbContext>(options => new(options));
     }
 
     public async Task DisposeAsync() => await _postgres.DisposeAsync();

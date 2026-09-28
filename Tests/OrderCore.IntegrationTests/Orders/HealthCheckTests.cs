@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
@@ -34,11 +35,22 @@ public sealed class HealthCheckTests : IClassFixture<OrderCoreApiFactory>
     [Fact]
     public void Api_refuses_to_start_without_a_jwt_signing_key()
     {
-        using var withoutKey = new WebApplicationFactory<Program>();
+        using var withoutKey = new OrderCoreApiFactory().WithWebHostBuilder(builder => builder.UseSetting("Jwt:SigningKey", string.Empty));
 
         var start = () => withoutKey.CreateClient();
 
         start.Should().Throw<Microsoft.Extensions.Options.OptionsValidationException>()
             .Which.Message.Should().Contain("Jwt:SigningKey");
+    }
+
+    [Fact]
+    public void Api_refuses_to_start_without_the_broker_password()
+    {
+        using var withoutPassword = new OrderCoreApiFactory().WithWebHostBuilder(builder => builder.UseSetting("RabbitMq:Password", string.Empty));
+
+        var start = () => withoutPassword.CreateClient();
+
+        start.Should().Throw<Microsoft.Extensions.Options.OptionsValidationException>()
+            .Which.Message.Should().Contain("RabbitMq:Password");
     }
 }
