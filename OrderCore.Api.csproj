@@ -57,6 +57,15 @@
          decision 1): outbox relay, retries, dead-lettering and the inbox are
          written in the project. -->
     <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
+    <!-- Observability (Docs/specs/observability/observability.md): OpenTelemetry
+         traces, metrics and logs, exported over OTLP (Grafana LGTM in
+         docker compose). Nothing is exported when no endpoint is configured. -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.19.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.19.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
+    <PackageReference Include="Npgsql.OpenTelemetry" Version="10.0.3" />
   </ItemGroup>
 
 </Project>

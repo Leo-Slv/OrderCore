@@ -11,11 +11,17 @@ using OrderCore.Api.Shared;
 using OrderCore.Api.Shared.Presentation.Authentication;
 using OrderCore.Api.Shared.Presentation.Conventions;
 using OrderCore.Api.Shared.Presentation.Cors;
+using OrderCore.Api.Shared.Infrastructure.Observability;
 using OrderCore.Api.Shared.Presentation.ExceptionHandling;
+using OrderCore.Api.Shared.Presentation.Observability;
 using OrderCore.Api.Shared.Presentation.OpenApi;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Traces, metrics and logs (OpenTelemetry, exported over OTLP when an
+// endpoint is configured) — Docs/specs/observability/observability.md.
+builder.AddOrderCoreObservability();
 
 // Endpoints stay thin and delegate to the Application layer (section 39).
 // Each module registers its own services through a dedicated extension
@@ -55,8 +61,9 @@ builder.Services
     .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // Business failures (not found, rule violated, conflict) reach the client
-// as ProblemDetails with a stable "code" — see ApiExceptionHandler.
-builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = ProblemDetailsDefaults.AddDefaultCode);
+// as ProblemDetails with a stable "code" — see ApiExceptionHandler — and
+// the trace id to look the request up with.
+builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = TraceResponseExtensions.Customize);
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddStorefrontCors(builder.Configuration);
 builder.Services.AddHealthChecks();
@@ -74,6 +81,8 @@ builder.Services.AddOpenApi(options =>
 
 var app = builder.Build();
 
+// Every response names its trace (W3C traceparent header).
+app.UseTraceResponseHeader();
 app.UseExceptionHandler();
 
 // Empty-bodied error responses (unknown route 404, the authorization
