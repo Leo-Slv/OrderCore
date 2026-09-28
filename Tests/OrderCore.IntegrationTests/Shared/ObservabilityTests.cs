@@ -75,6 +75,32 @@ public sealed class ObservabilityTests : IClassFixture<ApiDatabase>, IAsyncLifet
         TraceIdOf(response).Should().Be(callerTrace.ToString());
     }
 
+    [Fact]
+    public async Task One_checkout_is_one_trace_through_the_broker_down_to_the_confirmation_save()
+    {
+        var admin = await SignInAsAdminAsync(_factory);
+        var (customer, _) = await SignUpCustomerAsync(_factory);
+        var addressId = await AddAddressAsync(customer);
+        var product = await CreatePublishedProductAsync(admin, "Observed Oven", 90m);
+        await _database.SeedStockAsync(product.Id, quantity: 3);
+        var traceId = ActivityTraceId.CreateRandom();
+
+        var checkout = await CheckoutAsync(
+            customer, addressId, product.Id, quantity: 1, $"traced-{Guid.NewGuid():N}", $"00-{traceId}-{ActivitySpanId.CreateRandom()}-01");
+        var orderId = (await checkout.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        await PollOrderUntilAsync(admin, orderId, status => status == "Confirmed");
+
+        var consumer = await SpanAsync(traceId.ToString(), s =>
+            s.Kind == ActivityKind.Consumer && (string?)s.GetTagItem("messaging.destination.name") == "orders.payment-outcomes");
+        var producer = Spans(traceId.ToString()).Single(s => s.SpanId == consumer.ParentSpanId);
+        producer.Kind.Should().Be(ActivityKind.Producer);
+        producer.GetTagItem("messaging.rabbitmq.destination.routing_key").Should().Be("payments.payment-authorized.v1");
+        consumer.GetTagItem("messaging.system").Should().Be("rabbitmq");
+        consumer.GetTagItem("ordercore.messaging.attempt").Should().Be(1);
+        Spans(traceId.ToString()).Should().Contain(
+            s => s.Source.Name == "Npgsql" && s.ParentSpanId == consumer.SpanId, "the confirmation is saved inside the consumer span");
+    }
+
     private static string TraceIdOf(HttpResponseMessage response)
     {
         response.Headers.TryGetValues("traceparent", out var values).Should().BeTrue("every response carries its traceparent");
@@ -90,19 +116,22 @@ public sealed class ObservabilityTests : IClassFixture<ApiDatabase>, IAsyncLifet
     }
 
     /// <summary>The server span is exported when it ends, just after the response went out.</summary>
-    private async Task<Activity> ServerSpanAsync(string traceId)
+    private Task<Activity> ServerSpanAsync(string traceId) => SpanAsync(traceId, s => s.Kind == ActivityKind.Server);
+
+    /// <summary>Spans are exported when they end, so a span can show up a moment after what it did.</summary>
+    private async Task<Activity> SpanAsync(string traceId, Func<Activity, bool> match)
     {
-        for (var attempt = 0; attempt < 50; attempt++)
+        for (var attempt = 0; attempt < 100; attempt++)
         {
-            var server = Spans(traceId).FirstOrDefault(s => s.Kind == ActivityKind.Server);
-            if (server is not null)
+            var span = Spans(traceId).FirstOrDefault(match);
+            if (span is not null)
             {
-                return server;
+                return span;
             }
 
             await Task.Delay(100);
         }
 
-        throw new TimeoutException($"No server span was exported for trace {traceId}.");
+        throw new TimeoutException($"No matching span was exported for trace {traceId}.");
     }
 }

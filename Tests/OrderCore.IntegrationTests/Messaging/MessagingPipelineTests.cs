@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -11,8 +12,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
+using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 using OrderCore.Api.Shared.Application.Messaging;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
+using OpenTelemetry.Trace;
 using RabbitMQ.Client;
 using Xunit;
 
@@ -84,7 +87,7 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
     {
         var failing = SomethingHappened.New("never works", fail: true);
         var next = SomethingHappened.New("after the failing one");
-        using var request = new Activity("test-request").Start();
+        using var request = new Activity("test-request") { ActivityTraceFlags = ActivityTraceFlags.Recorded }.Start();
 
         await _host.EnqueueAsync(failing);
         await _host.EnqueueAsync(next);
@@ -98,7 +101,14 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
         failed.Single().Type.Should().Be(SomethingHappened.Contract);
         failed.Single().Status.Should().Be("Pending");
         failed.Single().LastError.Should().Contain("handler refused");
-        failed.Single().TraceParent.Should().Be(request.Id, "the backoffice can find the trace that led to the failure");
+        failed.Single().TraceParent.Should().Contain(request.TraceId.ToString(), "the backoffice can find the trace that led to the failure");
+
+        // Each attempt is one consumer span in that trace, and each one failed.
+        var attempts = _host.SpansOf(request.TraceId)
+            .Where(s => s.Kind == ActivityKind.Consumer && (string?)s.GetTagItem("messaging.message.id") == failing.EventId.ToString())
+            .ToList();
+        attempts.Select(s => (int)s.GetTagItem(MessagingTelemetry.AttemptTag)!).Should().BeEquivalentTo([1, 2, 3, 4, 5]);
+        attempts.Should().OnlyContain(s => s.Status == ActivityStatusCode.Error);
         _host.Probe.AttemptsOf(failing.EventId).Should().Be(5);
         (await _host.HandledAsync(failing.EventId)).Should().BeEmpty();
     }
@@ -115,6 +125,8 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
             var row = await EventuallyAsync(() => _host.OutboxRowAsync(happened.EventId), r => r.PublishAttempts > 0);
             row.SentAt.Should().BeNull();
             row.LastError.Should().NotBeNullOrEmpty();
+            // The backlog gauge shows what waits for the broker (measured at the start of each poll).
+            await EventuallyAsync(() => Task.FromResult(_host.PendingInOutbox("tests")), pending => pending > 0);
 
             await _host.RestoreExchangeAsync();
 
@@ -226,6 +238,44 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
 
         public HttpClient CreateAdminClient() => _factory.CreateAdminClient();
 
+        private readonly List<Activity> _spans = [];
+
+        public List<Activity> SpansOf(ActivityTraceId traceId)
+        {
+            lock (_spans)
+            {
+                return _spans.Where(s => s.TraceId == traceId).ToList();
+            }
+        }
+
+        /// <summary>What this host's outbox backlog gauge reports for <paramref name="module"/> right now.</summary>
+        public long PendingInOutbox(string module)
+        {
+            var meterFactory = _factory.Services.GetRequiredService<IMeterFactory>();
+            long pending = -1;
+            using var listener = new MeterListener();
+            listener.InstrumentPublished = (instrument, l) =>
+            {
+                if (instrument.Meter.Scope == meterFactory && instrument.Name == "ordercore.messaging.outbox.pending")
+                {
+                    l.EnableMeasurementEvents(instrument);
+                }
+            };
+            listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+            {
+                foreach (var tag in tags)
+                {
+                    if (tag.Key == "ordercore.module" && (string?)tag.Value == module)
+                    {
+                        pending = value;
+                    }
+                }
+            });
+            listener.Start();
+            listener.RecordObservableInstruments();
+            return pending;
+        }
+
         public async Task InitializeAsync()
         {
             await _database.InitializeAsync();
@@ -243,6 +293,7 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
                 services.AddIntegrationEvent<SomethingHappened>(SomethingHappened.Contract, 1);
                 services.AddOutboxSource<TestModuleDbContext>();
                 services.AddIntegrationEventConsumer<SomethingHappened, RecordingHandler, TestModuleDbContext>(Queue);
+                services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddInMemoryExporter(_spans));
             }));
 
             _broker = _factory.Services.GetRequiredService<IOptions<RabbitMqOptions>>().Value;
