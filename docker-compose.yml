@@ -4,7 +4,8 @@ networks:
 
 services:
   # Ambiente local: OrderCore + PostgreSQL + RabbitMQ (mensageria
-  # assíncrona entre módulos, Docs/specs/events/async-messaging.md).
+  # assíncrona entre módulos, Docs/specs/events/async-messaging.md) +
+  # Grafana LGTM (observabilidade).
   # Redis entra no compose somente quando um módulo passar a depender
   # dele de fato, não antecipadamente.
   postgres:
@@ -54,6 +55,22 @@ services:
     networks:
       - ordercore-net
 
+  # Observability backend (Docs/specs/observability/observability.md):
+  # OpenTelemetry collector + Tempo (traces), Loki (logs), Prometheus
+  # (metrics) and Grafana in one container, with its data in a volume.
+  # Grafana: http://localhost:3001 (3000 is the storefront).
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: ordercore-otel-lgtm
+    ports:
+      - "3001:3000"   # Grafana
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ordercore-otel-lgtm-data:/data
+    networks:
+      - ordercore-net
+
   api:
     build:
       context: .
@@ -64,6 +81,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      otel-lgtm:
+        condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__OrderCoreDb: "Host=postgres;Port=5432;Database=ordercore;Username=ordercore;Password=ordercore"
@@ -75,6 +94,7 @@ services:
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env (see .env.example)}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env (see .env.example)}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
     ports:
       - "8080:8080"
     networks:
@@ -83,3 +103,4 @@ services:
 volumes:
   ordercore-postgres-data:
   ordercore-rabbitmq-data:
+  ordercore-otel-lgtm-data:
