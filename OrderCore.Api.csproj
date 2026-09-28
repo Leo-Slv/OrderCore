@@ -52,6 +52,11 @@
          its JsonWebTokenHandler is also what issues them (no ASP.NET Core
          Identity, no external identity provider). -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+    <!-- Messaging module: the official RabbitMQ client, used directly (no
+         messaging framework — Docs/specs/events/async-messaging.md,
+         decision 1): outbox relay, retries, dead-lettering and the inbox are
+         written in the project. -->
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
   </ItemGroup>
 
 </Project>
