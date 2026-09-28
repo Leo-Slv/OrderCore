@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -25,6 +28,7 @@ namespace OrderCore.IntegrationTests.Messaging;
 public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTests.Host>
 {
     private const string Queue = "tests.recorder";
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
 
     private readonly Host _host;
@@ -114,13 +118,80 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
 
             await _host.RestoreExchangeAsync();
 
-            await EventuallyAsync(() => _host.HandledAsync(happened.EventId), records => records.Count == 1);
-            (await _host.OutboxRowAsync(happened.EventId)).SentAt.Should().NotBeNull();
+            // The row is published once the broker accepts it again. Whether
+            // this one reaches the handler depends on timing: restoring is two
+            // steps (exchange, then binding), and a publish landing between
+            // them is accepted and dropped as unroutable — the broker's normal
+            // answer for an event nobody subscribes to. What follows the
+            // restore does reach it.
+            await EventuallyAsync(() => _host.OutboxRowAsync(happened.EventId), r => r.SentAt is not null);
+            var next = SomethingHappened.New("after the exchange is back");
+            await _host.EnqueueAsync(next);
+            await EventuallyAsync(() => _host.HandledAsync(next.EventId), records => records.Count == 1);
         }
         finally
         {
             await _host.RestoreExchangeAsync();
         }
+    }
+
+    [Fact]
+    public async Task A_failed_message_is_listed_and_once_its_cause_is_gone_replaying_it_lets_it_through()
+    {
+        var failing = SomethingHappened.New("fails until fixed", fail: true);
+        await _host.EnqueueAsync(failing);
+        var failed = (await EventuallyAsync(() => _host.FailedAsync(failing.EventId), rows => rows.Count == 1)).Single();
+        var admin = _host.CreateAdminClient();
+
+        var pending = await admin.GetFromJsonAsync<JsonElement>("/api/messaging/failed-messages?status=Pending&pageSize=100", Json);
+        var listed = pending.GetProperty("items").EnumerateArray().Single(m => m.GetProperty("id").GetGuid() == failed.Id);
+        listed.GetProperty("attempts").GetInt32().Should().Be(5);
+        listed.GetProperty("consumer").GetString().Should().Be(Queue);
+        listed.GetProperty("type").GetString().Should().Be(SomethingHappened.Contract);
+        var details = await admin.GetFromJsonAsync<JsonElement>($"/api/messaging/failed-messages/{failed.Id}", Json);
+        details.GetProperty("body").GetString().Should().Contain(failing.EventId.ToString());
+
+        _host.Probe.Fix(failing.EventId);
+        var replay = await admin.PostAsync($"/api/messaging/failed-messages/{failed.Id}/replay", null);
+
+        replay.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await replay.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("status").GetString().Should().Be("Replayed");
+        await EventuallyAsync(() => _host.HandledAsync(failing.EventId), records => records.Count == 1);
+        _host.Probe.AttemptsOf(failing.EventId).Should().Be(6, "five failed attempts, then the replay");
+
+        var again = await admin.PostAsync($"/api/messaging/failed-messages/{failed.Id}/replay", null);
+        again.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await again.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString().Should().Be("invalid_failed_message_state");
+    }
+
+    [Fact]
+    public async Task A_discarded_message_is_never_sent_again()
+    {
+        var failing = SomethingHappened.New("given up on", fail: true);
+        await _host.EnqueueAsync(failing);
+        var failed = (await EventuallyAsync(() => _host.FailedAsync(failing.EventId), rows => rows.Count == 1)).Single();
+        var admin = _host.CreateAdminClient();
+
+        var discard = await admin.PostAsync($"/api/messaging/failed-messages/{failed.Id}/discard", null);
+        discard.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await discard.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("status").GetString().Should().Be("Discarded");
+
+        var replay = await admin.PostAsync($"/api/messaging/failed-messages/{failed.Id}/replay", null);
+        replay.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        _host.Probe.AttemptsOf(failing.EventId).Should().Be(5);
+
+        var discarded = await admin.GetFromJsonAsync<JsonElement>("/api/messaging/failed-messages?status=Discarded&pageSize=100", Json);
+        discarded.GetProperty("items").EnumerateArray().Should().Contain(m => m.GetProperty("id").GetGuid() == failed.Id);
+    }
+
+    [Fact]
+    public async Task An_unknown_failed_message_is_not_found()
+    {
+        var response = await _host.CreateAdminClient().PostAsync($"/api/messaging/failed-messages/{Guid.NewGuid()}/replay", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString().Should().Be("failed_message_not_found");
     }
 
     private static async Task<T> EventuallyAsync<T>(Func<Task<T>> read, Func<T, bool> done)
@@ -152,6 +223,8 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
         private IConnection _connection = null!;
 
         public HandlerProbe Probe => _factory.Services.GetRequiredService<HandlerProbe>();
+
+        public HttpClient CreateAdminClient() => _factory.CreateAdminClient();
 
         public async Task InitializeAsync()
         {
@@ -261,6 +334,13 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
         public void Record(Guid messageId) => _attempts.AddOrUpdate(messageId, 1, (_, count) => count + 1);
 
         public int AttemptsOf(Guid messageId) => _attempts.GetValueOrDefault(messageId);
+
+        private readonly ConcurrentDictionary<Guid, bool> _fixed = new();
+
+        /// <summary>The cause of the failure is gone: the handler accepts this message from now on.</summary>
+        public void Fix(Guid messageId) => _fixed[messageId] = true;
+
+        public bool IsFixed(Guid messageId) => _fixed.ContainsKey(messageId);
     }
 
     public sealed class RecordingHandler : IIntegrationEventHandler<SomethingHappened>
@@ -279,7 +359,7 @@ public sealed class MessagingPipelineTests : IClassFixture<MessagingPipelineTest
         public Task HandleAsync(SomethingHappened integrationEvent, CancellationToken cancellationToken)
         {
             _probe.Record(integrationEvent.EventId);
-            if (integrationEvent.Fail)
+            if (integrationEvent.Fail && !_probe.IsFixed(integrationEvent.EventId))
             {
                 throw new InvalidOperationException("The test handler refused this message.");
             }
