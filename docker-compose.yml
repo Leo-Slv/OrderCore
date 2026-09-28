@@ -3,10 +3,10 @@ networks:
     driver: bridge
 
 services:
-  # Fase 1 do ambiente local (seção 41 do contexto do projeto): apenas
-  # OrderCore + PostgreSQL. Redis e RabbitMQ entram no compose somente
-  # quando um módulo passar a depender de fato deles (cache/locks reais e
-  # comunicação assíncrona real), não antecipadamente.
+  # Ambiente local: OrderCore + PostgreSQL + RabbitMQ (mensageria
+  # assíncrona entre módulos, Docs/specs/events/async-messaging.md).
+  # Redis entra no compose somente quando um módulo passar a depender
+  # dele de fato, não antecipadamente.
   postgres:
     image: postgres:16-alpine
     container_name: ordercore-postgres
@@ -34,6 +34,26 @@ services:
     networks:
       - ordercore-net
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: ordercore-rabbitmq
+    environment:
+      # Credentials from the git-ignored .env (see .env.example).
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env (see .env.example)}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env (see .env.example)}
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # management UI: http://localhost:15672
+    volumes:
+      - ordercore-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ordercore-net
+
   api:
     build:
       context: .
@@ -41,6 +61,8 @@ services:
     container_name: ordercore-api
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -50,6 +72,9 @@ services:
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env (see .env.example)}
       IdentitySeed__AdminEmail: ${ADMIN_EMAIL:-}
       IdentitySeed__AdminPassword: ${ADMIN_PASSWORD:-}
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env (see .env.example)}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env (see .env.example)}
     ports:
       - "8080:8080"
     networks:
@@ -57,3 +82,4 @@ services:
 
 volumes:
   ordercore-postgres-data:
+  ordercore-rabbitmq-data:
