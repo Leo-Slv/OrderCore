@@ -1,14 +1,14 @@
 using OrderCore.Api.Modules.Orders.Application.UseCases;
-using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
-using OrderCore.Api.Shared.Application.Abstractions;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
+using OrderCore.Api.Shared.Application.Messaging;
 
 namespace OrderCore.Api.Modules.Orders.Infrastructure.IntegrationEventHandlers;
 
 /// <summary>
-/// Reacts to <see cref="PaymentFailed"/> — see
-/// <see cref="PaymentAuthorizedIntegrationEventHandler"/>'s remarks.
+/// Marks the order as payment failed when Payments announces
+/// <see cref="PaymentFailed"/> — see <see cref="PaymentAuthorizedIntegrationEventHandler"/>.
 /// </summary>
-public sealed class PaymentFailedIntegrationEventHandler : IDomainEventHandler<PaymentFailed>
+public sealed class PaymentFailedIntegrationEventHandler : IIntegrationEventHandler<PaymentFailed>
 {
     private readonly MarkOrderPaymentFailedUseCase _markPaymentFailed;
 
@@ -17,6 +17,6 @@ public sealed class PaymentFailedIntegrationEventHandler : IDomainEventHandler<P
         _markPaymentFailed = markPaymentFailed;
     }
 
-    public Task HandleAsync(PaymentFailed domainEvent, CancellationToken cancellationToken) =>
-        _markPaymentFailed.ExecuteAsync(domainEvent.OrderId, domainEvent.Reason, cancellationToken);
+    public Task HandleAsync(PaymentFailed integrationEvent, CancellationToken cancellationToken) =>
+        _markPaymentFailed.ExecuteAsync(integrationEvent.OrderId, integrationEvent.Reason, cancellationToken);
 }

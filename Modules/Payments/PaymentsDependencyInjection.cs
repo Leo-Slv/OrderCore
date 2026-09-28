@@ -1,12 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
-using OrderCore.Api.Modules.Payments.Infrastructure.Outbox;
+using OrderCore.Api.Modules.Payments.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
 using OrderCore.Api.Modules.Payments.Infrastructure.Webhooks;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 
 namespace OrderCore.Api.Modules.Payments;
 
@@ -27,8 +29,17 @@ public static class PaymentsDependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 
         services.AddScoped<IPaymentRepository, EfPaymentRepository>();
-        services.AddScoped<IOutboxWriter, OutboxWriter>();
-        services.AddHostedService<OutboxPublisherBackgroundService>();
+
+        // What Payments publishes, through its own outbox (Docs/specs/events).
+        services.AddScoped<OutboxWriter<PaymentsDbContext>>();
+        services.AddScoped<IPaymentsOutbox, PaymentsOutbox>();
+        services.AddOutboxSource<PaymentsDbContext>();
+        services.AddIntegrationEvent<PaymentRequested>(PaymentRequested.Name, 1);
+        services.AddIntegrationEvent<PaymentAuthorized>(PaymentAuthorized.Name, 1);
+        services.AddIntegrationEvent<PaymentFailed>(PaymentFailed.Name, 1);
+        services.AddIntegrationEvent<PaymentCaptured>(PaymentCaptured.Name, 1);
+        services.AddIntegrationEvent<PaymentVoided>(PaymentVoided.Name, 1);
+        services.AddIntegrationEvent<PaymentRefunded>(PaymentRefunded.Name, 1);
 
         services.AddScoped<CreatePaymentUseCase>();
         services.AddScoped<AuthorizePaymentUseCase>();

@@ -13,12 +13,11 @@ namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 /// reserved for it — the reservation stops being just "held" and
 /// permanently reduces on-hand stock (section 12).
 /// <para>
-/// Runs from the outbox publisher, which retries a message until its
-/// handler succeeds and publishes nothing after it meanwhile. An order that
-/// is no longer <see cref="OrderStatus.PendingPayment"/> (an admin
-/// cancelled it, and the payment was voided then) is logged and skipped:
-/// throwing would block the whole outbox on a message that can never
-/// succeed.
+/// Runs from a message handler, which retries a failing message five times
+/// before parking it in the failed-message list. An order that is no
+/// longer <see cref="OrderStatus.PendingPayment"/> (an admin cancelled it,
+/// and the payment was voided then) is logged and skipped: throwing would
+/// only retry, then park, a message that can never succeed.
 /// </para>
 /// </summary>
 public sealed class ConfirmOrderUseCase

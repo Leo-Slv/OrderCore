@@ -11,7 +11,7 @@ namespace OrderCore.Api.Modules.Payments.Domain.Entities;
 /// not reference Order, Customer or Product entities directly, only their
 /// ids. Does not raise domain events (unlike Order/InventoryReservation):
 /// what Orders needs to react to is published as Integration Events via
-/// the outbox (<c>IOutboxWriter</c>), not the in-process
+/// the outbox (<c>IPaymentsOutbox</c>), not the in-process
 /// <c>IDomainEventDispatcher</c> — see Docs/specs/payments/payment-processing.md.
 /// </summary>
 public sealed class Payment : AggregateRoot<Guid>

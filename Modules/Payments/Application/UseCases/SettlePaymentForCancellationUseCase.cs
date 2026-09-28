@@ -2,6 +2,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
@@ -13,7 +14,8 @@ namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 /// Leaves no money held for an order that is being cancelled (backoffice
 /// decision 2):
 /// <list type="bullet">
-/// <item>an authorized payment is voided, so the buyer is never charged;</item>
+/// <item>an authorized payment is voided, so the buyer is never charged
+/// (outbox <c>PaymentVoided</c>, in the same save);</item>
 /// <item>a captured one is refunded for whatever is still held, through
 /// the regular refund path (outbox <c>PaymentRefunded</c> included);</item>
 /// <item>no payment, or a failed/voided/refunded one, needs nothing;</item>
@@ -29,6 +31,7 @@ public sealed class SettlePaymentForCancellationUseCase
 {
     private readonly IPaymentRepository _payments;
     private readonly IPaymentProvider _provider;
+    private readonly IPaymentsOutbox _outbox;
     private readonly RequestRefundUseCase _requestRefund;
     private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
@@ -36,12 +39,14 @@ public sealed class SettlePaymentForCancellationUseCase
     public SettlePaymentForCancellationUseCase(
         IPaymentRepository payments,
         IPaymentProvider provider,
+        IPaymentsOutbox outbox,
         RequestRefundUseCase requestRefund,
         IAuditLogService auditLog,
         TimeProvider timeProvider)
     {
         _payments = payments;
         _provider = provider;
+        _outbox = outbox;
         _requestRefund = requestRefund;
         _auditLog = auditLog;
         _timeProvider = timeProvider;
@@ -84,6 +89,14 @@ public sealed class SettlePaymentForCancellationUseCase
         }
 
         payment.Void(_timeProvider.GetUtcNow());
+        _outbox.Enqueue(new PaymentVoided
+        {
+            EventId = Guid.NewGuid(),
+            Version = 1,
+            OccurredAt = _timeProvider.GetUtcNow(),
+            OrderId = payment.OrderId,
+            PaymentId = payment.Id,
+        });
         await _payments.SaveChangesAsync(cancellationToken);
 
         await _auditLog.RecordAsync(

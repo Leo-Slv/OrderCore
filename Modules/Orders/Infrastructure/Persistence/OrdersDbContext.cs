@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Models;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 
 namespace OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 
@@ -22,6 +23,9 @@ public sealed class OrdersDbContext : DbContext
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrdersDbContext).Assembly, type =>
             type.Namespace == "OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Configurations");
+
+        // Which integration events Orders' consumers already handled (inbox).
+        modelBuilder.AddInbox("orders");
 
         // Backs SequentialOrderNumberGenerator — a PostgreSQL sequence, not
         // an application-level counter, so concurrent order creation can

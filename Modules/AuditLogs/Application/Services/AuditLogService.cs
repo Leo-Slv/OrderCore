@@ -11,8 +11,8 @@ namespace OrderCore.Api.Modules.AuditLogs.Application.Services;
 /// enriched here, not in callers: when a caller passes no
 /// <c>userId</c> (every current call site), the signed-in user from
 /// <see cref="ICurrentUser"/> is recorded. With nobody signed in (a
-/// background service such as the outbox publisher) the entry has no
-/// actor, meaning the system did it. There is no correlation id yet.
+/// background service or a message handler) the entry has no actor,
+/// meaning the system did it.
 /// <para>
 /// Recording is best effort. Every caller records after its own change
 /// has committed, in a separate transaction, so a failure here can't undo

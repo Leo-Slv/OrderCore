@@ -1,7 +1,7 @@
 using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
-using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
@@ -14,11 +14,11 @@ namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 public sealed class FailPaymentUseCase
 {
     private readonly IPaymentRepository _payments;
-    private readonly IOutboxWriter _outbox;
+    private readonly IPaymentsOutbox _outbox;
     private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public FailPaymentUseCase(IPaymentRepository payments, IOutboxWriter outbox, IAuditLogService auditLog, TimeProvider timeProvider)
+    public FailPaymentUseCase(IPaymentRepository payments, IPaymentsOutbox outbox, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _payments = payments;
         _outbox = outbox;

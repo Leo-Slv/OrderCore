@@ -13,8 +13,8 @@ namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 /// reserved for it back to available — the compensation flow from
 /// section 12 ("Payment failed → Inventory released").
 /// Like <see cref="ConfirmOrderUseCase"/>, it skips (and logs) an order that
-/// is no longer <see cref="OrderStatus.PendingPayment"/> instead of blocking
-/// the outbox.
+/// is no longer <see cref="OrderStatus.PendingPayment"/> instead of retrying
+/// a message that can never succeed.
 /// </summary>
 public sealed class MarkOrderPaymentFailedUseCase
 {

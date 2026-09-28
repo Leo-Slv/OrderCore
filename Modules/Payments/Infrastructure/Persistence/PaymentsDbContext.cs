@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using OrderCore.Api.Modules.Payments.Infrastructure.Outbox;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Models;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 
 namespace OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 
@@ -9,14 +9,9 @@ namespace OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 /// <c>CustomersDbContext</c>'s remarks on why each module gets its own
 /// DbContext instead of one project-wide context.
 ///
-/// Exposes <see cref="OutboxMessages"/> instead of 06-payments.md's
-/// <c>PaymentEventPersistenceModel</c>/<c>PaymentEvents</c>: nothing in
-/// the diagram ever writes a <c>PaymentEventPersistenceModel</c> (no
-/// mapper, no repository, no use case creates one), while
-/// <c>OutboxWriter</c>/<c>OutboxPublisherBackgroundService</c> both need a
-/// concrete table with a <c>ProcessedAt</c> column to actually implement
-/// the outbox pattern — treated as a diagram inconsistency (most likely an
-/// earlier name for the same concept) rather than two separate tables.
+/// Also holds the module's outbox (<c>payments_outbox_messages</c>, the
+/// shared messaging shape), so a payment and the events it raised are
+/// saved in one transaction; the Messaging relay publishes them.
 /// </summary>
 public sealed class PaymentsDbContext : DbContext
 {
@@ -28,11 +23,11 @@ public sealed class PaymentsDbContext : DbContext
 
     public DbSet<RefundPersistenceModel> Refunds => Set<RefundPersistenceModel>();
 
-    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(PaymentsDbContext).Assembly, type =>
             type.Namespace == "OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Configurations");
+        modelBuilder.AddOutbox("payments");
     }
 }

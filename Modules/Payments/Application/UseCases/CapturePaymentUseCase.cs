@@ -2,6 +2,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
@@ -11,10 +12,9 @@ using OrderCore.Api.Shared.Domain.Exceptions;
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
 /// <summary>
-/// Enqueues nothing: there is no <c>PaymentCaptured</c> integration event
-/// (only PaymentRequested/Authorized/Failed/Refunded exist), so capture
-/// stays a Payments-internal state change Orders never needs to react to
-/// (resolved decision — see Docs/specs/payments/payment-processing.md).
+/// Enqueues <see cref="PaymentCaptured"/> in the same save as the payment
+/// (Docs/specs/events/async-messaging.md): nothing in OrderCore reacts to
+/// it yet, but the order timeline and a future PayCore do.
 /// <para>
 /// Idempotent: capturing an already-captured payment returns it as it is,
 /// so Orders can repeat "ship" after a failure that happened after the
@@ -25,13 +25,16 @@ public sealed class CapturePaymentUseCase
 {
     private readonly IPaymentRepository _payments;
     private readonly IPaymentProvider _provider;
+    private readonly IPaymentsOutbox _outbox;
     private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
 
-    public CapturePaymentUseCase(IPaymentRepository payments, IPaymentProvider provider, IAuditLogService auditLog, TimeProvider timeProvider)
+    public CapturePaymentUseCase(
+        IPaymentRepository payments, IPaymentProvider provider, IPaymentsOutbox outbox, IAuditLogService auditLog, TimeProvider timeProvider)
     {
         _payments = payments;
         _provider = provider;
+        _outbox = outbox;
         _auditLog = auditLog;
         _timeProvider = timeProvider;
     }
@@ -76,6 +79,16 @@ public sealed class CapturePaymentUseCase
         }
 
         payment.Capture(_timeProvider.GetUtcNow());
+        _outbox.Enqueue(new PaymentCaptured
+        {
+            EventId = Guid.NewGuid(),
+            Version = 1,
+            OccurredAt = _timeProvider.GetUtcNow(),
+            OrderId = payment.OrderId,
+            PaymentId = payment.Id,
+            Amount = payment.Amount,
+            Currency = payment.Currency,
+        });
         await _payments.SaveChangesAsync(cancellationToken);
 
         await _auditLog.RecordAsync(AuditLogActionNames.PaymentCaptured, "Payment", payment.Id, metadata: null, userId: null, cancellationToken);

@@ -8,7 +8,7 @@ namespace OrderCore.Api.Modules.Orders.Domain.Events;
 /// within the same unit of work. When the system evolves towards
 /// cross-module/cross-service communication, a subset of these facts is
 /// translated into Integration Events
-/// (Modules/Payments/Application/Contracts/IntegrationEvents) published
+/// (Modules/Payments/Contracts/IntegrationEvents) published
 /// through the Transactional Outbox — the two are deliberately kept as
 /// separate types.
 /// </summary>

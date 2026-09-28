@@ -7,8 +7,9 @@ using OrderCore.Api.Modules.Orders.Infrastructure.EventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.IntegrationEventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
-using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Shared.Application.Abstractions;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 
 namespace OrderCore.Api.Modules.Orders;
 
@@ -21,6 +22,8 @@ namespace OrderCore.Api.Modules.Orders;
 /// </summary>
 public static class OrdersDependencyInjection
 {
+    public const string PaymentOutcomesQueue = "orders.payment-outcomes";
+
     public static IServiceCollection AddOrdersModule(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddDbContext<OrdersDbContext>(options =>
@@ -43,8 +46,11 @@ public static class OrdersDependencyInjection
         services.AddScoped<IDomainEventHandler<OrderShipped>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderDelivered>, OrderStatusHistoryProjector>();
 
-        services.AddScoped<IDomainEventHandler<PaymentAuthorized>, PaymentAuthorizedIntegrationEventHandler>();
-        services.AddScoped<IDomainEventHandler<PaymentFailed>, PaymentFailedIntegrationEventHandler>();
+        // Payment outcomes arrive through RabbitMQ; the inbox lives in OrdersDbContext.
+        services.AddIntegrationEventConsumer<PaymentAuthorized, PaymentAuthorizedIntegrationEventHandler, OrdersDbContext>(
+            PaymentOutcomesQueue);
+        services.AddIntegrationEventConsumer<PaymentFailed, PaymentFailedIntegrationEventHandler, OrdersDbContext>(
+            PaymentOutcomesQueue);
 
         services.AddScoped<CreateOrderHandler>();
         services.AddScoped<SetOrderAddressesUseCase>();
