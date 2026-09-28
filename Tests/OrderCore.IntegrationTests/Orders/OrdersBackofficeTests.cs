@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using OrderCore.Api.Modules.Orders;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using Xunit;
 using static OrderCore.IntegrationTests.ApiDatabase;
 
@@ -37,6 +39,10 @@ public sealed class OrdersBackofficeTests : IClassFixture<ApiDatabase>
         var orderId = (await checkout.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
         await PollOrderUntilAsync(admin, orderId, status => status == "Confirmed");
 
+        // The confirmation came through the broker: Orders' inbox holds the authorization.
+        var authorized = await _database.WaitForPublishedPaymentEventAsync(PaymentAuthorized.Name, orderId);
+        (await _database.OrdersHandledAsync(authorized.Id, OrdersDependencyInjection.PaymentOutcomesQueue)).Should().BeTrue();
+
         // The admin list shows the buyer and the payment.
         var list = await admin.GetFromJsonAsync<JsonElement>($"/api/admin/orders?customerId={customerId}&status=Confirmed", Json);
         var row = list.GetProperty("items").EnumerateArray().Should().ContainSingle().Subject;
@@ -61,6 +67,7 @@ public sealed class OrdersBackofficeTests : IClassFixture<ApiDatabase>
         (await shipped.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("payment").GetProperty("status").GetString()
             .Should().Be("Captured");
         (await admin.PostAsync($"/api/orders/{orderId}/deliver", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        await _database.WaitForPublishedPaymentEventAsync(PaymentCaptured.Name, orderId);
 
         var history = await customer.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}/status-history", Json);
         history.EnumerateArray().Select(h => h.GetProperty("toStatus").GetString()).Should().EndWith(

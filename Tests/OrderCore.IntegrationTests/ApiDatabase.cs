@@ -21,6 +21,7 @@ using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -187,8 +188,8 @@ public sealed class ApiDatabase : IAsyncLifetime
     }
 
     /// <summary>
-    /// The outbox publisher polls every 5 seconds, so a payment outcome can
-    /// take a few seconds to reach the order. This is the same polling the
+    /// A payment outcome reaches the order through the outbox relay and
+    /// RabbitMQ, so it can take a moment. This is the same polling the
     /// storefront does. Works for the order's owner and for an admin.
     /// </summary>
     public static async Task<JsonElement> PollOrderUntilAsync(HttpClient client, Guid orderId, Func<string, bool> isDone)
@@ -209,6 +210,42 @@ public sealed class ApiDatabase : IAsyncLifetime
 
             await Task.Delay(TimeSpan.FromMilliseconds(500));
         }
+    }
+
+    /// <summary>
+    /// Waits until the Messaging relay has published Payments' event
+    /// <paramref name="contract"/> about the order, and returns its outbox row.
+    /// </summary>
+    public async Task<OutboxMessage> WaitForPublishedPaymentEventAsync(string contract, Guid orderId)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (true)
+        {
+            await using (var db = new PaymentsDbContext(Options<PaymentsDbContext>()))
+            {
+                var published = await db.Set<OutboxMessage>().Where(m => m.Type == contract && m.SentAt != null).ToListAsync();
+                var row = published.FirstOrDefault(m =>
+                    MessageEnvelope.FromOutbox(m).Payload.GetProperty("orderId").GetGuid() == orderId);
+                if (row is not null)
+                {
+                    return row;
+                }
+            }
+
+            if (DateTimeOffset.UtcNow > deadline)
+            {
+                throw new TimeoutException($"No published '{contract}' for order {orderId}.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
+        }
+    }
+
+    /// <summary>Whether Orders' inbox records the message as handled by <paramref name="consumer"/>.</summary>
+    public async Task<bool> OrdersHandledAsync(Guid messageId, string consumer)
+    {
+        await using var db = new OrdersDbContext(Options<OrdersDbContext>());
+        return await db.Set<InboxMessage>().AnyAsync(m => m.MessageId == messageId && m.Consumer == consumer);
     }
 
     public static void UseAccessToken(HttpClient client, JsonElement tokens) =>

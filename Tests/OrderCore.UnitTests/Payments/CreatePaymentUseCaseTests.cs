@@ -1,5 +1,6 @@
 using FluentAssertions;
-using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
+using OrderCore.Api.Shared.Application.Messaging;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
@@ -15,7 +16,7 @@ public sealed class CreatePaymentUseCaseTests
     [Fact]
     public async Task ExecuteAsync_authorizes_and_enqueues_PaymentAuthorized_when_the_provider_succeeds()
     {
-        var outbox = new FakeOutboxWriter();
+        var outbox = new FakePaymentsOutbox();
         var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: true), outbox, new FakeAuditLogService(), TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(), CancellationToken.None);
@@ -27,7 +28,7 @@ public sealed class CreatePaymentUseCaseTests
     [Fact]
     public async Task ExecuteAsync_fails_and_enqueues_PaymentFailed_when_the_provider_declines()
     {
-        var outbox = new FakeOutboxWriter();
+        var outbox = new FakePaymentsOutbox();
         var useCase = new CreatePaymentUseCase(new FakePaymentRepository(), new StubPaymentProvider(succeeds: false), outbox, new FakeAuditLogService(), TimeProvider.System);
 
         var result = await useCase.ExecuteAsync(Command(), CancellationToken.None);
@@ -40,7 +41,7 @@ public sealed class CreatePaymentUseCaseTests
     public async Task ExecuteAsync_records_the_chosen_payment_method()
     {
         var payments = new FakePaymentRepository();
-        var useCase = new CreatePaymentUseCase(payments, new StubPaymentProvider(succeeds: true), new FakeOutboxWriter(), new FakeAuditLogService(), TimeProvider.System);
+        var useCase = new CreatePaymentUseCase(payments, new StubPaymentProvider(succeeds: true), new FakePaymentsOutbox(), new FakeAuditLogService(), TimeProvider.System);
         var command = Command(PaymentMethod.Pix);
 
         await useCase.ExecuteAsync(command, CancellationToken.None);

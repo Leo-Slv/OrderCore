@@ -2,13 +2,13 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
-using OrderCore.Api.Modules.Payments.Infrastructure.Outbox;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Shared.Domain;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -79,7 +79,7 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var repository = new EfPaymentRepository(dbContext);
-            var outbox = new OutboxWriter(dbContext);
+            var outbox = PaymentsTestOutbox.For(dbContext);
             var payment = Payment.Create(orderId, 50m, "BRL", PaymentMethod.Card, "idem-2", "Fake", null, DateTimeOffset.UtcNow);
             payment.MarkProcessing();
             payment.Authorize("provider-ref", DateTimeOffset.UtcNow);
@@ -98,16 +98,16 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
             });
 
             // Single SaveChangesAsync flushes both the Payment insert and
-            // the OutboxMessage in the same transaction — the actual point
+            // the outbox row in the same transaction — the actual point
             // of "transactional outbox".
             await repository.SaveChangesAsync(CancellationToken.None);
         }
 
         await using (var dbContext = CreateDbContext())
         {
-            var pending = await dbContext.OutboxMessages.Where(m => m.ProcessedAt == null).ToListAsync();
+            var pending = await dbContext.Set<OutboxMessage>().Where(m => m.SentAt == null).ToListAsync();
 
-            pending.Should().ContainSingle(m => m.Type == nameof(PaymentAuthorized));
+            pending.Should().ContainSingle(m => m.Type == PaymentAuthorized.Name);
         }
     }
 

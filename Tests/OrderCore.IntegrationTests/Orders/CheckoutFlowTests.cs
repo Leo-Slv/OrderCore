@@ -19,16 +19,17 @@ using OrderCore.Api.Modules.Orders.Infrastructure.EventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.IntegrationEventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
-using OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
-using OrderCore.Api.Modules.Payments.Infrastructure.Outbox;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 using OrderCore.Api.Shared.Infrastructure;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
+using OrderCore.IntegrationTests.Payments;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -165,24 +166,24 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
 
         await using (var paymentsDb = new PaymentsDbContext(PaymentsOptions()))
         {
-            var pending = await paymentsDb.OutboxMessages.Where(m => m.ProcessedAt == null).ToListAsync();
-            pending.Should().ContainSingle(m => m.Type == nameof(PaymentAuthorized));
+            var pending = await paymentsDb.Set<OutboxMessage>().Where(m => m.SentAt == null).ToListAsync();
+            pending.Should().ContainSingle(m => m.Type == PaymentAuthorized.Name);
         }
 
-        // Act, part 2: "publish" the outbox — what OutboxPublisherBackgroundService
-        // does on its polling loop, dispatched through a real
-        // IDomainEventDispatcher wired to Orders' integration event handlers.
+        // Act, part 2: "deliver" the outbox by hand — what the Messaging relay
+        // and consumer host do through RabbitMQ (covered end to end by the
+        // storefront tests), handed straight to Orders' handler.
         await using (var ordersDb = new OrdersDbContext(OrdersOptions()))
         await using (var paymentsDb = new PaymentsDbContext(PaymentsOptions()))
         {
-            var dispatcher = OrdersDispatcher(ordersDb);
+            var handler = OrdersServices(ordersDb).GetRequiredService<PaymentAuthorizedIntegrationEventHandler>();
 
-            var pending = await paymentsDb.OutboxMessages.Where(m => m.ProcessedAt == null).ToListAsync();
+            var pending = await paymentsDb.Set<OutboxMessage>().Where(m => m.SentAt == null).ToListAsync();
             foreach (var message in pending)
             {
-                var integrationEvent = (PaymentAuthorized)System.Text.Json.JsonSerializer.Deserialize(message.PayloadJson, typeof(PaymentAuthorized))!;
-                await dispatcher.DispatchAsync([integrationEvent], CancellationToken.None);
-                message.ProcessedAt = DateTimeOffset.UtcNow;
+                var integrationEvent = (PaymentAuthorized)MessageEnvelope.FromOutbox(message).ToEvent(typeof(PaymentAuthorized));
+                await handler.HandleAsync(integrationEvent, CancellationToken.None);
+                message.SentAt = DateTimeOffset.UtcNow;
             }
 
             await paymentsDb.SaveChangesAsync(CancellationToken.None);
@@ -222,14 +223,16 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// A real dispatcher resolving Orders' own domain-event handlers
-    /// (OrderStatusHistoryProjector) and its two integration-event handlers
+    /// Orders' services for this test: its own domain-event handlers
+    /// (OrderStatusHistoryProjector) and the PaymentAuthorized handler
     /// — everything <see cref="EfOrderRepository.SaveChangesAsync"/> and the
     /// manual "publish" step in this test need to actually call, including a
     /// real <see cref="IInventoryService"/> so <c>ConfirmOrderUseCase</c> can
     /// actually consume the reservation against the same Postgres container.
     /// </summary>
-    private IDomainEventDispatcher OrdersDispatcher(OrdersDbContext ordersDb)
+    private IDomainEventDispatcher OrdersDispatcher(OrdersDbContext ordersDb) => new InProcessDomainEventDispatcher(OrdersServices(ordersDb));
+
+    private IServiceProvider OrdersServices(OrdersDbContext ordersDb)
     {
         var inventoryDb = new InventoryDbContext(InventoryOptions());
         var stockRepository = new EfStockItemRepository(inventoryDb);
@@ -264,30 +267,30 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         services.AddSingleton<IInventoryService>(inventoryService);
         services.AddSingleton<IAuditLogService>(NoOpAuditLog());
         services.AddSingleton<ConfirmOrderUseCase>();
-        services.AddSingleton<IDomainEventHandler<PaymentAuthorized>, PaymentAuthorizedIntegrationEventHandler>();
+        services.AddSingleton<PaymentAuthorizedIntegrationEventHandler>();
 
-        var provider = services.BuildServiceProvider();
-        return new InProcessDomainEventDispatcher(provider);
+        return services.BuildServiceProvider();
     }
 
     private static PaymentGatewayAdapter PaymentGateway(PaymentsDbContext paymentsDb)
     {
         var paymentRepository = new EfPaymentRepository(paymentsDb);
         var provider = new FakePaymentProvider(Options.Create(new FakePaymentProviderOptions()));
-        var refund = new RequestRefundUseCase(paymentRepository, provider, new OutboxWriter(paymentsDb), NoOpAuditLog(), TimeProvider.System);
+        var outbox = PaymentsTestOutbox.For(paymentsDb);
+        var refund = new RequestRefundUseCase(paymentRepository, provider, outbox, NoOpAuditLog(), TimeProvider.System);
 
         return new PaymentGatewayAdapter(
             CreatePaymentUseCase(paymentsDb),
             new GetPaymentByOrderIdUseCase(paymentRepository),
             new GetPaymentsByOrderIdsUseCase(paymentRepository),
-            new CapturePaymentUseCase(paymentRepository, provider, NoOpAuditLog(), TimeProvider.System),
-            new SettlePaymentForCancellationUseCase(paymentRepository, provider, refund, NoOpAuditLog(), TimeProvider.System));
+            new CapturePaymentUseCase(paymentRepository, provider, outbox, NoOpAuditLog(), TimeProvider.System),
+            new SettlePaymentForCancellationUseCase(paymentRepository, provider, outbox, refund, NoOpAuditLog(), TimeProvider.System));
     }
 
     private static CreatePaymentUseCase CreatePaymentUseCase(PaymentsDbContext paymentsDb)
     {
         var paymentRepository = new EfPaymentRepository(paymentsDb);
-        var outbox = new OutboxWriter(paymentsDb);
+        var outbox = PaymentsTestOutbox.For(paymentsDb);
         var provider = new FakePaymentProvider(Options.Create(new FakePaymentProviderOptions()));
         return new CreatePaymentUseCase(paymentRepository, provider, outbox, NoOpAuditLog(), TimeProvider.System);
     }

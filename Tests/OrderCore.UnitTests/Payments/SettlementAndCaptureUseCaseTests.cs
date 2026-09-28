@@ -1,6 +1,7 @@
 using FluentAssertions;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
+using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Shared.Application.Exceptions;
@@ -19,6 +20,7 @@ public sealed class SettlementAndCaptureUseCaseTests
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
     private readonly FakePaymentRepository _payments = new();
+    private readonly FakePaymentsOutbox _outbox = new();
 
     private async Task<Payment> SavePaymentAsync(PaymentStatus status, decimal amount = 100m)
     {
@@ -61,12 +63,13 @@ public sealed class SettlementAndCaptureUseCaseTests
         new(
             _payments,
             provider,
-            new RequestRefundUseCase(_payments, provider, new FakeOutboxWriter(), new FakeAuditLogService(), TimeProvider.System),
+            _outbox,
+            new RequestRefundUseCase(_payments, provider, _outbox, new FakeAuditLogService(), TimeProvider.System),
             new FakeAuditLogService(),
             TimeProvider.System);
 
     private CapturePaymentUseCase Capture(StubPaymentProvider provider) =>
-        new(_payments, provider, new FakeAuditLogService(), TimeProvider.System);
+        new(_payments, provider, _outbox, new FakeAuditLogService(), TimeProvider.System);
 
     [Fact]
     public async Task Settling_an_authorized_payment_voids_it()
@@ -79,6 +82,8 @@ public sealed class SettlementAndCaptureUseCaseTests
         outcome.Should().Be(PaymentSettlementOutcome.Voided);
         payment.Status.Should().Be(PaymentStatus.Voided);
         provider.VoidCalls.Should().Be(1);
+        _outbox.Enqueued.Should().ContainSingle().Which.Should().BeOfType<PaymentVoided>()
+            .Which.PaymentId.Should().Be(payment.Id);
     }
 
     [Fact]
@@ -151,6 +156,7 @@ public sealed class SettlementAndCaptureUseCaseTests
 
         (await act.Should().ThrowAsync<ConflictException>()).Which.Code.Should().Be("payment_void_failed");
         payment.Status.Should().Be(PaymentStatus.Authorized);
+        _outbox.Enqueued.Should().BeEmpty();
     }
 
     [Fact]
@@ -172,6 +178,9 @@ public sealed class SettlementAndCaptureUseCaseTests
         await Capture(new StubPaymentProvider()).ExecuteForOrderAsync(payment.OrderId, CancellationToken.None);
 
         payment.Status.Should().Be(PaymentStatus.Captured);
+        var captured = _outbox.Enqueued.Should().ContainSingle().Which.Should().BeOfType<PaymentCaptured>().Subject;
+        captured.OrderId.Should().Be(payment.OrderId);
+        captured.Amount.Should().Be(payment.Amount);
     }
 
     [Fact]
@@ -184,6 +193,7 @@ public sealed class SettlementAndCaptureUseCaseTests
 
         result.Status.Should().Be("Captured");
         provider.CaptureCalls.Should().Be(0);
+        _outbox.Enqueued.Should().BeEmpty("the capture was already announced");
     }
 
     [Fact]

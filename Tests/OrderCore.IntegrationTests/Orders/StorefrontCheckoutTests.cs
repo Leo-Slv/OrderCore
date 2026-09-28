@@ -12,8 +12,8 @@ namespace OrderCore.IntegrationTests.Orders;
 
 /// <summary>
 /// The storefront's whole path through the real HTTP host, against
-/// PostgreSQL: catalog → cart quote → checkout → the outbox publisher
-/// (running as the host's own background service) confirms the order →
+/// PostgreSQL: catalog → cart quote → checkout → the outbox relay and
+/// RabbitMQ (the host's own background services) confirm the order →
 /// tracking. Unlike <see cref="CheckoutFlowTests"/>, nothing is wired by
 /// hand: routing, model binding, authentication, the exception handler,
 /// DI and the background service are all the production ones. Only stock
@@ -75,7 +75,7 @@ public sealed class StorefrontCheckoutTests : IAsyncLifetime
         var replay = await CheckoutAsync(client, addressId, product.Id, quantity: 2, idempotencyKey: "checkout-e2e-1");
         (await replay.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid().Should().Be(orderId);
 
-        // Tracking: the outbox publisher confirms the order on its own.
+        // Tracking: the payment outcome confirms the order through the broker.
         var confirmed = await PollOrderUntilAsync(client, orderId, status => status == "Confirmed");
         confirmed.GetProperty("confirmedAt").ValueKind.Should().Be(JsonValueKind.String);
         confirmed.GetProperty("payment").GetProperty("status").GetString().Should().Be("Authorized");
