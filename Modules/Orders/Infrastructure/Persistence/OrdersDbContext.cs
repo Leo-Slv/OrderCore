@@ -19,6 +19,8 @@ public sealed class OrdersDbContext : DbContext
 
     public DbSet<OrderStatusHistoryPersistenceModel> StatusHistory => Set<OrderStatusHistoryPersistenceModel>();
 
+    public DbSet<OrderTimelineEntryPersistenceModel> Timeline => Set<OrderTimelineEntryPersistenceModel>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrdersDbContext).Assembly, type =>

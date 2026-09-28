@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OrderCore.Api.Modules.Inventory.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Domain.Events;
@@ -26,6 +27,8 @@ public static class OrdersDependencyInjection
 {
     public const string PaymentOutcomesQueue = "orders.payment-outcomes";
 
+    public const string TimelineQueue = "orders.timeline";
+
     public static IServiceCollection AddOrdersModule(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddDbContext<OrdersDbContext>(options =>
@@ -38,6 +41,7 @@ public static class OrdersDependencyInjection
         services.AddScoped<IPaymentGateway, PaymentGatewayAdapter>();
         services.AddScoped<ICustomerDirectory, CustomerDirectoryAdapter>();
         services.AddScoped<IOrderStatusHistoryReader, EfOrderStatusHistoryReader>();
+        services.AddScoped<IOrderTimelineReader, EfOrderTimelineReader>();
 
         services.AddScoped<IDomainEventHandler<OrderCreated>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderPaymentRequested>, OrderStatusHistoryProjector>();
@@ -67,6 +71,26 @@ public static class OrdersDependencyInjection
         services.AddIntegrationEventConsumer<PaymentFailed, PaymentFailedIntegrationEventHandler, OrdersDbContext>(
             PaymentOutcomesQueue);
 
+        // The admin order timeline: every event about an order, from every module.
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderCreated, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderPaymentRequested, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderConfirmed, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderProcessingStarted, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderShipped, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderDelivered, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderPaymentFailed, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderCancelled, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<PaymentRequested, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<PaymentAuthorized, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<PaymentFailed, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<PaymentCaptured, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<PaymentVoided, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<PaymentRefunded, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<StockReserved, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<StockReleased, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<StockConsumed, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<StockReturned, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+
         services.AddScoped<CreateOrderHandler>();
         services.AddScoped<SetOrderAddressesUseCase>();
         services.AddScoped<RequestOrderPaymentUseCase>();
@@ -79,6 +103,7 @@ public static class OrdersDependencyInjection
         services.AddScoped<QuoteCartUseCase>();
         services.AddScoped<GetOrderDetailsUseCase>();
         services.AddScoped<GetOrderStatusHistoryUseCase>();
+        services.AddScoped<GetOrderTimelineUseCase>();
         services.AddScoped<FulfilOrderUseCase>();
         services.AddScoped<SetOrderInternalNotesUseCase>();
         services.AddScoped<ListOrdersUseCase>();

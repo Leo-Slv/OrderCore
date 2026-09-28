@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using OrderCore.Api.Shared.Application.Messaging;
 
 namespace OrderCore.Api.Shared.Infrastructure.Messaging;
@@ -43,7 +44,7 @@ public static class MessagingRegistrationExtensions
         where THandler : class, IIntegrationEventHandler<TEvent>
         where TInboxDbContext : DbContext
     {
-        services.AddScoped<THandler>();
+        services.TryAddScoped<THandler>();
         services.IntegrationEventRegistry().AddConsumer(new ConsumerRegistration(
             queue,
             typeof(TEvent),

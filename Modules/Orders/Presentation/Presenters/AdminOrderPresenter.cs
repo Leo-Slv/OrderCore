@@ -53,6 +53,9 @@ public static class AdminOrderPresenter
         }).ToList(),
     };
 
+    public static IReadOnlyList<OrderTimelineEntryResponse> ToResponse(IReadOnlyList<OrderTimelineEntry> timeline) =>
+        timeline.Select(e => new OrderTimelineEntryResponse(e.EventId, e.Type, e.Source, e.OccurredAt, e.Details)).ToList();
+
     public static DashboardResponse ToResponse(DashboardOutput output) => new()
     {
         From = output.From,

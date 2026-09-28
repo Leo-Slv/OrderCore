@@ -23,13 +23,18 @@ public sealed class OrdersAdminController : ControllerBase
     private readonly ListOrdersUseCase _listOrders;
     private readonly GetAdminOrderDetailsUseCase _getAdminOrderDetails;
     private readonly GetDashboardUseCase _getDashboard;
+    private readonly GetOrderTimelineUseCase _getOrderTimeline;
 
     public OrdersAdminController(
-        ListOrdersUseCase listOrders, GetAdminOrderDetailsUseCase getAdminOrderDetails, GetDashboardUseCase getDashboard)
+        ListOrdersUseCase listOrders,
+        GetAdminOrderDetailsUseCase getAdminOrderDetails,
+        GetDashboardUseCase getDashboard,
+        GetOrderTimelineUseCase getOrderTimeline)
     {
         _listOrders = listOrders;
         _getAdminOrderDetails = getAdminOrderDetails;
         _getDashboard = getDashboard;
+        _getOrderTimeline = getOrderTimeline;
     }
 
     /// <summary>Every customer's orders, newest first, with the customer and payment status.</summary>
@@ -42,14 +47,27 @@ public sealed class OrdersAdminController : ControllerBase
 
     /// <summary>
     /// The order with its internal notes, customer, full payment and stock
-    /// reservations. Its history is <c>GET orders/{id}/status-history</c>; its
-    /// audit timeline <c>GET audit-logs?entityName=Order&amp;entityId={id}</c>.
+    /// reservations. Its history across modules is <c>GET admin/orders/{id}/timeline</c>;
+    /// its status history <c>GET orders/{id}/status-history</c>; its audit trail
+    /// <c>GET audit-logs?entityName=Order&amp;entityId={id}</c>.
     /// </summary>
     [HttpGet("orders/{id:guid}")]
     [ProducesResponseType(typeof(AdminOrderDetailsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AdminOrderDetailsResponse>> GetOrderAsync(Guid id, CancellationToken cancellationToken) =>
         Ok(AdminOrderPresenter.ToResponse(await _getAdminOrderDetails.ExecuteAsync(id, cancellationToken)));
+
+    /// <summary>
+    /// The order's life across modules — its own changes, payments and stock
+    /// reservations — oldest first. Filled asynchronously from the modules'
+    /// events, so the latest change can take a moment to appear.
+    /// </summary>
+    [HttpGet("orders/{id:guid}/timeline")]
+    [ProducesResponseType(typeof(IReadOnlyList<OrderTimelineEntryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<OrderTimelineEntryResponse>>> GetOrderTimelineAsync(
+        Guid id, CancellationToken cancellationToken) =>
+        Ok(AdminOrderPresenter.ToResponse(await _getOrderTimeline.ExecuteAsync(id, cancellationToken)));
 
     /// <summary>Summary figures for <c>[from, to)</c>; the last 30 days by default.</summary>
     [HttpGet("dashboard")]
