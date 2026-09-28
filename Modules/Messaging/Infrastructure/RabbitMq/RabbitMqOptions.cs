@@ -43,6 +43,13 @@ public sealed class MessagingOptions
 
     public int RelayBatchSize { get; set; } = 100;
 
+    /// <summary>
+    /// How long a publish waits for the broker's confirmation before it
+    /// counts as failed — so a confirmation that never comes (a channel the
+    /// broker closed mid-publish) can't stall the relay.
+    /// </summary>
+    public TimeSpan PublishTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
     public ushort ConsumerPrefetch { get; set; } = 10;
 
     /// <summary>How long startup waits for the broker before the API refuses to start.</summary>

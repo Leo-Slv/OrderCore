@@ -102,7 +102,7 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
                 message.SentAt = _timeProvider.GetUtcNow();
                 message.LastError = null;
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
                 message.PublishAttempts++;
                 message.LastError = exception.Message.Length > 2000 ? exception.Message[..2000] : exception.Message;
@@ -149,13 +149,18 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
             Headers = headers,
         };
 
+        // A confirmation that never comes must not stall the relay: past the
+        // timeout the publish counts as failed and is retried next poll.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_messaging.PublishTimeout);
+
         await _channel.BasicPublishAsync(
             _options.Exchange,
             IntegrationEventRegistry.RoutingKey(message.Type, message.Version),
             mandatory: false,
             properties,
             MessageEnvelope.FromOutbox(message).ToBytes(),
-            cancellationToken);
+            timeout.Token);
     }
 
     private async Task ResetChannelAsync()
