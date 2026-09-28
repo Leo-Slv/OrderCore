@@ -82,6 +82,8 @@ public sealed class EndpointAccessTests : IClassFixture<ApiDatabase>, IAsyncLife
     [InlineData(Caller.Customer, "GET", "/api/admin/orders", HttpStatusCode.Forbidden)]
     [InlineData(Caller.Admin, "GET", "/api/admin/orders", HttpStatusCode.OK)]
     [InlineData(Caller.Customer, "GET", "/api/admin/dashboard", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Customer, "GET", "/api/admin/orders/00000000-0000-0000-0000-000000000001/timeline", HttpStatusCode.Forbidden)]
+    [InlineData(Caller.Admin, "GET", "/api/admin/orders/00000000-0000-0000-0000-000000000001/timeline", HttpStatusCode.NotFound)]
     [InlineData(Caller.Admin, "GET", "/api/admin/dashboard", HttpStatusCode.OK)]
     [InlineData(Caller.Customer, "GET", "/api/admin/catalog/products", HttpStatusCode.Forbidden)]
     [InlineData(Caller.Admin, "GET", "/api/admin/catalog/products", HttpStatusCode.OK)]
