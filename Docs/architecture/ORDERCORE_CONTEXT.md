@@ -319,6 +319,14 @@ Um segundo módulo técnico, `Identity`, guarda contas, senhas e sessões
 seção 32. Também não é um bounded context de negócio: o `Customer`
 continua sendo do módulo Customers, e o `Identity` só guarda o id dele.
 
+Um terceiro módulo técnico, `Messaging`, leva os eventos de integração
+de um módulo aos outros pelo RabbitMQ (seções 19 a 21): a conexão e a
+topologia do broker, o relay que publica o outbox de cada módulo, o host
+que consome as filas (com inbox e retentativas) e as mensagens que
+falharam, que o admin reprocessa ou descarta pelo backoffice. As
+abstrações que todo módulo usa ficam no `Shared`
+(`Shared/Application/Messaging`, `Shared/Infrastructure/Messaging`).
+
 ---
 
 # 7. Regra fundamental de modularização
@@ -380,7 +388,14 @@ Contratos entre módulos existentes hoje:
 | Orders → Customers | `ICustomerDirectory` | `CustomerDirectoryAdapter` → `GetCustomerAddressUseCase`, `GetCustomersByIdsUseCase`, `CountNewCustomersUseCase` |
 | Catalog → Inventory | `IStockAvailabilityProvider` (vitrine) e `IStockLevels` (backoffice) | `InventoryStockAvailabilityAdapter` → `GetStockAvailabilityUseCase`, `EnsureStockItemUseCase`, `GetStockLevelsUseCase`, `ListProductIdsInStockStateUseCase` |
 | Identity → Customers | `ICustomerRegistry` | `CustomerRegistryAdapter` → `RegisterCustomerUseCase`, `GetCustomerByIdUseCase` (cliente ativo?) |
-| Payments → Orders | eventos de integração via outbox | `PaymentAuthorized`/`PaymentFailed` → handlers do Orders |
+| Payments → Orders | eventos pelo RabbitMQ (seção 21) | `PaymentAuthorized`/`PaymentFailed` → handlers do Orders na fila `orders.payment-outcomes` |
+| Payments, Inventory, Orders → Orders | eventos pelo RabbitMQ | todos os eventos sobre um pedido → `OrderTimelineProjector` na fila `orders.timeline` (timeline do admin) |
+
+Um evento de integração é contrato público do módulo que o publica e
+mora em `Modules/<Módulo>/Contracts/IntegrationEvents` — a única parte de
+um módulo que um handler de mensagem de outro módulo pode conhecer
+(`IntegrationEventTests` valida isso, e que os contratos não dependem do
+Domain/Application/Infrastructure do próprio módulo).
 
 Todas as dependências seguem uma só direção (Orders → Catalog/Inventory/
 Payments/Customers, Catalog → Inventory, Identity → Customers): quando o
@@ -911,19 +926,35 @@ Exemplo:
 
 Não compartilhar entidades de domínio entre módulos ou futuros serviços.
 
-Os integration events também são organizados por módulo
-(`Modules/Payments/Application/Contracts/IntegrationEvents/`), pelo mesmo
-motivo da seção 5.1: à medida que outros módulos publicarem integration
-events, cada um ganha sua própria pasta em vez de um `IntegrationEvents/`
-genérico compartilhado por todos.
+**Como está implementado** (`Docs/specs/events/async-messaging.md`):
+
+- Cada módulo que publica declara seus contratos em
+  `Modules/<Módulo>/Contracts/IntegrationEvents`, herdando
+  `IntegrationEvent` (`Shared/Application/Messaging`: `EventId`,
+  `Version`, `OccurredAt`; não é um `IDomainEvent`), e os registra na
+  própria `<Módulo>DependencyInjection` com um nome estável
+  `<módulo>.<evento>` e uma versão (ex.: `payments.payment-authorized`, 1).
+  Uma mudança aditiva mantém a versão; uma incompatível a incrementa.
+- Publicam hoje: **Payments** (requested, authorized, failed, captured,
+  voided, refunded), **Orders** (created, payment requested, confirmed,
+  processing started, shipped, delivered, payment failed, cancelled — com
+  o resumo do pedido) e **Inventory** (reserved, released, consumed,
+  returned e o alerta de estoque `inventory.stock-alert`, levantado só na
+  mudança para estoque baixo ou esgotado).
+- Orders e Inventory não enfileiram nos use cases: o repositório
+  (`EfOrderRepository`) e a unidade de trabalho (`InventoryUnitOfWork`)
+  traduzem os domain events do agregado para os contratos antes do save.
+- Na fila, cada mensagem é um envelope JSON — `messageId` (o `EventId`),
+  `type`, `version`, `occurredAt`, `causationId` (a mensagem que a causou,
+  se houver) e o `payload` —, com o trace W3C (`traceparent`/`tracestate`)
+  nos cabeçalhos. O id de correlação é o trace id: um checkout e tudo o
+  que ele causa em outros módulos ficam no mesmo trace.
 
 ---
 
 # 20. Transactional Outbox
 
-O projeto deverá posteriormente implementar o Transactional Outbox.
-
-Exemplo:
+Implementado para todo módulo que publica eventos. O princípio:
 
 ```text
 BEGIN TRANSACTION
@@ -953,13 +984,42 @@ RabbitMQ publish = failure
 
 sem possibilidade de recuperação.
 
+**Como está implementado:**
+
+- **Outbox por módulo.** Cada módulo que publica mapeia
+  `{módulo}_outbox_messages` no próprio `DbContext`
+  (`modelBuilder.AddOutbox("payments")`), porque é isso que faz
+  "agregado salvo ⇔ evento gravado" ser uma transação só (todos os
+  módulos compartilham o banco, então o nome do módulo vai no nome da
+  tabela). Existem `payments_outbox_messages`, `orders_outbox_messages` e
+  `inventory_outbox_messages`.
+- **Uma interface de outbox por módulo** (`IPaymentsOutbox`,
+  `IOrdersOutbox`, `IInventoryOutbox`, todas `IOutbox`, em
+  `Application/Contracts`), implementada sobre o `OutboxWriter<TDbContext>`
+  compartilhado — vários módulos publicam, então um `IOutbox` único não
+  saberia em qual `DbContext` escrever. A linha guarda também o trace e a
+  causa.
+- **Relay.** `OutboxRelayBackgroundService` (módulo Messaging) lê a cada
+  segundo as linhas pendentes de cada outbox registrado, publica em ordem
+  com *publisher confirms* e só marca `SentAt` depois da confirmação — a
+  entrega é "pelo menos uma vez", e os consumidores são idempotentes (seção
+  21). Uma falha, inclusive uma confirmação que não chega a tempo, fica na
+  linha (`PublishAttempts`, `LastError`) e é tentada no ciclo seguinte; nada
+  ali derruba a API. Uma instância só é suposta: com várias, as linhas
+  precisariam ser reivindicadas (`FOR UPDATE SKIP LOCKED`).
+- **Nunca publicar direto.** Nenhum código publica no broker fora do relay
+  (e do reprocessamento de mensagens que falharam): todo evento passa pelo
+  outbox do módulo.
+
 ---
 
 # 21. RabbitMQ
 
 RabbitMQ será utilizado somente quando existir uma necessidade clara de comunicação assíncrona.
 
-A arquitetura futura será:
+Essa necessidade chegou com o V3 (eventos entre módulos, timeline do
+pedido, e em seguida rastreamento em tempo real e o futuro PayCore). A
+arquitetura futura será:
 
 ```text
 OrderCore
@@ -990,6 +1050,41 @@ O projeto deve considerar que mensagens podem:
 * precisar de retry.
 
 Portanto, consumidores devem ser idempotentes.
+
+**Como está implementado** (módulo Messaging, `RabbitMQ.Client` usado
+direto, sem framework de mensageria):
+
+- **Sempre o broker.** A API não sobe sem RabbitMQ (algumas tentativas na
+  subida, depois falha) nem sem `RabbitMq:Password`; `docker compose` sobe
+  o `rabbitmq:4-management`, e os testes de integração sobem um container
+  (um vhost por host de teste). Não existe caminho em memória para eventos
+  de integração.
+- **Topologia.** Exchange `topic` durável `ordercore.events`, routing key
+  `{contrato}.v{versão}`. Uma fila por consumidor (`orders.payment-outcomes`,
+  `orders.timeline`), ligada só aos eventos que ele trata — cada consumidor
+  recebe sua própria cópia. Um evento sem fila ligada (alertas de estoque,
+  por enquanto) é descartado pelo broker, como esperado.
+- **Consumidores idempotentes (inbox).** O host de consumidores confere
+  `{módulo}_processed_messages` (chave `MessageId` + `Consumer`) no
+  `DbContext` do módulo consumidor e grava a linha junto com as mudanças
+  do handler; uma segunda entrega vira no-op, inclusive duas simultâneas.
+  Os handlers também toleram estado que já seguiu adiante (um pedido que
+  não está mais `PendingPayment` é ignorado com log).
+- **Retentativas e mensagens que falharam.** Cinco tentativas — na hora,
+  depois de 10 s, 1 min, 5 min e 30 min — por filas de espera com TTL que
+  devolvem a mensagem à fila do consumidor (sem plugin). Depois da quinta,
+  ou de imediato para uma mensagem ilegível, ela vira uma linha em
+  `failed_messages` e é confirmada: nunca bloqueia a fila. O admin lista,
+  inspeciona, reprocessa (volta só para a fila daquele consumidor, como
+  primeira tentativa) ou descarta em `messaging/failed-messages`.
+- **Trace.** O consumidor continua o trace que veio na mensagem; o que o
+  handler publica sai no mesmo trace, com a mensagem tratada como causa.
+- **Conexão.** Uma conexão, deixada para a recuperação automática do
+  cliente (os consumidores são reinscritos na conexão recuperada); os
+  canais pedidos durante uma queda falham e são tentados de novo. Durante
+  uma queda, a API continua aceitando pedidos: os eventos esperam no outbox.
+- Tudo roda no processo da API por enquanto; consumidores em processo
+  separado ficam para quando houver motivo (PayCore).
 
 ---
 
@@ -1729,6 +1824,14 @@ de movimentos por `(ProductId, CreatedAt)`), `AddCustomerCreatedAtIndex`
 (Customers) e `AddOrderListIndexes` (Orders — `CreatedAt` e `ConfirmedAt`).
 Os status novos (`Voided`, `Returned`) cabem nas colunas de texto que já
 existiam.
+A mensageria acrescentou `InitialMessagingSchema` (Messaging —
+`failed_messages`) e `AddFailedMessageResolution` (`ResolvedAt`),
+`MoveOutboxToSharedMessaging` (Payments — `outbox_messages` renomeada para
+`payments_outbox_messages`, com as colunas de trace, causa e tentativas;
+escrita à mão para as linhas pendentes sobreviverem), `AddOrdersInbox`,
+`AddOrdersOutbox` e `AddOrderTimeline` (Orders —
+`orders_processed_messages`, `orders_outbox_messages` e `order_timeline`)
+e `AddInventoryOutbox` (Inventory — `inventory_outbox_messages`).
 `IProductCatalog` (contrato do próprio Orders) também ganhou sua
 implementação real, `ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`),
 que lê de `IProductRepository` do Catalog — a indireção de "Application
@@ -1787,19 +1890,12 @@ e `Payments`:
   (Orders) é o segundo, despachado por `EfOrderRepository.SaveChangesAsync`
   sem precisar de `IUnitOfWork` — toda operação de Orders mexe em um único
   agregado raiz por vez.
-- `Payments` publica seus `IntegrationEvent` (seção 19) através da mesma
-  infraestrutura de domain events, não de um message broker de verdade:
-  `IntegrationEvent` passou a implementar `IDomainEvent`, e
-  `OutboxPublisherBackgroundService` (`Modules/Payments/Infrastructure/Outbox`)
-  lê periodicamente as linhas pendentes de `outbox_messages` e chama
-  `IDomainEventDispatcher.DispatchAsync` diretamente sobre elas. É uma ponte
-  deliberada e temporária até o RabbitMQ (seção 21) existir — o outbox
-  garante a escrita atômica evento+agregado na mesma transação (a
-  necessidade real do padrão), e o dispatcher in-process cobre a "entrega"
-  até existir um transporte de verdade. `Orders` reage a esses eventos
-  (`PaymentAuthorized`/`PaymentFailed`) como qualquer outro
-  `IDomainEventHandler<T>` — ver
-  [06-payments.md](../diagrams/implementation-class/06-payments.md).
+- Eventos de integração saem pelo outbox de cada módulo e o RabbitMQ
+  (seções 19 a 21). Até a mensageria, `Payments` "publicava" chamando o
+  `IDomainEventDispatcher` em memória a partir do próprio outbox; essa
+  ponte temporária foi removida, e domain events voltaram a ser só o que
+  acontece dentro de um módulo — ver
+  [09-messaging.md](../diagrams/implementation-class/09-messaging.md).
 
 ---
 
@@ -1807,14 +1903,15 @@ e `Payments`:
 
 O ambiente local deverá ser reproduzível.
 
-Inicialmente:
+Hoje (`docker-compose.yml`), com as credenciais do RabbitMQ no `.env`:
 
 ```text
 OrderCore
 PostgreSQL
+RabbitMQ (management UI em http://localhost:15672)
 ```
 
-Posteriormente:
+Posteriormente, quando algo precisar de cache/locks de verdade:
 
 ```text
 OrderCore

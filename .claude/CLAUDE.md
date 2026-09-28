@@ -22,6 +22,9 @@ Existing modules include:
 - Identity (cross-cutting/technical module: accounts, credentials, refresh
   sessions and JWT issuing/validation for customers and admins; the
   `Customer` itself stays in Customers)
+- Messaging (cross-cutting/technical module: the RabbitMQ connection and
+  topology, the outbox relay, the consumer host with inbox and retries,
+  and the failed messages admins replay or discard — see Messaging below)
 
 Cross-cutting functionality belongs under:
 
@@ -178,7 +181,7 @@ to a module.
 
 The project targets PostgreSQL via Entity Framework Core. Every module —
 the five business modules (Customers, Catalog, Orders, Inventory,
-Payments) and both technical ones (Identity, AuditLogs) — has
+Payments) and the technical ones (Identity, AuditLogs, Messaging) — has
 `Infrastructure/Persistence` implemented end to end. Follow their shape
 when implementing persistence for a new module:
 
@@ -235,6 +238,9 @@ Database
   without an `IUnitOfWork`, the reference) place this actually happens;
   domain events raised but never dispatched (true for every module before
   Inventory) just sit unused on the aggregate until `ClearDomainEvents()`;
+- domain events stay inside their module and process; whatever another
+  module needs to react to or show goes out as an integration event
+  through the module's outbox (see Messaging);
 - use EF Core migrations, not schema changes applied ad hoc;
 - do not run or apply production migrations automatically from application
   startup;
@@ -274,13 +280,55 @@ things repairable by repeating the request:
 - put the step whose failure matters most first (cancelling settles the
   money before touching stock) and the owning aggregate's save last.
 
-Integration-event consumers (anything the outbox publisher dispatches)
-must **tolerate state that has moved on**: the publisher retries a
-message until its handler succeeds and publishes nothing after it
-meanwhile, so a handler that throws for a message that can never succeed
-blocks the whole outbox. `ConfirmOrderUseCase`/
-`MarkOrderPaymentFailedUseCase` skip (and log) an order that is no
-longer `PendingPayment` instead of throwing.
+Integration-event handlers must **tolerate state that has moved on**:
+a handler that throws for a message that can never succeed only burns
+its five attempts and parks the message in the failed list.
+`ConfirmOrderUseCase`/`MarkOrderPaymentFailedUseCase` skip (and log) an
+order that is no longer `PendingPayment` instead of throwing.
+
+## Messaging (integration events)
+
+Modules talk asynchronously through RabbitMQ, never in-process: see
+`Docs/specs/events/async-messaging.md` and
+`Docs/diagrams/implementation-class/09-messaging.md`.
+
+- **Contracts live in the publishing module**, under
+  `Modules/<Module>/Contracts/IntegrationEvents`, one record per file,
+  deriving from `Shared/Application/Messaging/IntegrationEvent` and
+  carrying a `const string Name` (`<module>.<event>`, e.g.
+  `orders.order-shipped`). They never reference the module's own
+  Domain/Application/Infrastructure. Register each one in the module's
+  DI with `services.AddIntegrationEvent<T>(T.Name, version)`. An additive
+  change keeps the version; a breaking one adds a new version.
+- **A message handler knows other modules only through their
+  `Contracts.IntegrationEvents`** (`IntegrationEventTests` enforces it).
+  Handlers implement `IIntegrationEventHandler<T>` and are registered
+  with `AddIntegrationEventConsumer<TEvent, THandler, TInboxDbContext>(queue)`,
+  one queue per consumer (`<module>.<consumer>`), the inbox in the
+  consuming module's own `DbContext` (`modelBuilder.AddInbox("<module>")`).
+- **Publish through the outbox, never directly.** A publishing module
+  maps `modelBuilder.AddOutbox("<module>")`, registers
+  `AddOutboxSource<TDbContext>()`, and exposes its own outbox interface in
+  `Application/Contracts` (`IPaymentsOutbox : IOutbox`, `IOrdersOutbox`,
+  `IInventoryOutbox`) implemented over `OutboxWriter<TDbContext>` — one per
+  module, because several modules publish. Enqueue before the save that
+  changes the aggregate, so both commit together; where a repository or
+  unit of work already collects domain events, translate them there
+  (`EfOrderRepository`, `InventoryUnitOfWork`) instead of in every use case.
+  Nothing but the relay (and the failed-message replay) talks to the broker.
+- **Every consumer is idempotent.** The inbox turns a redelivery into a
+  no-op, but a handler must also be safe to run against state that moved
+  on, and must not save in a way that bypasses the scope's `DbContext`
+  (the inbox row commits with the handler's changes).
+- **Trace context travels in messages.** The outbox stores the current
+  W3C trace context; the consumer host continues it and records the
+  handled message as the causation of anything published meanwhile. The
+  correlation id is the trace id — don't add a separate one.
+- The API needs RabbitMQ to start (`RabbitMq:Password` from the
+  environment/user-secrets, never committed). Integration tests get a
+  shared RabbitMQ container with one virtual host per host
+  (`TestBroker`) and millisecond retries; `TestOutboxes` wires module
+  outboxes for tests that build repositories by hand.
 
 ## Cross-Cutting Concerns
 
