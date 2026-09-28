@@ -2,11 +2,13 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
+using OrderCore.Api.Modules.Payments.Application.Telemetry;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
@@ -27,15 +29,17 @@ public sealed class CapturePaymentUseCase
     private readonly IPaymentProvider _provider;
     private readonly IPaymentsOutbox _outbox;
     private readonly IAuditLogService _auditLog;
+    private readonly PaymentsMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public CapturePaymentUseCase(
-        IPaymentRepository payments, IPaymentProvider provider, IPaymentsOutbox outbox, IAuditLogService auditLog, TimeProvider timeProvider)
+        IPaymentRepository payments, IPaymentProvider provider, IPaymentsOutbox outbox, IAuditLogService auditLog, PaymentsMetrics metrics, TimeProvider timeProvider)
     {
         _payments = payments;
         _provider = provider;
         _outbox = outbox;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
@@ -58,6 +62,8 @@ public sealed class CapturePaymentUseCase
 
     private async Task<CreatePaymentResult> CaptureAsync(Payment payment, CancellationToken cancellationToken)
     {
+        Observed.Payment(payment.Id);
+        Observed.Order(payment.OrderId);
         if (payment.Status == PaymentStatus.Captured)
         {
             return new CreatePaymentResult(payment.Id, payment.Status.ToString());
@@ -90,6 +96,7 @@ public sealed class CapturePaymentUseCase
             Currency = payment.Currency,
         });
         await _payments.SaveChangesAsync(cancellationToken);
+        _metrics.Captured();
 
         await _auditLog.RecordAsync(AuditLogActionNames.PaymentCaptured, "Payment", payment.Id, metadata: null, userId: null, cancellationToken);
 

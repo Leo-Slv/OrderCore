@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
+using OrderCore.Api.Modules.Inventory.Application.Telemetry;
 using OrderCore.Api.Modules.Inventory.Application.UseCases;
 using OrderCore.Api.Modules.Inventory.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Inventory.Domain.Events;
@@ -36,6 +37,8 @@ public static class InventoryDependencyInjection
         services.AddScoped<IStockMovementReader, EfStockMovementReader>();
 
         services.AddScoped<IDomainEventHandler<InventoryStockMovementRecorded>, StockMovementRecorder>();
+        services.AddScoped<IDomainEventHandler<StockAlertRaised>, StockAlertMetricsRecorder>();
+        services.AddSingleton<InventoryMetrics>();
 
         // What Inventory publishes, through its own outbox (Docs/specs/events).
         // Stock alerts have no consumer yet.

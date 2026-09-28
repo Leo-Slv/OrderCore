@@ -1,6 +1,7 @@
 using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
+using OrderCore.Api.Modules.Inventory.Application.Telemetry;
 using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Inventory.Application.UseCases;
@@ -11,6 +12,7 @@ public sealed class ReleaseReservationUseCase
     private readonly IInventoryReservationRepository _reservations;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAuditLogService _auditLog;
+    private readonly InventoryMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public ReleaseReservationUseCase(
@@ -18,12 +20,14 @@ public sealed class ReleaseReservationUseCase
         IInventoryReservationRepository reservations,
         IUnitOfWork unitOfWork,
         IAuditLogService auditLog,
+        InventoryMetrics metrics,
         TimeProvider timeProvider)
     {
         _stockItems = stockItems;
         _reservations = reservations;
         _unitOfWork = unitOfWork;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
@@ -40,6 +44,7 @@ public sealed class ReleaseReservationUseCase
         stockItem.Release(reservation.Quantity, now);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _metrics.Released("released");
 
         await _auditLog.RecordAsync(
             AuditLogActionNames.InventoryReleased, "InventoryReservation", reservationId, metadata: null, userId: null, cancellationToken);

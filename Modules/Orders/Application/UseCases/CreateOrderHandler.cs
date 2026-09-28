@@ -2,8 +2,10 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
+using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
@@ -22,6 +24,7 @@ public sealed class CreateOrderHandler
     private readonly IProductCatalog _productCatalog;
     private readonly IOrderNumberGenerator _orderNumbers;
     private readonly IAuditLogService _auditLog;
+    private readonly OrdersMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public CreateOrderHandler(
@@ -29,12 +32,14 @@ public sealed class CreateOrderHandler
         IProductCatalog productCatalog,
         IOrderNumberGenerator orderNumbers,
         IAuditLogService auditLog,
+        OrdersMetrics metrics,
         TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _productCatalog = productCatalog;
         _orderNumbers = orderNumbers;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
@@ -60,6 +65,9 @@ public sealed class CreateOrderHandler
 
         await _orderRepository.AddAsync(order, cancellationToken);
         await _orderRepository.SaveChangesAsync(cancellationToken);
+        Observed.Order(order.Id);
+        Observed.Customer(order.CustomerId);
+        _metrics.OrderCreated("admin");
 
         await _auditLog.RecordAsync(
             AuditLogActionNames.OrderCreated,

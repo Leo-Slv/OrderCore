@@ -2,11 +2,13 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
+using OrderCore.Api.Modules.Payments.Application.Telemetry;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
@@ -34,6 +36,7 @@ public sealed class SettlePaymentForCancellationUseCase
     private readonly IPaymentsOutbox _outbox;
     private readonly RequestRefundUseCase _requestRefund;
     private readonly IAuditLogService _auditLog;
+    private readonly PaymentsMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public SettlePaymentForCancellationUseCase(
@@ -42,6 +45,7 @@ public sealed class SettlePaymentForCancellationUseCase
         IPaymentsOutbox outbox,
         RequestRefundUseCase requestRefund,
         IAuditLogService auditLog,
+        PaymentsMetrics metrics,
         TimeProvider timeProvider)
     {
         _payments = payments;
@@ -49,11 +53,13 @@ public sealed class SettlePaymentForCancellationUseCase
         _outbox = outbox;
         _requestRefund = requestRefund;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
     public async Task<PaymentSettlementOutcome> ExecuteAsync(Guid orderId, string reason, CancellationToken cancellationToken)
     {
+        Observed.Order(orderId);
         var payment = await _payments.GetByOrderIdAsync(orderId, cancellationToken);
 
         switch (payment?.Status)
@@ -98,6 +104,7 @@ public sealed class SettlePaymentForCancellationUseCase
             PaymentId = payment.Id,
         });
         await _payments.SaveChangesAsync(cancellationToken);
+        _metrics.Voided();
 
         await _auditLog.RecordAsync(
             AuditLogActionNames.PaymentVoided,

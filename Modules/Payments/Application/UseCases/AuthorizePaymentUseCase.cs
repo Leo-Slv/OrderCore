@@ -1,11 +1,13 @@
 using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
+using OrderCore.Api.Modules.Payments.Application.Telemetry;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
@@ -22,15 +24,17 @@ public sealed class AuthorizePaymentUseCase
     private readonly IPaymentProvider _provider;
     private readonly IPaymentsOutbox _outbox;
     private readonly IAuditLogService _auditLog;
+    private readonly PaymentsMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public AuthorizePaymentUseCase(
-        IPaymentRepository payments, IPaymentProvider provider, IPaymentsOutbox outbox, IAuditLogService auditLog, TimeProvider timeProvider)
+        IPaymentRepository payments, IPaymentProvider provider, IPaymentsOutbox outbox, IAuditLogService auditLog, PaymentsMetrics metrics, TimeProvider timeProvider)
     {
         _payments = payments;
         _provider = provider;
         _outbox = outbox;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
@@ -75,6 +79,16 @@ public sealed class AuthorizePaymentUseCase
         }
 
         await _payments.SaveChangesAsync(cancellationToken);
+        Observed.Payment(payment.Id);
+        Observed.Order(payment.OrderId);
+        if (result.Succeeded)
+        {
+            _metrics.Authorized(payment.Method.ToString());
+        }
+        else
+        {
+            _metrics.Declined(payment.Method.ToString(), payment.FailureReason);
+        }
 
         if (result.Succeeded)
         {

@@ -3,7 +3,9 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
+using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 
@@ -32,6 +34,7 @@ public sealed class CancelOrderUseCase
     private readonly IInventoryService _inventoryService;
     private readonly IPaymentGateway _paymentGateway;
     private readonly IAuditLogService _auditLog;
+    private readonly OrdersMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public CancelOrderUseCase(
@@ -39,12 +42,14 @@ public sealed class CancelOrderUseCase
         IInventoryService inventoryService,
         IPaymentGateway paymentGateway,
         IAuditLogService auditLog,
+        OrdersMetrics metrics,
         TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _inventoryService = inventoryService;
         _paymentGateway = paymentGateway;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
@@ -55,6 +60,8 @@ public sealed class CancelOrderUseCase
             throw new ArgumentException("A reason is required to cancel an order.", nameof(command));
         }
 
+        Observed.Order(command.OrderId);
+        Observed.Customer(command.RequestingCustomerId);
         var order = await OrderAccess.LoadVisibleToAsync(_orderRepository, command.OrderId, command.RequestingCustomerId, cancellationToken);
 
         if (command.RequestingCustomerId is null)
@@ -72,6 +79,7 @@ public sealed class CancelOrderUseCase
 
         order.Cancel(command.Reason, _timeProvider.GetUtcNow());
         await _orderRepository.SaveChangesAsync(cancellationToken);
+        _metrics.OrderCancelled(command.RequestingCustomerId is null ? "admin" : "customer");
 
         await _auditLog.RecordAsync(
             AuditLogActionNames.OrderCancelled,

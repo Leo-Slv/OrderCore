@@ -1,11 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
+using OrderCore.Api.Modules.Payments.Application.Telemetry;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
 using OrderCore.Api.Modules.Payments.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Modules.Payments.Infrastructure.Providers;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
 using OrderCore.Api.Modules.Payments.Infrastructure.Webhooks;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
@@ -23,7 +25,10 @@ public static class PaymentsDependencyInjection
     public static IServiceCollection AddPaymentsModule(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<FakePaymentProviderOptions>(_ => { });
-        services.AddSingleton<IPaymentProvider, FakePaymentProvider>();
+        services.AddSingleton<PaymentsMetrics>();
+        services.AddSingleton<FakePaymentProvider>();
+        services.AddSingleton<IPaymentProvider>(provider => new MeasuredPaymentProvider(
+            provider.GetRequiredService<FakePaymentProvider>(), provider.GetRequiredService<PaymentsMetrics>(), "Fake"));
 
         services.AddDbContext<PaymentsDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));

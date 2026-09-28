@@ -40,6 +40,7 @@ public static class ObservabilityExtensions
             options.IncludeFormattedMessage = true;
             options.IncludeScopes = true;
             options.ParseStateValues = true;
+            options.AddProcessor(new SpanIdsLogProcessor());
         });
 
         if (builder.Environment.IsDevelopment())

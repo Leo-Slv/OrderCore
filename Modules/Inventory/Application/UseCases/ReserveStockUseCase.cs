@@ -3,8 +3,10 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
 using OrderCore.Api.Modules.Inventory.Application.DTOs;
+using OrderCore.Api.Modules.Inventory.Application.Telemetry;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Inventory.Application.UseCases;
 
@@ -24,6 +26,7 @@ public sealed class ReserveStockUseCase
     private readonly IInventoryReservationRepository _reservations;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAuditLogService _auditLog;
+    private readonly InventoryMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public ReserveStockUseCase(
@@ -31,17 +34,21 @@ public sealed class ReserveStockUseCase
         IInventoryReservationRepository reservations,
         IUnitOfWork unitOfWork,
         IAuditLogService auditLog,
+        InventoryMetrics metrics,
         TimeProvider timeProvider)
     {
         _stockItems = stockItems;
         _reservations = reservations;
         _unitOfWork = unitOfWork;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
     public async Task<ReserveStockResult> ExecuteAsync(ReserveStockCommand command, CancellationToken cancellationToken)
     {
+        Observed.Product(command.ProductId);
+        Observed.Order(command.OrderId);
         for (var attempt = 1; ; attempt++)
         {
             var stockItem = await _stockItems.GetByProductIdAsync(command.ProductId, cancellationToken)
@@ -50,6 +57,7 @@ public sealed class ReserveStockUseCase
             var now = _timeProvider.GetUtcNow();
             if (!stockItem.TryReserve(command.Quantity, now))
             {
+                _metrics.ReservationRefused();
                 return new ReserveStockResult(null, false);
             }
 
@@ -59,6 +67,7 @@ public sealed class ReserveStockUseCase
             try
             {
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
+                _metrics.Reserved();
 
                 await _auditLog.RecordAsync(
                     AuditLogActionNames.InventoryReserved,

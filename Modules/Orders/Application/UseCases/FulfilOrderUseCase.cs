@@ -2,8 +2,10 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
+using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 
@@ -21,14 +23,16 @@ public sealed class FulfilOrderUseCase
     private readonly IOrderRepository _orderRepository;
     private readonly IPaymentGateway _paymentGateway;
     private readonly IAuditLogService _auditLog;
+    private readonly OrdersMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public FulfilOrderUseCase(
-        IOrderRepository orderRepository, IPaymentGateway paymentGateway, IAuditLogService auditLog, TimeProvider timeProvider)
+        IOrderRepository orderRepository, IPaymentGateway paymentGateway, IAuditLogService auditLog, OrdersMetrics metrics, TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _paymentGateway = paymentGateway;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
@@ -49,7 +53,9 @@ public sealed class FulfilOrderUseCase
         await _paymentGateway.CaptureForOrderAsync(orderId, cancellationToken);
         order.Ship(_timeProvider.GetUtcNow());
 
-        return await SaveAsync(order, AuditLogActionNames.OrderShipped, cancellationToken);
+        var shipped = await SaveAsync(order, AuditLogActionNames.OrderShipped, cancellationToken);
+        _metrics.OrderShipped();
+        return shipped;
     }
 
     public async Task<OrderDetailsOutput> DeliverAsync(Guid orderId, CancellationToken cancellationToken)
@@ -58,12 +64,17 @@ public sealed class FulfilOrderUseCase
 
         order.Deliver(_timeProvider.GetUtcNow());
 
-        return await SaveAsync(order, AuditLogActionNames.OrderDelivered, cancellationToken);
+        var delivered = await SaveAsync(order, AuditLogActionNames.OrderDelivered, cancellationToken);
+        _metrics.OrderDelivered();
+        return delivered;
     }
 
-    private async Task<Order> LoadAsync(Guid orderId, CancellationToken cancellationToken) =>
-        await _orderRepository.GetByIdAsync(orderId, cancellationToken)
+    private async Task<Order> LoadAsync(Guid orderId, CancellationToken cancellationToken)
+    {
+        Observed.Order(orderId);
+        return await _orderRepository.GetByIdAsync(orderId, cancellationToken)
             ?? throw new NotFoundException("order_not_found", $"Order '{orderId}' was not found.");
+    }
 
     private async Task<OrderDetailsOutput> SaveAsync(Order order, string auditAction, CancellationToken cancellationToken)
     {

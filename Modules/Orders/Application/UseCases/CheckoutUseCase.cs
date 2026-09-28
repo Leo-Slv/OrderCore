@@ -2,9 +2,11 @@ using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
+using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 using OrderCore.Api.Modules.Orders.Domain.Enums;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Orders.Application.UseCases;
@@ -30,6 +32,8 @@ namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 /// finds it and requests payment again. Payments allows only one payment
 /// per order, so the retry can't charge twice.</item>
 /// </list>
+/// Every checkout is measured (<see cref="OrdersMetrics"/>): its duration by
+/// outcome, and a refusal by the error code the customer got.
 /// </summary>
 public sealed class CheckoutUseCase
 {
@@ -40,6 +44,7 @@ public sealed class CheckoutUseCase
     private readonly IPaymentGateway _paymentGateway;
     private readonly IOrderNumberGenerator _orderNumbers;
     private readonly IAuditLogService _auditLog;
+    private readonly OrdersMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public CheckoutUseCase(
@@ -50,8 +55,10 @@ public sealed class CheckoutUseCase
         IPaymentGateway paymentGateway,
         IOrderNumberGenerator orderNumbers,
         IAuditLogService auditLog,
+        OrdersMetrics metrics,
         TimeProvider timeProvider)
     {
+        _metrics = metrics;
         _orderRepository = orderRepository;
         _productCatalog = productCatalog;
         _customerDirectory = customerDirectory;
@@ -65,6 +72,34 @@ public sealed class CheckoutUseCase
     /// <returns>The id of the order this checkout created, or the one it had already created for this key.</returns>
     public async Task<Guid> ExecuteAsync(CheckoutCommand command, CancellationToken cancellationToken)
     {
+        Observed.Customer(command.CustomerId);
+        var started = _timeProvider.GetTimestamp();
+        try
+        {
+            var (orderId, outcome) = await PlaceAsync(command, cancellationToken);
+            Observed.Order(orderId);
+            _metrics.CheckoutFinished(outcome, _timeProvider.GetElapsedTime(started));
+            return orderId;
+        }
+        catch (Exception exception) when (ErrorCodeOf(exception) is { } code)
+        {
+            _metrics.CheckoutFinished("refused", _timeProvider.GetElapsedTime(started));
+            _metrics.CheckoutRefused(code);
+            throw;
+        }
+    }
+
+    private static string? ErrorCodeOf(Exception exception) => exception switch
+    {
+        DomainRuleViolationException rule => rule.Code,
+        NotFoundException notFound => notFound.Code,
+        ConflictException conflict => conflict.Code,
+        ArgumentException => "validation_error",
+        _ => null,
+    };
+
+    private async Task<(Guid OrderId, string Outcome)> PlaceAsync(CheckoutCommand command, CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(command.IdempotencyKey))
         {
             throw new ArgumentException("An idempotency key is required.", nameof(command));
@@ -74,7 +109,7 @@ public sealed class CheckoutUseCase
         if (existing is not null)
         {
             await ResumePaymentIfMissingAsync(existing, command.PaymentMethod, cancellationToken);
-            return existing.Id;
+            return (existing.Id, "repeated");
         }
 
         if (command.Items.Count == 0)
@@ -121,9 +156,10 @@ public sealed class CheckoutUseCase
         var savedOrder = await SaveReleasingReservationsOnFailureAsync(order, command, cancellationToken);
         if (savedOrder.Id != order.Id)
         {
-            return savedOrder.Id;
+            return (savedOrder.Id, "repeated");
         }
 
+        _metrics.OrderCreated("checkout");
         await _auditLog.RecordAsync(
             AuditLogActionNames.OrderCreated,
             "Order",
@@ -135,7 +171,7 @@ public sealed class CheckoutUseCase
         await _paymentGateway.RequestPaymentAsync(
             order.Id, order.TotalAmount, order.Currency, command.PaymentMethod, order.Id.ToString(), cancellationToken);
 
-        return order.Id;
+        return (order.Id, "placed");
     }
 
     /// <summary>

@@ -53,9 +53,10 @@ public sealed class AdminSeedHostedService : IHostedService
         {
             await using var scope = _scopeFactory.CreateAsyncScope();
             var seedAdmin = scope.ServiceProvider.GetRequiredService<SeedAdminUseCase>();
-            if (await seedAdmin.ExecuteAsync(_options.AdminEmail!, _options.AdminPassword!, cancellationToken))
+            // Only the id: e-mails and names never reach the logs (observability spec).
+            if (await seedAdmin.ExecuteAsync(_options.AdminEmail!, _options.AdminPassword!, cancellationToken) is { } adminId)
             {
-                _logger.LogInformation("Seed administrator {Email} created.", _options.AdminEmail);
+                _logger.LogInformation("Seed administrator {AccountId} created.", adminId);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

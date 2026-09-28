@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Inventory.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
+using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Domain.Events;
 using OrderCore.Api.Modules.Orders.Infrastructure.Adapters;
@@ -34,6 +35,7 @@ public static class OrdersDependencyInjection
         services.AddDbContext<OrdersDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 
+        services.AddSingleton<OrdersMetrics>();
         services.AddScoped<IOrderRepository, EfOrderRepository>();
         services.AddScoped<IOrderNumberGenerator, SequentialOrderNumberGenerator>();
         services.AddScoped<IProductCatalog, ProductCatalogAdapter>();

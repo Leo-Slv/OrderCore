@@ -1,11 +1,13 @@
 using OrderCore.Api.Modules.AuditLogs.Application.Constants;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
+using OrderCore.Api.Modules.Payments.Application.Telemetry;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
@@ -24,15 +26,17 @@ public sealed class RequestRefundUseCase
     private readonly IPaymentProvider _provider;
     private readonly IPaymentsOutbox _outbox;
     private readonly IAuditLogService _auditLog;
+    private readonly PaymentsMetrics _metrics;
     private readonly TimeProvider _timeProvider;
 
     public RequestRefundUseCase(
-        IPaymentRepository payments, IPaymentProvider provider, IPaymentsOutbox outbox, IAuditLogService auditLog, TimeProvider timeProvider)
+        IPaymentRepository payments, IPaymentProvider provider, IPaymentsOutbox outbox, IAuditLogService auditLog, PaymentsMetrics metrics, TimeProvider timeProvider)
     {
         _payments = payments;
         _provider = provider;
         _outbox = outbox;
         _auditLog = auditLog;
+        _metrics = metrics;
         _timeProvider = timeProvider;
     }
 
@@ -40,6 +44,8 @@ public sealed class RequestRefundUseCase
     {
         var payment = await _payments.GetByIdAsync(command.PaymentId, cancellationToken)
             ?? throw new NotFoundException("payment_not_found", $"Payment '{command.PaymentId}' was not found.");
+        Observed.Payment(payment.Id);
+        Observed.Order(payment.OrderId);
 
         var now = _timeProvider.GetUtcNow();
         var refund = payment.RequestRefund(command.Amount, command.Reason, now);
@@ -79,6 +85,7 @@ public sealed class RequestRefundUseCase
         }
 
         await _payments.SaveChangesAsync(cancellationToken);
+        _metrics.Refunded(result.Succeeded ? "completed" : "failed");
 
         if (paymentFullyRefunded)
         {

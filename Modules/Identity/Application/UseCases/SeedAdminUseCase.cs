@@ -29,12 +29,12 @@ public sealed class SeedAdminUseCase
         _timeProvider = timeProvider;
     }
 
-    /// <returns>Whether an admin was created.</returns>
-    public async Task<bool> ExecuteAsync(string email, string password, CancellationToken cancellationToken)
+    /// <returns>The id of the admin created, or <c>null</c> when an admin already existed.</returns>
+    public async Task<Guid?> ExecuteAsync(string email, string password, CancellationToken cancellationToken)
     {
         if (await _accounts.AnyAdminAsync(cancellationToken))
         {
-            return false;
+            return null;
         }
 
         PasswordPolicy.EnsureAcceptable(password);
@@ -56,6 +56,6 @@ public sealed class SeedAdminUseCase
             userId: null,
             cancellationToken);
 
-        return true;
+        return admin.Id;
     }
 }
