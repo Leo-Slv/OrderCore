@@ -18,10 +18,16 @@ public sealed class ExpireReservationUseCase
     private readonly IStockItemRepository _stockItems;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAuditLogService _auditLog;
+    private readonly TimeProvider _timeProvider;
 
     public ExpireReservationUseCase(
-        IInventoryReservationRepository reservations, IStockItemRepository stockItems, IUnitOfWork unitOfWork, IAuditLogService auditLog)
+        IInventoryReservationRepository reservations,
+        IStockItemRepository stockItems,
+        IUnitOfWork unitOfWork,
+        IAuditLogService auditLog,
+        TimeProvider timeProvider)
     {
+        _timeProvider = timeProvider;
         _reservations = reservations;
         _stockItems = stockItems;
         _unitOfWork = unitOfWork;
@@ -37,7 +43,7 @@ public sealed class ExpireReservationUseCase
             ?? throw new NotFoundException("stock_item_not_found", $"No stock record for product '{reservation.ProductId}'.");
 
         reservation.Expire();
-        stockItem.Release(reservation.Quantity);
+        stockItem.Release(reservation.Quantity, _timeProvider.GetUtcNow());
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

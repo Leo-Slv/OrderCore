@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Models;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 
 namespace OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 
@@ -24,5 +25,8 @@ public sealed class InventoryDbContext : DbContext
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(InventoryDbContext).Assembly, type =>
             type.Namespace == "OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Configurations");
+
+        // What Inventory announces, saved with the stock change (Docs/specs/events).
+        modelBuilder.AddOutbox("inventory");
     }
 }

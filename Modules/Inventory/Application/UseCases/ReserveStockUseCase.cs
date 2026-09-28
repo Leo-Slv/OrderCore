@@ -47,12 +47,12 @@ public sealed class ReserveStockUseCase
             var stockItem = await _stockItems.GetByProductIdAsync(command.ProductId, cancellationToken)
                 ?? throw new NotFoundException("stock_item_not_found", $"No stock record for product '{command.ProductId}'.");
 
-            if (!stockItem.TryReserve(command.Quantity))
+            var now = _timeProvider.GetUtcNow();
+            if (!stockItem.TryReserve(command.Quantity, now))
             {
                 return new ReserveStockResult(null, false);
             }
 
-            var now = _timeProvider.GetUtcNow();
             var reservation = InventoryReservation.Create(command.ProductId, command.OrderId, command.OrderItemId, command.Quantity, now);
             await _reservations.AddAsync(reservation, cancellationToken);
 

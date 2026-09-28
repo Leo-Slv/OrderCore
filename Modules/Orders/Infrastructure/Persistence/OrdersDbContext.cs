@@ -24,7 +24,9 @@ public sealed class OrdersDbContext : DbContext
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrdersDbContext).Assembly, type =>
             type.Namespace == "OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Configurations");
 
-        // Which integration events Orders' consumers already handled (inbox).
+        // What Orders announces, saved with the order, and which integration
+        // events its consumers already handled (Docs/specs/events).
+        modelBuilder.AddOutbox("orders");
         modelBuilder.AddInbox("orders");
 
         // Backs SequentialOrderNumberGenerator — a PostgreSQL sequence, not

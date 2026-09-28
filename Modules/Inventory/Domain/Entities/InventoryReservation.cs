@@ -74,7 +74,7 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
         var reservation = new InventoryReservation(Guid.NewGuid(), productId, orderId, orderItemId, quantity, now);
         reservation.IncrementVersion();
         reservation.Raise(new InventoryStockMovementRecorded(
-            Guid.NewGuid(), now, productId, StockMovementType.ReservationCreated, quantity, nameof(InventoryReservation), reservation.Id));
+            Guid.NewGuid(), now, productId, StockMovementType.ReservationCreated, quantity, nameof(InventoryReservation), reservation.Id, OrderId: orderId));
         return reservation;
     }
 
@@ -90,7 +90,7 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
         ReleasedAt = now;
         IncrementVersion();
         Raise(new InventoryStockMovementRecorded(
-            Guid.NewGuid(), now, ProductId, StockMovementType.ReservationReleased, Quantity, nameof(InventoryReservation), Id));
+            Guid.NewGuid(), now, ProductId, StockMovementType.ReservationReleased, Quantity, nameof(InventoryReservation), Id, OrderId: OrderId));
     }
 
     /// <summary>
@@ -103,7 +103,7 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
         ConsumedAt = now;
         IncrementVersion();
         Raise(new InventoryStockMovementRecorded(
-            Guid.NewGuid(), now, ProductId, StockMovementType.ReservationConsumed, Quantity, nameof(InventoryReservation), Id));
+            Guid.NewGuid(), now, ProductId, StockMovementType.ReservationConsumed, Quantity, nameof(InventoryReservation), Id, OrderId: OrderId));
     }
 
     /// <summary>
@@ -119,7 +119,7 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
         ReturnedAt = now;
         IncrementVersion();
         Raise(new InventoryStockMovementRecorded(
-            Guid.NewGuid(), now, ProductId, StockMovementType.ReservationReturned, Quantity, nameof(InventoryReservation), Id));
+            Guid.NewGuid(), now, ProductId, StockMovementType.ReservationReturned, Quantity, nameof(InventoryReservation), Id, OrderId: OrderId));
     }
 
     /// <summary>

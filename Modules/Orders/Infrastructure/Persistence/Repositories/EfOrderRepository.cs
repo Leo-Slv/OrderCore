@@ -3,6 +3,7 @@ using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 using OrderCore.Api.Modules.Orders.Domain.Enums;
+using OrderCore.Api.Modules.Orders.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Mappers;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Models;
 using OrderCore.Api.Shared.Application.Abstractions;
@@ -18,17 +19,25 @@ namespace OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
 /// this repository dispatches domain events itself, right after its own
 /// save succeeds, per 05-orders.md's
 /// <c>EfOrderRepository --&gt; IDomainEventDispatcher</c>.
+/// <para>
+/// Before saving, it also translates those domain events into Orders'
+/// integration events (<see cref="OrderIntegrationEventTranslator"/>) and
+/// enqueues them in the Orders outbox, so the order and what it announces
+/// commit together.
+/// </para>
 /// </summary>
 public sealed class EfOrderRepository : IOrderRepository
 {
     private readonly OrdersDbContext _dbContext;
     private readonly IDomainEventDispatcher _domainEventDispatcher;
+    private readonly IOrdersOutbox _outbox;
     private readonly Dictionary<Guid, (Order Domain, OrderPersistenceModel Model)> _tracked = new();
 
-    public EfOrderRepository(OrdersDbContext dbContext, IDomainEventDispatcher domainEventDispatcher)
+    public EfOrderRepository(OrdersDbContext dbContext, IDomainEventDispatcher domainEventDispatcher, IOrdersOutbox outbox)
     {
         _dbContext = dbContext;
         _domainEventDispatcher = domainEventDispatcher;
+        _outbox = outbox;
     }
 
     public async Task<Order?> GetByIdAsync(Guid orderId, CancellationToken cancellationToken)
@@ -150,6 +159,14 @@ public sealed class EfOrderRepository : IOrderRepository
         foreach (var (domain, model) in _tracked.Values)
         {
             OrderMapper.ApplyChanges(domain, model);
+
+            foreach (var domainEvent in domain.DomainEvents)
+            {
+                if (OrderIntegrationEventTranslator.Translate(domain, domainEvent) is { } integrationEvent)
+                {
+                    _outbox.Enqueue(integrationEvent);
+                }
+            }
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);

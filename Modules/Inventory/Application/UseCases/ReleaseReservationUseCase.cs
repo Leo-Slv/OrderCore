@@ -35,8 +35,9 @@ public sealed class ReleaseReservationUseCase
         var stockItem = await _stockItems.GetByProductIdAsync(reservation.ProductId, cancellationToken)
             ?? throw new NotFoundException("stock_item_not_found", $"No stock record for product '{reservation.ProductId}'.");
 
-        reservation.Release(_timeProvider.GetUtcNow());
-        stockItem.Release(reservation.Quantity);
+        var now = _timeProvider.GetUtcNow();
+        reservation.Release(now);
+        stockItem.Release(reservation.Quantity, now);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

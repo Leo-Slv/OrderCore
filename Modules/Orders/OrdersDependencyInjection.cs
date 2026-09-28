@@ -5,11 +5,13 @@ using OrderCore.Api.Modules.Orders.Domain.Events;
 using OrderCore.Api.Modules.Orders.Infrastructure.Adapters;
 using OrderCore.Api.Modules.Orders.Infrastructure.EventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.IntegrationEventHandlers;
+using OrderCore.Api.Modules.Orders.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
+using IntegrationEvents = OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
 
 namespace OrderCore.Api.Modules.Orders;
 
@@ -45,6 +47,19 @@ public static class OrdersDependencyInjection
         services.AddScoped<IDomainEventHandler<OrderProcessingStarted>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderShipped>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderDelivered>, OrderStatusHistoryProjector>();
+
+        // What Orders publishes, through its own outbox (Docs/specs/events).
+        services.AddScoped<OutboxWriter<OrdersDbContext>>();
+        services.AddScoped<IOrdersOutbox, OrdersOutbox>();
+        services.AddOutboxSource<OrdersDbContext>();
+        services.AddIntegrationEvent<IntegrationEvents.OrderCreated>(IntegrationEvents.OrderCreated.Name, 1);
+        services.AddIntegrationEvent<IntegrationEvents.OrderPaymentRequested>(IntegrationEvents.OrderPaymentRequested.Name, 1);
+        services.AddIntegrationEvent<IntegrationEvents.OrderConfirmed>(IntegrationEvents.OrderConfirmed.Name, 1);
+        services.AddIntegrationEvent<IntegrationEvents.OrderProcessingStarted>(IntegrationEvents.OrderProcessingStarted.Name, 1);
+        services.AddIntegrationEvent<IntegrationEvents.OrderShipped>(IntegrationEvents.OrderShipped.Name, 1);
+        services.AddIntegrationEvent<IntegrationEvents.OrderDelivered>(IntegrationEvents.OrderDelivered.Name, 1);
+        services.AddIntegrationEvent<IntegrationEvents.OrderPaymentFailed>(IntegrationEvents.OrderPaymentFailed.Name, 1);
+        services.AddIntegrationEvent<IntegrationEvents.OrderCancelled>(IntegrationEvents.OrderCancelled.Name, 1);
 
         // Payment outcomes arrive through RabbitMQ; the inbox lives in OrdersDbContext.
         services.AddIntegrationEventConsumer<PaymentAuthorized, PaymentAuthorizedIntegrationEventHandler, OrdersDbContext>(

@@ -14,6 +14,8 @@ namespace OrderCore.Api.Modules.Inventory.Domain.Events;
 /// Docs/specs/inventory/stock-and-reservations.md for why this is a single
 /// event type parametrized by <see cref="MovementType"/> rather than one
 /// per movement. <see cref="Quantity"/> is signed for adjustments.
+/// Reservation movements carry the reservation's <see cref="OrderId"/>,
+/// which the integration events published for them need.
 /// </summary>
 public sealed record InventoryStockMovementRecorded(
     Guid EventId,
@@ -23,4 +25,20 @@ public sealed record InventoryStockMovementRecorded(
     int Quantity,
     string ReferenceType,
     Guid ReferenceId,
-    string? Reason = null) : IDomainEvent;
+    string? Reason = null,
+    Guid? OrderId = null) : IDomainEvent;
+
+/// <summary>
+/// A <see cref="Entities.StockItem"/> has just entered a state worth
+/// warning about — low on stock or out of it. Raised on the change of
+/// state only, never again while the item stays there, so each alert is
+/// news (Docs/specs/events/async-messaging.md: stock alerts are published,
+/// with no consumer yet).
+/// </summary>
+public sealed record StockAlertRaised(
+    Guid EventId,
+    DateTimeOffset OccurredAt,
+    Guid ProductId,
+    StockAlertLevel Level,
+    int QuantityAvailable,
+    int ReorderLevel) : IDomainEvent;

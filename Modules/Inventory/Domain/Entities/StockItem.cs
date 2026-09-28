@@ -42,6 +42,12 @@ public sealed class StockItem : AggregateRoot<Guid>
     /// </summary>
     public bool IsLowStock => QuantityAvailable > 0 && QuantityAvailable <= ReorderLevel;
 
+    /// <summary>The state an alert is raised for, or <c>null</c> when stock is fine.</summary>
+    public StockAlertLevel? AlertLevel =>
+        QuantityAvailable <= 0 ? StockAlertLevel.OutOfStock
+        : IsLowStock ? StockAlertLevel.LowStock
+        : null;
+
     public DateTimeOffset UpdatedAt { get; private set; }
 
     private StockItem()
@@ -85,10 +91,12 @@ public sealed class StockItem : AggregateRoot<Guid>
         RequirePositive(quantity);
         RequireReasonWithinLimit(reason);
 
+        var before = AlertLevel;
         QuantityOnHand += quantity;
         UpdatedAt = now;
         IncrementVersion();
         RecordMovement(StockMovementType.Inbound, quantity, reason, now);
+        RaiseAlertIfEntered(before, now);
     }
 
     /// <summary>
@@ -100,9 +108,11 @@ public sealed class StockItem : AggregateRoot<Guid>
     {
         RequirePositive(quantity);
 
+        var before = AlertLevel;
         QuantityOnHand += quantity;
         UpdatedAt = now;
         IncrementVersion();
+        RaiseAlertIfEntered(before, now);
     }
 
     public void SetReorderLevel(int reorderLevel, DateTimeOffset now)
@@ -112,9 +122,11 @@ public sealed class StockItem : AggregateRoot<Guid>
             throw new ArgumentOutOfRangeException(nameof(reorderLevel), "Reorder level cannot be negative.");
         }
 
+        var before = AlertLevel;
         ReorderLevel = reorderLevel;
         UpdatedAt = now;
         IncrementVersion();
+        RaiseAlertIfEntered(before, now);
     }
 
     /// <summary>
@@ -122,8 +134,9 @@ public sealed class StockItem : AggregateRoot<Guid>
     /// available stock — that is the whole point of the <c>bool</c> return
     /// in 04-inventory.md: callers (section 11's central race) check the
     /// result rather than catching an exception per contended request.
+    /// <paramref name="now"/> dates the stock alert a reservation may raise.
     /// </summary>
-    public bool TryReserve(int quantity)
+    public bool TryReserve(int quantity, DateTimeOffset now)
     {
         RequirePositive(quantity);
 
@@ -132,12 +145,15 @@ public sealed class StockItem : AggregateRoot<Guid>
             return false;
         }
 
+        var before = AlertLevel;
         QuantityReserved += quantity;
         IncrementVersion();
+        RaiseAlertIfEntered(before, now);
         return true;
     }
 
-    public void Release(int quantity)
+    /// <summary><paramref name="now"/> — see <see cref="TryReserve"/>.</summary>
+    public void Release(int quantity, DateTimeOffset now)
     {
         RequirePositive(quantity);
 
@@ -146,10 +162,13 @@ public sealed class StockItem : AggregateRoot<Guid>
             throw new DomainRuleViolationException("invalid_stock_operation", "Cannot release more than is currently reserved.");
         }
 
+        var before = AlertLevel;
         QuantityReserved -= quantity;
         IncrementVersion();
+        RaiseAlertIfEntered(before, now);
     }
 
+    /// <summary>Takes reserved units off the shelf; what is available doesn't change, so no alert.</summary>
     public void Consume(int quantity)
     {
         RequirePositive(quantity);
@@ -184,10 +203,26 @@ public sealed class StockItem : AggregateRoot<Guid>
             throw new DomainRuleViolationException("stock_below_reserved", "Adjustment would leave fewer units on hand than are currently reserved.");
         }
 
+        var before = AlertLevel;
         QuantityOnHand = newQuantityOnHand;
         UpdatedAt = now;
         IncrementVersion();
         RecordMovement(StockMovementType.Adjustment, quantity, reason, now);
+        RaiseAlertIfEntered(before, now);
+    }
+
+    /// <summary>
+    /// Raises <see cref="StockAlertRaised"/> when the item has just entered
+    /// low or out of stock — including out of stock → low, which is a
+    /// different warning — and nothing while it stays in the same state.
+    /// </summary>
+    private void RaiseAlertIfEntered(StockAlertLevel? before, DateTimeOffset now)
+    {
+        var after = AlertLevel;
+        if (after is { } level && after != before)
+        {
+            Raise(new StockAlertRaised(Guid.NewGuid(), now, ProductId, level, QuantityAvailable, ReorderLevel));
+        }
     }
 
     private void RecordMovement(StockMovementType type, int quantity, string? reason, DateTimeOffset now) =>

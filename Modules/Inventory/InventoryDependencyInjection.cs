@@ -1,11 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
 using OrderCore.Api.Modules.Inventory.Application.UseCases;
+using OrderCore.Api.Modules.Inventory.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Inventory.Domain.Events;
 using OrderCore.Api.Modules.Inventory.Infrastructure.EventHandlers;
+using OrderCore.Api.Modules.Inventory.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Shared.Application.Abstractions;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 
 namespace OrderCore.Api.Modules.Inventory;
 
@@ -33,6 +36,17 @@ public static class InventoryDependencyInjection
         services.AddScoped<IStockMovementReader, EfStockMovementReader>();
 
         services.AddScoped<IDomainEventHandler<InventoryStockMovementRecorded>, StockMovementRecorder>();
+
+        // What Inventory publishes, through its own outbox (Docs/specs/events).
+        // Stock alerts have no consumer yet.
+        services.AddScoped<OutboxWriter<InventoryDbContext>>();
+        services.AddScoped<IInventoryOutbox, InventoryOutbox>();
+        services.AddOutboxSource<InventoryDbContext>();
+        services.AddIntegrationEvent<StockReserved>(StockReserved.Name, 1);
+        services.AddIntegrationEvent<StockReleased>(StockReleased.Name, 1);
+        services.AddIntegrationEvent<StockConsumed>(StockConsumed.Name, 1);
+        services.AddIntegrationEvent<StockReturned>(StockReturned.Name, 1);
+        services.AddIntegrationEvent<StockAlert>(StockAlert.Name, 1);
 
         services.AddScoped<ReserveStockUseCase>();
         services.AddScoped<ReleaseReservationUseCase>();
