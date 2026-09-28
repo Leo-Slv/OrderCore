@@ -1,12 +1,12 @@
 # Módulo Payments
 
-Pagamento, estorno e a fila de saída (outbox) que finalmente publica os `IntegrationEvents`. Como [02-customers.md](02-customers.md), [03-catalog.md](03-catalog.md), [04-inventory.md](04-inventory.md) e [05-orders.md](05-orders.md), este módulo está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core, outbox e Presentation) — os `IntegrationEvents` não são mais placeholders. Mantido isolado de Order/Customer/Product por design (referenciados apenas por id), para permitir extração futura para um serviço PayCore. Ver `Docs/specs/payments/payment-processing.md` para o spec completo e as decisões resolvidas antes da implementação. Base: [Shared kernel](01-shared-kernel.md).
+Pagamento, estorno e os eventos de integração que o módulo publica pelo RabbitMQ. Como [02-customers.md](02-customers.md), [03-catalog.md](03-catalog.md), [04-inventory.md](04-inventory.md) e [05-orders.md](05-orders.md), este módulo está **implementado** de ponta a ponta (Domain, Application, Infrastructure/EF Core, outbox e Presentation) — os `IntegrationEvents` não são mais placeholders. Mantido isolado de Order/Customer/Product por design (referenciados apenas por id), para permitir extração futura para um serviço PayCore. Ver `Docs/specs/payments/payment-processing.md` para o spec completo e as decisões resolvidas antes da implementação. Base: [Shared kernel](01-shared-kernel.md).
 
 Diferenças entre este diagrama e o código, todas documentadas nos comentários das classes correspondentes:
 
-- `IntegrationEvent` passou a implementar `IDomainEvent` (não estava no diagrama) — é a ponte deliberada e temporária que permite a `OutboxPublisherBackgroundService` reutilizar o `IDomainEventDispatcher` já existente do shared kernel para "publicar" antes do RabbitMQ existir (seção 21 ainda é fase futura). Ver "How publish works before RabbitMQ exists" no spec.
-- `IOutboxWriter` mora em `Application/Contracts`, não em `Infrastructure/Outbox` como o diagrama original indicava — a Application depende dele (`CreatePaymentUseCase` etc.) e Application não pode depender de Infrastructure (regra validada por `OrderCore.ArchitectureTests`). Só a implementação concreta (`OutboxWriter`) e `OutboxMessage`/`OutboxPublisherBackgroundService` continuam em `Infrastructure/Outbox`.
-- `PaymentsDbContext` expõe `DbSet<OutboxMessage> OutboxMessages`, não `DbSet<PaymentEventPersistenceModel> PaymentEvents` como no diagrama — nada no código escreve um `PaymentEventPersistenceModel`; tratado como inconsistência do diagrama e consolidado no `OutboxMessage`, que é o que `OutboxWriter`/`OutboxPublisherBackgroundService` de fato leem e escrevem.
+- **Eventos pelo broker** (`Docs/specs/events/async-messaging.md`): os contratos moram em `Modules/Payments/Contracts/IntegrationEvents` (um por arquivo, com `Name` estável, ex.: `payments.payment-authorized`, versão 1) e herdam o `IntegrationEvent` do Shared, que não é mais um `IDomainEvent`. A ponte temporária que "publicava" chamando o `IDomainEventDispatcher` (`OutboxPublisherBackgroundService`, `IntegrationEventTypeRegistry`, `IOutboxWriter`, `OutboxWriter` e o `OutboxMessage` do módulo) foi removida: os use cases enfileiram por `IPaymentsOutbox` (Application/Contracts), implementado por `PaymentsOutbox` sobre o `OutboxWriter<PaymentsDbContext>` compartilhado, e o relay do módulo Messaging publica — ver [09-messaging.md](09-messaging.md).
+- O outbox é `payments_outbox_messages`, mapeado em `PaymentsDbContext` por `modelBuilder.AddOutbox("payments")`; a migration `MoveOutboxToSharedMessaging` renomeou `outbox_messages` (escrita à mão, para as linhas ainda não publicadas sobreviverem, com os nomes de tipo convertidos para os nomes de contrato).
+- `PaymentCaptured` e `PaymentVoided` são novos: `CapturePaymentUseCase` e `SettlePaymentForCancellationUseCase` os enfileiram no mesmo save do pagamento (uma captura repetida não publica de novo). `PaymentRequested` existe e é registrado, mas o caminho síncrono de hoje (`CreatePaymentUseCase` autoriza na mesma chamada) só publica `PaymentAuthorized`/`PaymentFailed`.
 - `Payment` tem, ao mesmo tempo, um método `Refund()` (sem parâmetros, marca o pagamento inteiro como `Refunded`) e precisa referenciar o tipo `Refund` (retorno de `RequestRefund`, chamada estática `Refund.Create(...)`) — colisão de nomes que o próprio diagrama já tinha. Resolvido qualificando o tipo com `global::OrderCore.Api.Modules.Payments.Domain.Entities.Refund` nesses dois pontos (coleções como `IReadOnlyCollection<Refund>` compilam normalmente sem qualificação).
 - `Payment.Fail(string reason)` não recebe `now` (ao contrário de `Authorize`/`Capture`) — não existe um campo de timestamp para "quando falhou" no diagrama nem no documento de modelagem. `Refund.Complete`/`Fail`, por sua vez, recebem `now` (o diagrama original não mostrava o parâmetro), já que `ProcessedAt` precisa de um valor.
 - `RequestRefundUseCase.ExecuteAsync` retorna `Task<Refund>`, não `Task` como no diagrama — `PaymentsController.RequestRefundAsync` não tem outro jeito de montar um `RefundResponse` depois, já que nenhum outro use case do módulo busca um refund pelo próprio id.
@@ -30,15 +30,21 @@ classDiagram
         <<external>>
     }
 
-    class IDomainEventDispatcher {
+    class IntegrationEvent {
+        <<external>>
+        <<abstract>>
+    }
+
+    class IOutbox {
         <<external>>
         <<interface>>
     }
 
-    class IDomainEvent {
+    class OutboxWriter~TDbContext~ {
         <<external>>
-        <<interface>>
     }
+
+    note for IntegrationEvent "Shared messaging — ver 09-messaging.md"
 
     %% OrderCore.Api.Modules.Payments.Domain.Entities
     class Payment {
@@ -189,20 +195,21 @@ classDiagram
     class CreatePaymentUseCase {
         -IPaymentRepository payments
         -IPaymentProvider provider
-        -IOutboxWriter outbox
+        -IPaymentsOutbox outbox
         +ExecuteAsync(CreatePaymentCommand command) Task~CreatePaymentResult~
     }
 
     class AuthorizePaymentUseCase {
         -IPaymentRepository payments
         -IPaymentProvider provider
-        -IOutboxWriter outbox
+        -IPaymentsOutbox outbox
         +ExecuteAsync(Guid paymentId) Task~CreatePaymentResult~
     }
 
     class CapturePaymentUseCase {
         -IPaymentRepository payments
         -IPaymentProvider provider
+        -IPaymentsOutbox outbox
         +ExecuteAsync(Guid paymentId) Task~CreatePaymentResult~
         +ExecuteForOrderAsync(Guid orderId) Task~CreatePaymentResult~
     }
@@ -210,6 +217,7 @@ classDiagram
     class SettlePaymentForCancellationUseCase {
         -IPaymentRepository payments
         -IPaymentProvider provider
+        -IPaymentsOutbox outbox
         -RequestRefundUseCase requestRefund
         +ExecuteAsync(Guid orderId, string reason) Task~PaymentSettlementOutcome~
     }
@@ -231,14 +239,14 @@ classDiagram
 
     class FailPaymentUseCase {
         -IPaymentRepository payments
-        -IOutboxWriter outbox
+        -IPaymentsOutbox outbox
         +ExecuteAsync(Guid paymentId, string reason) Task
     }
 
     class RequestRefundUseCase {
         -IPaymentRepository payments
         -IPaymentProvider provider
-        -IOutboxWriter outbox
+        -IPaymentsOutbox outbox
         +ExecuteAsync(RequestRefundCommand command) Task~Refund~
     }
 
@@ -248,14 +256,7 @@ classDiagram
     }
 
 
-    %% OrderCore.Api.Modules.Payments.Application.Contracts.IntegrationEvents
-    class IntegrationEvent {
-        <<abstract>>
-        +Guid EventId
-        +int Version
-        +DateTimeOffset OccurredAt
-    }
-
+    %% OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents
     class PaymentRequested {
         +Guid OrderId
         +Guid PaymentId
@@ -280,6 +281,24 @@ classDiagram
     class PaymentRefunded {
         +Guid OrderId
         +Guid PaymentId
+    }
+
+    class PaymentCaptured {
+        +Guid OrderId
+        +Guid PaymentId
+        +decimal Amount
+        +string Currency
+    }
+
+    class PaymentVoided {
+        +Guid OrderId
+        +Guid PaymentId
+    }
+
+    %% OrderCore.Api.Modules.Payments.Application.Contracts
+    class IPaymentsOutbox {
+        <<interface>>
+        +Enqueue(IntegrationEvent integrationEvent) void
     }
 
 
@@ -322,7 +341,6 @@ classDiagram
     class PaymentsDbContext {
         +DbSet~PaymentPersistenceModel~ Payments
         +DbSet~RefundPersistenceModel~ Refunds
-        +DbSet~OutboxMessage~ OutboxMessages
         +SaveChangesAsync() Task~int~
     }
 
@@ -332,29 +350,10 @@ classDiagram
     }
 
 
-    %% OrderCore.Api.Modules.Payments.Infrastructure.Outbox
-    class OutboxMessage {
-        +Guid Id
-        +string Type
-        +string PayloadJson
-        +DateTimeOffset OccurredAt
-        +DateTimeOffset? ProcessedAt
-    }
-
-    class IOutboxWriter {
-        <<interface>>
+    %% OrderCore.Api.Modules.Payments.Infrastructure.Messaging
+    class PaymentsOutbox {
+        -OutboxWriter~PaymentsDbContext~ writer
         +Enqueue(IntegrationEvent integrationEvent) void
-    }
-
-    class OutboxWriter {
-        -PaymentsDbContext dbContext
-        +Enqueue(IntegrationEvent integrationEvent) void
-    }
-
-    class OutboxPublisherBackgroundService {
-        -PaymentsDbContext dbContext
-        -IDomainEventDispatcher dispatcher
-        +ExecuteAsync(CancellationToken stoppingToken) Task
     }
 
 
@@ -468,28 +467,32 @@ classDiagram
     Payment --> PaymentStatus
     Payment --> PaymentMethod
     Refund --> RefundStatus
-    IDomainEvent <|.. IntegrationEvent : temporary outbox bridge
     IntegrationEvent <|-- PaymentRequested
     IntegrationEvent <|-- PaymentAuthorized
     IntegrationEvent <|-- PaymentFailed
     IntegrationEvent <|-- PaymentRefunded
+    IntegrationEvent <|-- PaymentCaptured
+    IntegrationEvent <|-- PaymentVoided
+    IOutbox <|-- IPaymentsOutbox
 
     CreatePaymentUseCase --> IPaymentRepository
     CreatePaymentUseCase --> IPaymentProvider
-    CreatePaymentUseCase --> IOutboxWriter
+    CreatePaymentUseCase --> IPaymentsOutbox
     AuthorizePaymentUseCase --> IPaymentRepository
     AuthorizePaymentUseCase --> IPaymentProvider
-    AuthorizePaymentUseCase --> IOutboxWriter
+    AuthorizePaymentUseCase --> IPaymentsOutbox
     CapturePaymentUseCase --> IPaymentRepository
     CapturePaymentUseCase --> IPaymentProvider
+    CapturePaymentUseCase --> IPaymentsOutbox : PaymentCaptured
     FailPaymentUseCase --> IPaymentRepository
-    FailPaymentUseCase --> IOutboxWriter
+    FailPaymentUseCase --> IPaymentsOutbox
     RequestRefundUseCase --> IPaymentRepository
     RequestRefundUseCase --> IPaymentProvider
-    RequestRefundUseCase --> IOutboxWriter
+    RequestRefundUseCase --> IPaymentsOutbox
     GetPaymentByOrderIdUseCase --> IPaymentRepository
     SettlePaymentForCancellationUseCase --> IPaymentRepository
     SettlePaymentForCancellationUseCase --> IPaymentProvider
+    SettlePaymentForCancellationUseCase --> IPaymentsOutbox : PaymentVoided
     SettlePaymentForCancellationUseCase --> RequestRefundUseCase : refunds a capture
     SettlePaymentForCancellationUseCase ..> PaymentSettlementOutcome
     ListPaymentsUseCase --> IPaymentRepository
@@ -505,18 +508,14 @@ classDiagram
     PaymentMapper --> Payment
     PaymentsDbContext --> PaymentPersistenceModel
     PaymentsDbContext --> RefundPersistenceModel
-    PaymentsDbContext --> OutboxMessage
+    PaymentsDbContext ..> OutboxWriter~TDbContext~ : payments_outbox_messages
 
     IPaymentProvider <|.. FakePaymentProvider
     FakePaymentProvider --> FakePaymentProviderOptions
     FakePaymentProviderOptions --> FakePaymentProviderMode
 
-    IOutboxWriter <|.. OutboxWriter
-    OutboxWriter --> PaymentsDbContext
-    OutboxWriter --> OutboxMessage
-    OutboxPublisherBackgroundService --> OutboxMessage
-    OutboxPublisherBackgroundService --> PaymentsDbContext
-    OutboxPublisherBackgroundService --> IDomainEventDispatcher
+    IPaymentsOutbox <|.. PaymentsOutbox
+    PaymentsOutbox --> OutboxWriter~TDbContext~
 
     PaymentWebhookHandler --> IPaymentRepository
     PaymentWebhookHandler --> CapturePaymentUseCase
@@ -549,4 +548,4 @@ O documento de modelagem de banco já especificava `customer_payment_method_id`,
 
 ## Consumido por outros módulos
 
-- **Orders** chama `CreatePaymentUseCase` (com a forma de pagamento escolhida no checkout, mapeada de `PaymentMethodChoice` do Orders) e `GetPaymentByOrderIdUseCase` (para o resumo do pagamento na tela do pedido) de dentro de um `PaymentGatewayAdapter` (implementa o `IPaymentGateway` do próprio Orders) e reage a `PaymentAuthorized`/`PaymentFailed` publicados pelo `OutboxPublisherBackgroundService` — ver [05-orders.md](05-orders.md). `Payment.OrderId` guarda apenas o id, nunca uma referência a `Order`.
+- **Orders** chama `CreatePaymentUseCase` (com a forma de pagamento escolhida no checkout, mapeada de `PaymentMethodChoice` do Orders) e `GetPaymentByOrderIdUseCase` (para o resumo do pagamento na tela do pedido) de dentro de um `PaymentGatewayAdapter` (implementa o `IPaymentGateway` do próprio Orders) e reage a `PaymentAuthorized`/`PaymentFailed`, que chegam pelo RabbitMQ na fila `orders.payment-outcomes` — ver [05-orders.md](05-orders.md). A timeline do pedido do admin (`orders.timeline`) arquiva todos os eventos de Payments sobre o pedido. `Payment.OrderId` guarda apenas o id, nunca uma referência a `Order`.

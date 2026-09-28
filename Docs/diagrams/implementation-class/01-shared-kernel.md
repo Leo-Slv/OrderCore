@@ -189,7 +189,8 @@ classDiagram
 - `AggregateRoot<TId>` é a base de `Customer`, `Product`/`Category`, `StockItem`/`InventoryReservation`, `Order` e `Payment` — ver o diagrama de cada módulo.
 - `Address` é usada por `CustomerAddress` (Customers) e por `Order.ShippingAddress`/`Order.BillingAddress` (Orders).
 - `Slug` é usada por `Product` e `Category` (Catalog).
-- `IDomainEventDispatcher`/`IDomainEventHandler<T>` são implementados por `EfOrderRepository` (dispara após salvar) e consumidos pelo `OrderStatusHistoryProjector` — ver [05-orders.md](05-orders.md).
+- `IDomainEventDispatcher`/`IDomainEventHandler<T>` são chamados por `EfOrderRepository` e `InventoryUnitOfWork` (despacham após salvar) e consumidos pelo `OrderStatusHistoryProjector` e pelo `StockMovementRecorder` — ver [05-orders.md](05-orders.md) e [04-inventory.md](04-inventory.md). São só para o que acontece dentro do módulo e do mesmo processo.
+- **Mensageria entre módulos** (`Shared/Application/Messaging` e `Shared/Infrastructure/Messaging`): `IntegrationEvent` (não é um `IDomainEvent`), `IIntegrationEventHandler<T>`, `IOutbox`, `IMessageContext`, o envelope, o mapeamento de outbox/inbox por módulo, `OutboxWriter<TDbContext>` e o registro de contratos e consumidores. Estão desenhados junto com o módulo que os opera, em [09-messaging.md](09-messaging.md).
 - `Slug.IsValid` é usado por `GetProductBySlugUseCase` (Catalog) para tratar um slug mal formado vindo da rota como "não encontrado", não como erro de validação.
 
 ## Contrato de erros

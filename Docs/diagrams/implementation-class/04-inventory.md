@@ -22,6 +22,12 @@ Como [02-customers.md](02-customers.md) e [03-catalog.md](03-catalog.md), este m
   - Leituras: `ListStockItemsUseCase` (por estado), `GetStockLevelsUseCase`/`ListProductIdsInStockStateUseCase` (para a lista de produtos do admin no Catalog), `GetStockSummaryUseCase` (dashboard), `ListStockMovementsUseCase` via `IStockMovementReader` (mesmo formato do `IOrderStatusHistoryReader`) e `ListReservationsUseCase` (de um produto, paginado, ou de um pedido). O estado (`StockState`) é calculado igual a `IsLowStock`; o repositório repete a regra em SQL, e um teste de integração confere que as duas batem.
 - Corrigido também, ao escrever o teste de concorrência desta feature: `CustomerMapper`/`ProductMapper`/`CategoryMapper`/`OrderMapper.ApplyChanges` nunca sincronizavam `Version` — o token de concorrência otimista nunca incrementava de fato após um update, tornando a checagem do EF Core um no-op em todo o projeto. Corrigido em todos os quatro (commit separado, fora do escopo do Inventory).
 
+- **Mensageria** (`Docs/specs/events/async-messaging.md`; mecânica comum em [09-messaging.md](09-messaging.md)):
+  - Inventory publica, em `Modules/Inventory/Contracts/IntegrationEvents`, os movimentos da reserva de um pedido — `StockReserved`, `StockReleased`, `StockConsumed`, `StockReturned` (reserva, pedido, produto, quantidade; base `StockReservationIntegrationEvent`) — e `StockAlert` (`inventory.stock-alert`: produto, nível `LowStock`/`OutOfStock`, disponível, ponto de reposição). Recebimentos e ajustes continuam internos (histórico de movimentos). Ainda não há consumidor para os alertas.
+  - `InventoryStockMovementRecorded` ganhou `OrderId` (preenchido pelas reservas), que os eventos de integração precisam.
+  - **Alerta na mudança de estado.** `StockItem.AlertLevel` (`LowStock` com unidades até o ponto de reposição, `OutOfStock` sem nenhuma disponível, `null` fora disso). Cada operação que muda o disponível (`TryReserve`, `Release`, `Receive`, `ReturnConsumed`, `Adjust`, `SetReorderLevel`) levanta `StockAlertRaised` quando o item **entra** num desses estados — inclusive de sem estoque para estoque baixo — e nada enquanto ele continua no mesmo. Para datar o alerta, `TryReserve` e `Release` passaram a receber `now` (`ExpireReservationUseCase` ganhou `TimeProvider`). `Consume` não muda o disponível, então não alerta.
+  - `InventoryUnitOfWork` recebe `IInventoryOutbox`: coleta os domain events **antes** do save, traduz (`InventoryIntegrationEventTranslator`, mantendo o id do evento) para `inventory_outbox_messages` e salva tudo junto; se o save falhar, descarta as linhas de outbox ainda não salvas, para uma nova tentativa no mesmo escopo (`ReserveStockUseCase`) não gravar eventos de uma mudança que não aconteceu. O despacho em memória para o histórico de movimentos continua depois do save. Migration `AddInventoryOutbox`.
+
 ```mermaid
 
 classDiagram
@@ -43,6 +49,22 @@ classDiagram
         <<external>>
     }
 
+    class IntegrationEvent {
+        <<external>>
+        <<abstract>>
+    }
+
+    class IOutbox {
+        <<external>>
+        <<interface>>
+    }
+
+    class OutboxWriter~TDbContext~ {
+        <<external>>
+    }
+
+    note for IntegrationEvent "Shared messaging — ver 09-messaging.md"
+
     %% OrderCore.Api.Modules.Inventory.Domain.Entities
     class StockItem {
         +Guid ProductId
@@ -52,14 +74,15 @@ classDiagram
         +int QuantityAvailable
         +int ReorderLevel
         +bool IsLowStock
+        +StockAlertLevel? AlertLevel
         +DateTimeOffset UpdatedAt
         +Create(Guid productId, int initialQuantity, Guid? productVariantId, DateTimeOffset now)$ StockItem
         +MaxReasonLength int$
         +Receive(int quantity, string? reason, DateTimeOffset now) void
         +ReturnConsumed(int quantity, DateTimeOffset now) void
         +SetReorderLevel(int reorderLevel, DateTimeOffset now) void
-        +TryReserve(int quantity) bool
-        +Release(int quantity) void
+        +TryReserve(int quantity, DateTimeOffset now) bool
+        +Release(int quantity, DateTimeOffset now) void
         +Consume(int quantity) void
         +Adjust(int quantity, string reason, DateTimeOffset now) void
     }
@@ -93,6 +116,12 @@ classDiagram
         Returned
     }
 
+    class StockAlertLevel {
+        <<enumeration>>
+        LowStock
+        OutOfStock
+    }
+
     class StockMovementType {
         <<enumeration>>
         Inbound
@@ -115,6 +144,54 @@ classDiagram
         +string ReferenceType
         +Guid ReferenceId
         +string? Reason
+        +Guid? OrderId
+    }
+
+    class StockAlertRaised {
+        +Guid EventId
+        +DateTimeOffset OccurredAt
+        +Guid ProductId
+        +StockAlertLevel Level
+        +int QuantityAvailable
+        +int ReorderLevel
+    }
+
+    %% OrderCore.Api.Modules.Inventory.Contracts.IntegrationEvents
+    class StockReservationIntegrationEvent {
+        <<abstract>>
+        +Guid ReservationId
+        +Guid OrderId
+        +Guid ProductId
+        +int Quantity
+    }
+
+    class StockReserved
+    class StockReleased
+    class StockConsumed
+    class StockReturned
+
+    class StockAlert {
+        +Guid ProductId
+        +string Level
+        +int QuantityAvailable
+        +int ReorderLevel
+    }
+
+    %% OrderCore.Api.Modules.Inventory.Application.Contracts (messaging)
+    class IInventoryOutbox {
+        <<interface>>
+        +Enqueue(IntegrationEvent integrationEvent) void
+    }
+
+    %% OrderCore.Api.Modules.Inventory.Infrastructure.Messaging
+    class InventoryOutbox {
+        -OutboxWriter~InventoryDbContext~ writer
+        +Enqueue(IntegrationEvent integrationEvent) void
+    }
+
+    class InventoryIntegrationEventTranslator {
+        <<static>>
+        +Translate(IDomainEvent domainEvent)$ IntegrationEvent?
     }
 
 
@@ -263,6 +340,7 @@ classDiagram
         -IInventoryReservationRepository reservations
         -IStockItemRepository stockItems
         -IUnitOfWork unitOfWork
+        -TimeProvider timeProvider
         +ExecuteAsync(Guid reservationId) Task
     }
 
@@ -415,6 +493,7 @@ classDiagram
         -EfStockItemRepository stockItemRepository
         -EfInventoryReservationRepository reservationRepository
         -IDomainEventDispatcher domainEventDispatcher
+        -IInventoryOutbox outbox
         +SaveChangesAsync() Task
     }
 
@@ -554,6 +633,22 @@ classDiagram
     InventoryUnitOfWork --> EfStockItemRepository
     InventoryUnitOfWork --> EfInventoryReservationRepository
     InventoryUnitOfWork --> IDomainEventDispatcher : dispatches after save
+    InventoryUnitOfWork --> IInventoryOutbox : enqueues before save
+    InventoryUnitOfWork ..> InventoryIntegrationEventTranslator
+    IOutbox <|-- IInventoryOutbox
+    IInventoryOutbox <|.. InventoryOutbox
+    InventoryOutbox --> OutboxWriter~TDbContext~ : inventory_outbox_messages
+    IntegrationEvent <|-- StockReservationIntegrationEvent
+    StockReservationIntegrationEvent <|-- StockReserved
+    StockReservationIntegrationEvent <|-- StockReleased
+    StockReservationIntegrationEvent <|-- StockConsumed
+    StockReservationIntegrationEvent <|-- StockReturned
+    IntegrationEvent <|-- StockAlert
+    IDomainEvent <|.. StockAlertRaised
+    StockItem ..> StockAlertRaised : raises on entering low/out of stock
+    StockAlertRaised --> StockAlertLevel
+    InventoryIntegrationEventTranslator ..> StockReservationIntegrationEvent : creates
+    InventoryIntegrationEventTranslator ..> StockAlert : creates
     IDomainEventHandler~TEvent~ <|.. StockMovementRecorder
     StockMovementRecorder --> InventoryDbContext
 

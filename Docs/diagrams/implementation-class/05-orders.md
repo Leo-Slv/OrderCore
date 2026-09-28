@@ -8,7 +8,7 @@ Diferenças entre este diagrama e o código, todas documentadas nos comentários
 - `IOrderRepository` ganhou `ListByCustomerIdAsync(Guid customerId)`, não listado no diagrama original — `ListCustomerOrdersUseCase` depende dessa interface e não tinha por onde consultar, mesma classe de lacuna de `IInventoryReservationRepository.ListByOrderIdAsync` em Inventory.
 - `Order` ganhou dois métodos de passagem não listados no diagrama: `DecreaseItemQuantity(Guid productId, int quantity)` e `ApplyItemDiscount(Guid productId, decimal amount)`, delegando para `OrderItem.DecreaseQuantity`/`ApplyDiscount` — como esses dois métodos do item são `internal` (ver "Comportamento de OrderItem" abaixo), só o agregado (`Order`) pode chamá-los; sem esses dois métodos de passagem nada fora do assembly conseguiria disparar essa mudança.
 - `EfOrderRepository.SaveChangesAsync` despacha os domain events do agregado via `IDomainEventDispatcher` logo após o save, igual ao padrão de `InventoryUnitOfWork` — só que aqui sem `IUnitOfWork`, porque toda operação de Orders mexe em um único agregado raiz (`Order`) por vez (ver a seção Transactions do `claude.md`).
-- `IPaymentGateway`/`PaymentGatewayAdapter` (envolvendo `CreatePaymentUseCase` de Payments) e os dois `IDomainEventHandler` de `PaymentAuthorized`/`PaymentFailed` só existem porque `IntegrationEvent` (Payments) passou a implementar `IDomainEvent` — ver a nota em [06-payments.md](06-payments.md) sobre a ponte do outbox antes de existir RabbitMQ.
+- `IPaymentGateway`/`PaymentGatewayAdapter` envolvem os use cases de Payments; o resultado do pagamento chega depois, pelo RabbitMQ, a `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler` (ver "Adicionado pela mensageria" abaixo).
 - `RequestOrderPaymentUseCase.ExecuteAsync` retorna `CreateOrderResult`, não `Order`/`void` — reaproveita o mesmo DTO de `CreateOrderHandler` já que ambos só precisam devolver id/total/status.
 - `OrdersController.RequestPaymentAsync` devolve `Task<IActionResult>` (202 Accepted, sem corpo), como já estava no diagrama: confirmar ou falhar o pedido acontece depois, de forma assíncrona (ver `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler`), então um corpo `OrderResponse` aqui seria enganoso de qualquer forma — `CreateOrderResult` não carrega dados suficientes para montar um.
 
@@ -35,6 +35,12 @@ Adicionado pelo backoffice (`Docs/specs/backoffice/backoffice-api.md`, decisões
 - **Consumidores tolerantes.** `ConfirmOrderUseCase`/`MarkOrderPaymentFailedUseCase` ignoram (com log) um pedido que já não está `PendingPayment` — antes lançavam `invalid_order_state` dentro do publisher do outbox, que nunca marcava a mensagem como processada e travava as seguintes.
 - **Leituras do admin** em `OrdersAdminController` (`admin/…`): `ListOrdersUseCase` (todos os pedidos, filtros por status/cliente/período, com o cliente e o status do pagamento buscados uma vez por página), `GetAdminOrderDetailsUseCase` (o pedido + notas internas, cliente, pagamento completo e reservas) e `GetDashboardUseCase` (pedidos por status, receita por moeda dos confirmados no período, clientes novos, alertas de estoque e pedidos recentes, calculado na hora a partir de cada módulo). `SetOrderInternalNotesUseCase` (até 2000 caracteres; vazio limpa).
 - **Contratos ampliados, sempre com tipos do Orders:** `IPaymentGateway` (`GetPaymentSummariesAsync`, `GetPaymentDetailsAsync`, `CaptureForOrderAsync`, `SettleForCancellationAsync`), `IInventoryService` (`ReturnConsumedStockAsync`, `GetReservationsAsync`, `GetStockAlertCountsAsync`), `ICustomerDirectory` (`GetCustomersAsync`, `CountNewCustomersAsync`); `IOrderRepository` ganhou `ListAsync`, `CountByStatusAsync` e `SumConfirmedTotalsAsync` (total de cada pedido calculado no SQL a partir dos itens, somado por moeda em memória). Migration `AddOrderListIndexes` (`CreatedAt`, `ConfirmedAt`).
+
+Adicionado pela mensageria (`Docs/specs/events/async-messaging.md`; mecânica comum em [09-messaging.md](09-messaging.md)):
+
+- **Orders publica.** Contratos em `Modules/Orders/Contracts/IntegrationEvents`, todos herdando `OrderIntegrationEvent` (id e número do pedido, cliente, status para o qual o pedido foi, total e moeda): `OrderCreated`, `OrderPaymentRequested`, `OrderConfirmed`, `OrderProcessingStarted`, `OrderShipped`, `OrderDelivered`, `OrderPaymentFailed` e `OrderCancelled` (esses dois com o motivo). Os nomes coincidem com os domain events de propósito; são tipos diferentes. `EfOrderRepository` recebe `IOrdersOutbox` e, antes do save, traduz os domain events do agregado (`OrderIntegrationEventTranslator`, mantendo o id do evento) para `orders_outbox_messages` — o pedido e o que ele anuncia são gravados juntos. O despacho em memória dos domain events para o histórico de status continua igual.
+- **Orders consome.** `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler` agora são `IIntegrationEventHandler<T>`, na fila `orders.payment-outcomes`, com o inbox em `orders_processed_messages` (salvo no mesmo save do pedido). Os use cases que eles chamam continuam tolerando um pedido que já seguiu adiante: com retentativas, lançar ali só adiaria a mensagem até a lista de falhas.
+- **Timeline do pedido (admin).** `OrderTimelineProjector` (fila `orders.timeline`) arquiva cada evento sobre o pedido — os do próprio Orders, os de Payments e as reservas do Inventory — em `order_timeline`, uma linha por evento com o id do evento como chave (uma reentrega nunca duplica), com tipo, módulo de origem, quando e alguns detalhes (valor e moeda, motivo, produto e quantidade). `GetOrderTimelineUseCase` + `IOrderTimelineReader`/`EfOrderTimelineReader` servem `GET admin/orders/{id}/timeline`, do mais antigo para o mais recente. Migrations `AddOrdersInbox`, `AddOrdersOutbox`, `AddOrderTimeline`.
 
 ```mermaid
 
@@ -136,6 +142,37 @@ classDiagram
     class PaymentFailed {
         <<external>>
     }
+
+    class IntegrationEvent {
+        <<external>>
+        <<abstract>>
+    }
+
+    class IIntegrationEventHandler~TEvent~ {
+        <<external>>
+        <<interface>>
+    }
+
+    class IOutbox {
+        <<external>>
+        <<interface>>
+    }
+
+    class OutboxWriter~TDbContext~ {
+        <<external>>
+    }
+
+    class PaymentCaptured {
+        <<external>>
+    }
+
+    class StockReserved {
+        <<external>>
+    }
+
+    note for IntegrationEvent "Shared messaging — ver 09-messaging.md"
+    note for StockReserved "Inventory module — ver 04-inventory.md (e StockReleased/Consumed/Returned)"
+    note for PaymentCaptured "Payments module — ver 06-payments.md (e os demais eventos de Payments)"
 
     note for IProductRepository "Catalog module — ver 03-catalog.md"
     note for ReserveStockUseCase "Inventory module — ver 04-inventory.md"
@@ -737,13 +774,30 @@ classDiagram
     class OrdersDbContext {
         +DbSet~OrderPersistenceModel~ Orders
         +DbSet~OrderStatusHistoryPersistenceModel~ StatusHistory
+        +DbSet~OrderTimelineEntryPersistenceModel~ Timeline
         +SaveChangesAsync() Task~int~
+    }
+
+    class OrderTimelineEntryPersistenceModel {
+        +Guid EventId
+        +Guid OrderId
+        +long Sequence
+        +string Type
+        +string Source
+        +DateTimeOffset OccurredAt
+        +string DetailsJson
+    }
+
+    class EfOrderTimelineReader {
+        -OrdersDbContext dbContext
+        +ListAsync(Guid orderId) Task~IReadOnlyList~OrderTimelineEntry~~
     }
 
     class EfOrderRepository {
         -OrdersDbContext dbContext
         -OrderMapper mapper
         -IDomainEventDispatcher dispatcher
+        -IOrdersOutbox outbox
     }
 
     class SequentialOrderNumberGenerator {
@@ -820,7 +874,74 @@ classDiagram
     }
 
 
+    %% OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents
+    class OrderIntegrationEvent {
+        <<abstract>>
+        +Guid OrderId
+        +string OrderNumber
+        +Guid CustomerId
+        +string Status
+        +decimal TotalAmount
+        +string Currency
+    }
+
+    class OrderCreatedContract["OrderCreated (contract)"]
+    class OrderConfirmedContract["OrderConfirmed (contract)"]
+    class OrderCancelledContract["OrderCancelled (contract)"] {
+        +string Reason
+    }
+
+    note for OrderCreatedContract "também OrderPaymentRequested, OrderProcessingStarted, OrderShipped, OrderDelivered e OrderPaymentFailed (com Reason)"
+
+    %% OrderCore.Api.Modules.Orders.Application (messaging)
+    class IOrdersOutbox {
+        <<interface>>
+        +Enqueue(IntegrationEvent integrationEvent) void
+    }
+
+    class IOrderTimelineReader {
+        <<interface>>
+        +ListAsync(Guid orderId) Task~IReadOnlyList~OrderTimelineEntry~~
+    }
+
+    class OrderTimelineEntry {
+        <<record>>
+        +Guid EventId
+        +string Type
+        +string Source
+        +DateTimeOffset OccurredAt
+        +IReadOnlyDictionary~string, string?~ Details
+    }
+
+    class GetOrderTimelineUseCase {
+        -IOrderRepository orderRepository
+        -IOrderTimelineReader timeline
+        +ExecuteAsync(Guid orderId) Task~IReadOnlyList~OrderTimelineEntry~~
+    }
+
+    %% OrderCore.Api.Modules.Orders.Infrastructure.Messaging
+    class OrdersOutbox {
+        -OutboxWriter~OrdersDbContext~ writer
+        +Enqueue(IntegrationEvent integrationEvent) void
+    }
+
+    class OrderIntegrationEventTranslator {
+        <<static>>
+        +Translate(Order order, IDomainEvent domainEvent)$ IntegrationEvent?
+    }
+
     %% OrderCore.Api.Modules.Orders.Infrastructure.IntegrationEventHandlers
+    class OrderTimelineProjector {
+        -OrdersDbContext dbContext
+        -IntegrationEventRegistry registry
+        +HandleAsync(OrderCreated integrationEvent) Task
+        +HandleAsync(PaymentAuthorized integrationEvent) Task
+        +HandleAsync(StockReserved integrationEvent) Task
+    }
+
+    note for OrderTimelineProjector "fila orders.timeline; um HandleAsync por contrato: os 8 de Orders, os 6 de Payments e os 4 de reserva do Inventory"
+    note for PaymentAuthorizedIntegrationEventHandler "fila orders.payment-outcomes (também PaymentFailedIntegrationEventHandler)"
+
     class PaymentAuthorizedIntegrationEventHandler {
         -ConfirmOrderUseCase confirmOrder
         +HandleAsync(PaymentAuthorized integrationEvent) Task
@@ -873,9 +994,11 @@ classDiagram
         -ListOrdersUseCase listOrders
         -GetAdminOrderDetailsUseCase getAdminOrderDetails
         -GetDashboardUseCase getDashboard
+        -GetOrderTimelineUseCase getOrderTimeline
         +ListOrdersAsync(ListOrdersFilter filter) Task~ActionResult~PagedResponse~AdminOrderSummaryResponse~~~
         +GetOrderAsync(Guid id) Task~ActionResult~AdminOrderDetailsResponse~~
         +GetDashboardAsync(DateTimeOffset? from, DateTimeOffset? to) Task~ActionResult~DashboardResponse~~
+        +GetOrderTimelineAsync(Guid id) Task~ActionResult~IReadOnlyList~OrderTimelineEntryResponse~~~
     }
 
     class SetOrderInternalNotesRequest {
@@ -1140,6 +1263,27 @@ classDiagram
     EfOrderRepository --> OrdersDbContext
     EfOrderRepository --> OrderMapper
     EfOrderRepository --> IDomainEventDispatcher : dispatches after save
+    EfOrderRepository --> IOrdersOutbox : enqueues before save
+    EfOrderRepository ..> OrderIntegrationEventTranslator
+    IOutbox <|-- IOrdersOutbox
+    IOrdersOutbox <|.. OrdersOutbox
+    OrdersOutbox --> OutboxWriter~TDbContext~ : orders_outbox_messages
+    IntegrationEvent <|-- OrderIntegrationEvent
+    OrderIntegrationEvent <|-- OrderCreatedContract
+    OrderIntegrationEvent <|-- OrderConfirmedContract
+    OrderIntegrationEvent <|-- OrderCancelledContract
+    OrderIntegrationEventTranslator ..> OrderIntegrationEvent : creates
+    IOrderTimelineReader <|.. EfOrderTimelineReader
+    EfOrderTimelineReader --> OrdersDbContext
+    GetOrderTimelineUseCase --> IOrderTimelineReader
+    GetOrderTimelineUseCase ..> OrderAccess : order must exist
+    OrdersDbContext --> OrderTimelineEntryPersistenceModel
+    IIntegrationEventHandler~TEvent~ <|.. OrderTimelineProjector
+    IIntegrationEventHandler~TEvent~ <|.. PaymentAuthorizedIntegrationEventHandler
+    IIntegrationEventHandler~TEvent~ <|.. PaymentFailedIntegrationEventHandler
+    OrderTimelineProjector --> OrderTimelineEntryPersistenceModel : one row per event
+    OrderTimelineProjector ..> PaymentCaptured
+    OrderTimelineProjector ..> StockReserved
     IOrderNumberGenerator <|.. SequentialOrderNumberGenerator
     SequentialOrderNumberGenerator --> OrdersDbContext
     OrderMapper --> OrderPersistenceModel
@@ -1190,6 +1334,7 @@ classDiagram
     OrdersAdminController --> ListOrdersUseCase
     OrdersAdminController --> GetAdminOrderDetailsUseCase
     OrdersAdminController --> GetDashboardUseCase
+    OrdersAdminController --> GetOrderTimelineUseCase
     OrdersAdminController --> AdminOrderPresenter
     OrdersController --> CheckoutUseCase
     OrdersController --> QuoteCartUseCase
@@ -1219,7 +1364,7 @@ O documento de modelagem de banco já especificava `internal_notes` e `updated_a
 
 ## Fluxo de checkout (leitura sugerida)
 
-`CreateOrderHandler` → `RequestOrderPaymentUseCase` (reserva estoque via `InventoryServiceAdapter`, depois solicita pagamento via `PaymentGatewayAdapter`) → `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler` (recebem o resultado assíncrono do módulo Payments — ver [06-payments.md](06-payments.md) — e chamam `ConfirmOrderUseCase`/`MarkOrderPaymentFailedUseCase`).
+`CreateOrderHandler` → `RequestOrderPaymentUseCase` (reserva estoque via `InventoryServiceAdapter`, depois solicita pagamento via `PaymentGatewayAdapter`) → `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler` (recebem pelo RabbitMQ o resultado do módulo Payments — ver [06-payments.md](06-payments.md) — e chamam `ConfirmOrderUseCase`/`MarkOrderPaymentFailedUseCase`).
 
 ## Fluxo do storefront
 
@@ -1227,5 +1372,5 @@ O caminho que o front usa, em vez de encadear os passos acima:
 
 1. `POST orders/cart/quote` → `QuoteCartUseCase` reprecifica o carrinho (sem reservar nada).
 2. `POST orders/checkout` (access token do cliente, header `Idempotency-Key`) → `CheckoutUseCase`: endereços (`CustomerDirectoryAdapter`) → produtos (`ProductCatalogAdapter.GetManyAsync`) → reserva (`InventoryServiceAdapter`) → salva o pedido já `PendingPayment` → `PaymentGatewayAdapter.RequestPaymentAsync`. Responde 202 com o pedido.
-3. O outbox de Payments publica `PaymentAuthorized`/`PaymentFailed` (a cada 5 s) → os mesmos integration event handlers confirmam ou falham o pedido.
+3. O relay do módulo Messaging publica no RabbitMQ o `PaymentAuthorized`/`PaymentFailed` que Payments gravou no próprio outbox (em cerca de um segundo) → os mesmos handlers, na fila `orders.payment-outcomes`, confirmam ou falham o pedido. O admin vê a vida inteira do pedido em `GET admin/orders/{id}/timeline`.
 4. O front faz polling de `GET orders/{id}` (`GetOrderDetailsUseCase`, com o resumo do pagamento) e desenha a timeline com `GET orders/{id}/status-history`; o histórico do cliente vem de `GET orders/me`.
