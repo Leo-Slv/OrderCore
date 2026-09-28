@@ -29,7 +29,7 @@ public sealed class InventoryStockAvailabilityAdapterTests
         var stockItems = new FakeStockItemRepository();
         var inStock = StockItem.Create(Guid.NewGuid(), 5, null, DateTimeOffset.UtcNow);
         var fullyReserved = StockItem.Create(Guid.NewGuid(), 2, null, DateTimeOffset.UtcNow);
-        fullyReserved.TryReserve(2);
+        fullyReserved.TryReserve(2, DateTimeOffset.UtcNow);
         await stockItems.AddAsync(inStock, CancellationToken.None);
         await stockItems.AddAsync(fullyReserved, CancellationToken.None);
         var withoutStockRecord = Guid.NewGuid();
@@ -52,7 +52,7 @@ public sealed class InventoryStockAvailabilityAdapterTests
         var stockItems = new FakeStockItemRepository();
         var low = StockItem.Create(Guid.NewGuid(), 3, null, DateTimeOffset.UtcNow);
         low.SetReorderLevel(3, DateTimeOffset.UtcNow);
-        low.TryReserve(1);
+        low.TryReserve(1, DateTimeOffset.UtcNow);
         var plenty = StockItem.Create(Guid.NewGuid(), 50, null, DateTimeOffset.UtcNow);
         await stockItems.AddAsync(low, CancellationToken.None);
         await stockItems.AddAsync(plenty, CancellationToken.None);

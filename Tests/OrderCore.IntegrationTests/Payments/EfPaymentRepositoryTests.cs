@@ -79,7 +79,7 @@ public sealed class EfPaymentRepositoryTests : IAsyncLifetime
         await using (var dbContext = CreateDbContext())
         {
             var repository = new EfPaymentRepository(dbContext);
-            var outbox = PaymentsTestOutbox.For(dbContext);
+            var outbox = TestOutboxes.Payments(dbContext);
             var payment = Payment.Create(orderId, 50m, "BRL", PaymentMethod.Card, "idem-2", "Fake", null, DateTimeOffset.UtcNow);
             payment.MarkProcessing();
             payment.Authorize("provider-ref", DateTimeOffset.UtcNow);

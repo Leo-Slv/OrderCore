@@ -2,9 +2,14 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using OrderCore.Api.Modules.Inventory.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders;
+using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using Xunit;
+using OrderEvents = OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
 using static OrderCore.IntegrationTests.ApiDatabase;
 
 namespace OrderCore.IntegrationTests.Orders;
@@ -40,7 +45,7 @@ public sealed class OrdersBackofficeTests : IClassFixture<ApiDatabase>
         await PollOrderUntilAsync(admin, orderId, status => status == "Confirmed");
 
         // The confirmation came through the broker: Orders' inbox holds the authorization.
-        var authorized = await _database.WaitForPublishedPaymentEventAsync(PaymentAuthorized.Name, orderId);
+        var authorized = await _database.WaitForPublishedEventAsync<PaymentsDbContext>(PaymentAuthorized.Name, orderId);
         (await _database.OrdersHandledAsync(authorized.Id, OrdersDependencyInjection.PaymentOutcomesQueue)).Should().BeTrue();
 
         // The admin list shows the buyer and the payment.
@@ -67,7 +72,20 @@ public sealed class OrdersBackofficeTests : IClassFixture<ApiDatabase>
         (await shipped.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("payment").GetProperty("status").GetString()
             .Should().Be("Captured");
         (await admin.PostAsync($"/api/orders/{orderId}/deliver", null)).StatusCode.Should().Be(HttpStatusCode.OK);
-        await _database.WaitForPublishedPaymentEventAsync(PaymentCaptured.Name, orderId);
+        await _database.WaitForPublishedEventAsync<PaymentsDbContext>(PaymentCaptured.Name, orderId);
+
+        // Orders announced every step of the way, and Inventory the reservation and its consumption.
+        foreach (var contract in new[]
+                 {
+                     OrderEvents.OrderCreated.Name, OrderEvents.OrderPaymentRequested.Name, OrderEvents.OrderConfirmed.Name,
+                     OrderEvents.OrderProcessingStarted.Name, OrderEvents.OrderShipped.Name, OrderEvents.OrderDelivered.Name,
+                 })
+        {
+            await _database.WaitForPublishedEventAsync<OrdersDbContext>(contract, orderId);
+        }
+
+        await _database.WaitForPublishedEventAsync<InventoryDbContext>(StockReserved.Name, orderId);
+        await _database.WaitForPublishedEventAsync<InventoryDbContext>(StockConsumed.Name, orderId);
 
         var history = await customer.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}/status-history", Json);
         history.EnumerateArray().Select(h => h.GetProperty("toStatus").GetString()).Should().EndWith(

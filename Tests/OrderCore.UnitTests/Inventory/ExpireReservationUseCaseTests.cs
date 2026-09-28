@@ -13,13 +13,13 @@ public sealed class ExpireReservationUseCaseTests
         var products = new FakeStockItemRepository();
         var reservations = new FakeInventoryReservationRepository();
         var stockItem = StockItem.Create(Guid.NewGuid(), 5, null, DateTimeOffset.UtcNow);
-        stockItem.TryReserve(2);
+        stockItem.TryReserve(2, DateTimeOffset.UtcNow);
         await products.AddAsync(stockItem, CancellationToken.None);
 
         var reservation = InventoryReservation.Create(stockItem.ProductId, Guid.NewGuid(), Guid.NewGuid(), 2, DateTimeOffset.UtcNow);
         await reservations.AddAsync(reservation, CancellationToken.None);
 
-        var useCase = new ExpireReservationUseCase(reservations, products, new FakeUnitOfWork(), new FakeAuditLogService());
+        var useCase = new ExpireReservationUseCase(reservations, products, new FakeUnitOfWork(), new FakeAuditLogService(), TimeProvider.System);
         await useCase.ExecuteAsync(reservation.Id, CancellationToken.None);
 
         stockItem.QuantityReserved.Should().Be(0);

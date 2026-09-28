@@ -4,8 +4,11 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
+using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
 using Xunit;
+using OrderEvents = OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
 using static OrderCore.IntegrationTests.ApiDatabase;
 
 namespace OrderCore.IntegrationTests.Orders;
@@ -65,7 +68,8 @@ public sealed class BackofficeFlowTests : IClassFixture<ApiDatabase>
 
         // Payments: released, never captured, and announced.
         (await PaymentStatusAsync(admin, orderId)).Should().Be("Voided");
-        await _database.WaitForPublishedPaymentEventAsync(PaymentVoided.Name, orderId);
+        await _database.WaitForPublishedEventAsync<PaymentsDbContext>(PaymentVoided.Name, orderId);
+        await _database.WaitForPublishedEventAsync<OrdersDbContext>(OrderEvents.OrderCancelled.Name, orderId);
 
         // Inventory: the units are back, the reservation says so, and the history shows the return.
         (await OnHandAsync(admin, productId)).Should().Be(5);

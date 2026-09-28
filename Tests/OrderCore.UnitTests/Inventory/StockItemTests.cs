@@ -36,7 +36,7 @@ public sealed class StockItemTests
     public void IsLowStock_is_false_when_nothing_is_available()
     {
         var stockItem = CreateStockItem(1);
-        stockItem.TryReserve(1);
+        stockItem.TryReserve(1, DateTimeOffset.UtcNow);
 
         stockItem.IsLowStock.Should().BeFalse();
     }
@@ -46,7 +46,7 @@ public sealed class StockItemTests
     {
         var stockItem = CreateStockItem(1);
 
-        var succeeded = stockItem.TryReserve(1);
+        var succeeded = stockItem.TryReserve(1, DateTimeOffset.UtcNow);
 
         succeeded.Should().BeTrue();
         stockItem.QuantityAvailable.Should().Be(0);
@@ -56,9 +56,9 @@ public sealed class StockItemTests
     public void TryReserve_fails_without_mutating_state_when_not_enough_is_available()
     {
         var stockItem = CreateStockItem(1);
-        stockItem.TryReserve(1);
+        stockItem.TryReserve(1, DateTimeOffset.UtcNow);
 
-        var succeeded = stockItem.TryReserve(1);
+        var succeeded = stockItem.TryReserve(1, DateTimeOffset.UtcNow);
 
         succeeded.Should().BeFalse();
         stockItem.QuantityReserved.Should().Be(1);
@@ -68,9 +68,9 @@ public sealed class StockItemTests
     public void Release_frees_up_reserved_quantity()
     {
         var stockItem = CreateStockItem(5);
-        stockItem.TryReserve(3);
+        stockItem.TryReserve(3, DateTimeOffset.UtcNow);
 
-        stockItem.Release(3);
+        stockItem.Release(3, DateTimeOffset.UtcNow);
 
         stockItem.QuantityReserved.Should().Be(0);
         stockItem.QuantityAvailable.Should().Be(5);
@@ -81,7 +81,7 @@ public sealed class StockItemTests
     {
         var stockItem = CreateStockItem(5);
 
-        var act = () => stockItem.Release(1);
+        var act = () => stockItem.Release(1, DateTimeOffset.UtcNow);
 
         act.Should().Throw<DomainRuleViolationException>();
     }
@@ -90,7 +90,7 @@ public sealed class StockItemTests
     public void Consume_reduces_both_on_hand_and_reserved()
     {
         var stockItem = CreateStockItem(5);
-        stockItem.TryReserve(2);
+        stockItem.TryReserve(2, DateTimeOffset.UtcNow);
 
         stockItem.Consume(2);
 
@@ -122,7 +122,7 @@ public sealed class StockItemTests
     public void Adjust_rejects_a_result_below_reserved_quantity()
     {
         var stockItem = CreateStockItem(5);
-        stockItem.TryReserve(5);
+        stockItem.TryReserve(5, DateTimeOffset.UtcNow);
 
         var act = () => stockItem.Adjust(-1, "damaged goods", Now);
 

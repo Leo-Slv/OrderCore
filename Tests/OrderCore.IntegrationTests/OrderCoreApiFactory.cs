@@ -47,6 +47,7 @@ public class OrderCoreApiFactory : WebApplicationFactory<Program>
                 TimeSpan.FromMilliseconds(200),
             ];
             options.RelayPollInterval = TimeSpan.FromMilliseconds(100);
+            options.PublishTimeout = TimeSpan.FromSeconds(1);
         }));
     }
 }

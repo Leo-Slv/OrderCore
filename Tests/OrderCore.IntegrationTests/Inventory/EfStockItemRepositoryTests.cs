@@ -3,12 +3,14 @@ using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Inventory.Application.DTOs;
 using OrderCore.Api.Modules.Inventory.Application.UseCases;
+using OrderCore.Api.Modules.Inventory.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Models;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -65,7 +67,7 @@ public sealed class EfStockItemRepositoryTests : IAsyncLifetime
     {
         var stockItemRepository = new EfStockItemRepository(dbContext);
         var reservationRepository = new EfInventoryReservationRepository(dbContext);
-        var unitOfWork = new InventoryUnitOfWork(dbContext, stockItemRepository, reservationRepository, new NoOpDomainEventDispatcher());
+        var unitOfWork = new InventoryUnitOfWork(dbContext, stockItemRepository, reservationRepository, new NoOpDomainEventDispatcher(), TestOutboxes.Inventory(dbContext));
 
         return new ReserveStockUseCase(stockItemRepository, reservationRepository, unitOfWork, new NoOpAuditLogService(), TimeProvider.System);
     }
@@ -79,7 +81,7 @@ public sealed class EfStockItemRepositoryTests : IAsyncLifetime
         {
             var repository = new EfStockItemRepository(dbContext);
             var reservationRepository = new EfInventoryReservationRepository(dbContext);
-            var unitOfWork = new InventoryUnitOfWork(dbContext, repository, reservationRepository, new NoOpDomainEventDispatcher());
+            var unitOfWork = new InventoryUnitOfWork(dbContext, repository, reservationRepository, new NoOpDomainEventDispatcher(), TestOutboxes.Inventory(dbContext));
             var stockItem = StockItem.Create(productId, 10, null, DateTimeOffset.UtcNow);
             await repository.AddAsync(stockItem, CancellationToken.None);
             await unitOfWork.SaveChangesAsync(CancellationToken.None);
@@ -145,7 +147,7 @@ public sealed class EfStockItemRepositoryTests : IAsyncLifetime
         {
             var repository = new EfStockItemRepository(dbContext);
             var reservationRepository = new EfInventoryReservationRepository(dbContext);
-            var unitOfWork = new InventoryUnitOfWork(dbContext, repository, reservationRepository, new NoOpDomainEventDispatcher());
+            var unitOfWork = new InventoryUnitOfWork(dbContext, repository, reservationRepository, new NoOpDomainEventDispatcher(), TestOutboxes.Inventory(dbContext));
             await repository.AddAsync(StockItem.Create(productId, 1, null, DateTimeOffset.UtcNow), CancellationToken.None);
             await unitOfWork.SaveChangesAsync(CancellationToken.None);
         }
@@ -171,5 +173,12 @@ public sealed class EfStockItemRepositoryTests : IAsyncLifetime
         await using var verifyDbContext = CreateDbContext();
         var finalStockItem = await new EfStockItemRepository(verifyDbContext).GetByProductIdAsync(productId, CancellationToken.None);
         finalStockItem!.QuantityAvailable.Should().Be(0);
+
+        // Only the winner's events were written: one reservation, and the item running out.
+        var announced = (await verifyDbContext.Set<OutboxMessage>().ToListAsync())
+            .Where(m => m.PayloadJson.Contains(productId.ToString(), StringComparison.OrdinalIgnoreCase))
+            .Select(m => m.Type)
+            .ToList();
+        announced.Should().BeEquivalentTo([StockReserved.Name, StockAlert.Name]);
     }
 }

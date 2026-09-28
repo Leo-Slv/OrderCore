@@ -29,7 +29,6 @@ using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 using OrderCore.Api.Shared.Infrastructure;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
-using OrderCore.IntegrationTests.Payments;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -107,7 +106,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         {
             var stockRepository = new EfStockItemRepository(inventoryDb);
             var reservationRepository = new EfInventoryReservationRepository(inventoryDb);
-            var unitOfWork = new InventoryUnitOfWork(inventoryDb, stockRepository, reservationRepository, NoOpDispatcher());
+            var unitOfWork = new InventoryUnitOfWork(inventoryDb, stockRepository, reservationRepository, NoOpDispatcher(), TestOutboxes.Inventory(inventoryDb));
             await stockRepository.AddAsync(StockItem.Create(productId, 10, null, DateTimeOffset.UtcNow), CancellationToken.None);
             await unitOfWork.SaveChangesAsync(CancellationToken.None);
         }
@@ -123,7 +122,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
 
             var stockRepository = new EfStockItemRepository(inventoryDb);
             var reservationRepository = new EfInventoryReservationRepository(inventoryDb);
-            var inventoryUnitOfWork = new InventoryUnitOfWork(inventoryDb, stockRepository, reservationRepository, NoOpDispatcher());
+            var inventoryUnitOfWork = new InventoryUnitOfWork(inventoryDb, stockRepository, reservationRepository, NoOpDispatcher(), TestOutboxes.Inventory(inventoryDb));
             var inventoryService = new InventoryServiceAdapter(
                 new Api.Modules.Inventory.Application.UseCases.ReserveStockUseCase(
                     stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
@@ -138,7 +137,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
                 new Api.Modules.Inventory.Application.UseCases.ListReservationsUseCase(reservationRepository),
                 new Api.Modules.Inventory.Application.UseCases.GetStockSummaryUseCase(stockRepository));
 
-            var orderRepository = new EfOrderRepository(ordersDb, OrdersDispatcher(ordersDb));
+            var orderRepository = new EfOrderRepository(ordersDb, OrdersDispatcher(ordersDb), TestOutboxes.Orders(ordersDb));
             var orderNumbers = new SequentialOrderNumberGenerator(ordersDb, TimeProvider.System);
             var createOrder = new CreateOrderHandler(orderRepository, productCatalog, orderNumbers, NoOpAuditLog(), TimeProvider.System);
 
@@ -160,7 +159,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         // defaults to Success).
         await using (var ordersDb = new OrdersDbContext(OrdersOptions()))
         {
-            var order = await new EfOrderRepository(ordersDb, NoOpDispatcher()).GetByIdAsync(orderId, CancellationToken.None);
+            var order = await new EfOrderRepository(ordersDb, NoOpDispatcher(), TestOutboxes.Orders(ordersDb)).GetByIdAsync(orderId, CancellationToken.None);
             order!.Status.Should().Be(OrderStatus.PendingPayment);
         }
 
@@ -193,7 +192,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         // (stock permanently reduced, not just held).
         await using (var ordersDb = new OrdersDbContext(OrdersOptions()))
         {
-            var order = await new EfOrderRepository(ordersDb, NoOpDispatcher()).GetByIdAsync(orderId, CancellationToken.None);
+            var order = await new EfOrderRepository(ordersDb, NoOpDispatcher(), TestOutboxes.Orders(ordersDb)).GetByIdAsync(orderId, CancellationToken.None);
             order!.Status.Should().Be(OrderStatus.Confirmed);
         }
 
@@ -237,7 +236,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         var inventoryDb = new InventoryDbContext(InventoryOptions());
         var stockRepository = new EfStockItemRepository(inventoryDb);
         var reservationRepository = new EfInventoryReservationRepository(inventoryDb);
-        var inventoryUnitOfWork = new InventoryUnitOfWork(inventoryDb, stockRepository, reservationRepository, NoOpDispatcher());
+        var inventoryUnitOfWork = new InventoryUnitOfWork(inventoryDb, stockRepository, reservationRepository, NoOpDispatcher(), TestOutboxes.Inventory(inventoryDb));
         var inventoryService = new InventoryServiceAdapter(
             new Api.Modules.Inventory.Application.UseCases.ReserveStockUseCase(
                 stockRepository, reservationRepository, inventoryUnitOfWork, NoOpAuditLog(), TimeProvider.System),
@@ -261,7 +260,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         services.AddSingleton<IDomainEventHandler<OrderCancelled>>(sp => sp.GetRequiredService<OrderStatusHistoryProjector>());
         services.AddSingleton<IDomainEventHandler<OrderPaymentFailed>>(sp => sp.GetRequiredService<OrderStatusHistoryProjector>());
 
-        services.AddSingleton<IOrderRepository>(sp => new EfOrderRepository(ordersDb, NoOpDispatcher()));
+        services.AddSingleton<IOrderRepository>(sp => new EfOrderRepository(ordersDb, NoOpDispatcher(), TestOutboxes.Orders(ordersDb)));
         services.AddSingleton(TimeProvider.System);
         services.AddLogging();
         services.AddSingleton<IInventoryService>(inventoryService);
@@ -276,7 +275,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
     {
         var paymentRepository = new EfPaymentRepository(paymentsDb);
         var provider = new FakePaymentProvider(Options.Create(new FakePaymentProviderOptions()));
-        var outbox = PaymentsTestOutbox.For(paymentsDb);
+        var outbox = TestOutboxes.Payments(paymentsDb);
         var refund = new RequestRefundUseCase(paymentRepository, provider, outbox, NoOpAuditLog(), TimeProvider.System);
 
         return new PaymentGatewayAdapter(
@@ -290,7 +289,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
     private static CreatePaymentUseCase CreatePaymentUseCase(PaymentsDbContext paymentsDb)
     {
         var paymentRepository = new EfPaymentRepository(paymentsDb);
-        var outbox = PaymentsTestOutbox.For(paymentsDb);
+        var outbox = TestOutboxes.Payments(paymentsDb);
         var provider = new FakePaymentProvider(Options.Create(new FakePaymentProviderOptions()));
         return new CreatePaymentUseCase(paymentRepository, provider, outbox, NoOpAuditLog(), TimeProvider.System);
     }

@@ -156,7 +156,7 @@ public sealed class ApiDatabase : IAsyncLifetime
         await using var inventoryDb = new InventoryDbContext(Options<InventoryDbContext>());
         var stockItems = new EfStockItemRepository(inventoryDb);
         var unitOfWork = new InventoryUnitOfWork(
-            inventoryDb, stockItems, new EfInventoryReservationRepository(inventoryDb), new NoOpDomainEventDispatcher());
+            inventoryDb, stockItems, new EfInventoryReservationRepository(inventoryDb), new NoOpDomainEventDispatcher(), TestOutboxes.Inventory(inventoryDb));
         var stockItem = await stockItems.GetByProductIdAsync(productId, CancellationToken.None);
         if (stockItem is null)
         {
@@ -213,15 +213,17 @@ public sealed class ApiDatabase : IAsyncLifetime
     }
 
     /// <summary>
-    /// Waits until the Messaging relay has published Payments' event
-    /// <paramref name="contract"/> about the order, and returns its outbox row.
+    /// Waits until the Messaging relay has published the event
+    /// <paramref name="contract"/> about the order from the outbox in
+    /// <typeparamref name="TDbContext"/>, and returns its outbox row.
     /// </summary>
-    public async Task<OutboxMessage> WaitForPublishedPaymentEventAsync(string contract, Guid orderId)
+    public async Task<OutboxMessage> WaitForPublishedEventAsync<TDbContext>(string contract, Guid orderId)
+        where TDbContext : DbContext
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
         while (true)
         {
-            await using (var db = new PaymentsDbContext(Options<PaymentsDbContext>()))
+            await using (var db = (TDbContext)Activator.CreateInstance(typeof(TDbContext), Options<TDbContext>())!)
             {
                 var published = await db.Set<OutboxMessage>().Where(m => m.Type == contract && m.SentAt != null).ToListAsync();
                 var row = published.FirstOrDefault(m =>

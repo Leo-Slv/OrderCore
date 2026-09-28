@@ -14,7 +14,7 @@ public sealed class GetStockAvailabilityUseCaseTests
     {
         var repository = new FakeStockItemRepository();
         var stockItem = StockItem.Create(Guid.NewGuid(), 10, null, Now);
-        stockItem.TryReserve(4);
+        stockItem.TryReserve(4, DateTimeOffset.UtcNow);
         await repository.AddAsync(stockItem, CancellationToken.None);
 
         var result = await new GetStockAvailabilityUseCase(repository).ExecuteAsync([stockItem.ProductId], CancellationToken.None);

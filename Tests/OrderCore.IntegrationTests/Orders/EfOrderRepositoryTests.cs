@@ -64,7 +64,7 @@ public sealed class EfOrderRepositoryTests : IAsyncLifetime
 
         await using (var dbContext = CreateDbContext())
         {
-            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher());
+            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher(), TestOutboxes.Orders(dbContext));
             var order = Order.Create(customerId, "BRL", "ORD-2026-000001", DateTimeOffset.UtcNow);
             order.AddItem(Guid.NewGuid(), null, "SKU-1", "Widget", null, 10m, 2);
             order.SetAddresses(SomeAddress(), SomeAddress());
@@ -76,7 +76,7 @@ public sealed class EfOrderRepositoryTests : IAsyncLifetime
 
         await using (var dbContext = CreateDbContext())
         {
-            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher());
+            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher(), TestOutboxes.Orders(dbContext));
             var reloaded = await repository.GetByIdAsync(orderId, CancellationToken.None);
 
             reloaded.Should().NotBeNull();
@@ -95,7 +95,7 @@ public sealed class EfOrderRepositoryTests : IAsyncLifetime
 
         await using (var dbContext = CreateDbContext())
         {
-            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher());
+            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher(), TestOutboxes.Orders(dbContext));
             var order = Order.Create(customerId, "BRL", "ORD-2026-000002", DateTimeOffset.UtcNow);
             order.AddItem(Guid.NewGuid(), null, "SKU-1", "Widget", null, 10m, 1);
             order.RequestPayment(DateTimeOffset.UtcNow);
@@ -107,7 +107,7 @@ public sealed class EfOrderRepositoryTests : IAsyncLifetime
 
         await using (var dbContext = CreateDbContext())
         {
-            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher());
+            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher(), TestOutboxes.Orders(dbContext));
             var order = await repository.GetByIdAsync(orderId, CancellationToken.None);
             order!.Confirm(DateTimeOffset.UtcNow);
             await repository.SaveChangesAsync(CancellationToken.None);
@@ -115,7 +115,7 @@ public sealed class EfOrderRepositoryTests : IAsyncLifetime
 
         await using (var dbContext = CreateDbContext())
         {
-            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher());
+            var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher(), TestOutboxes.Orders(dbContext));
             var reloaded = await repository.GetByIdAsync(orderId, CancellationToken.None);
 
             reloaded!.ConfirmedAt.Should().NotBeNull();

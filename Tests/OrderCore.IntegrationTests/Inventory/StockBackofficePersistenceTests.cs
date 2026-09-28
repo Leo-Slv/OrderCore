@@ -68,7 +68,7 @@ public sealed class StockBackofficePersistenceTests : IAsyncLifetime
             DbContext = dbContext;
             StockItems = new EfStockItemRepository(dbContext);
             Reservations = new EfInventoryReservationRepository(dbContext);
-            UnitOfWork = new InventoryUnitOfWork(dbContext, StockItems, Reservations, new RecordingDispatcher(dbContext));
+            UnitOfWork = new InventoryUnitOfWork(dbContext, StockItems, Reservations, new RecordingDispatcher(dbContext), TestOutboxes.Inventory(dbContext));
         }
 
         public InventoryDbContext DbContext { get; }
@@ -91,7 +91,7 @@ public sealed class StockBackofficePersistenceTests : IAsyncLifetime
         stockItem.SetReorderLevel(reorderLevel, Now);
         if (reserved > 0)
         {
-            stockItem.TryReserve(reserved).Should().BeTrue();
+            stockItem.TryReserve(reserved, DateTimeOffset.UtcNow).Should().BeTrue();
         }
 
         await scope.StockItems.AddAsync(stockItem, CancellationToken.None);
@@ -168,7 +168,7 @@ public sealed class StockBackofficePersistenceTests : IAsyncLifetime
         await using (var scope = NewScope())
         {
             var stockItem = await scope.StockItems.GetByProductIdAsync(productId, CancellationToken.None);
-            stockItem!.TryReserve(2);
+            stockItem!.TryReserve(2, DateTimeOffset.UtcNow);
             stockItem.Consume(2);
             var reservation = InventoryReservation.Create(productId, orderId, Guid.NewGuid(), 2, Now);
             reservation.Consume(Now);

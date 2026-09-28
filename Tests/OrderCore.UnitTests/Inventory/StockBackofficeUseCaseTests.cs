@@ -31,7 +31,7 @@ public sealed class StockBackofficeUseCaseTests
     /// <summary>A reservation of <paramref name="quantity"/> units, already consumed (the order was confirmed).</summary>
     private async Task<InventoryReservation> SaveConsumedReservationAsync(StockItem stockItem, Guid orderId, int quantity)
     {
-        stockItem.TryReserve(quantity);
+        stockItem.TryReserve(quantity, DateTimeOffset.UtcNow);
         stockItem.Consume(quantity);
         var reservation = InventoryReservation.Create(stockItem.ProductId, orderId, Guid.NewGuid(), quantity, Now);
         reservation.Consume(Now);
@@ -114,7 +114,7 @@ public sealed class StockBackofficeUseCaseTests
     public async Task Fully_reserved_stock_is_out_of_stock()
     {
         var stockItem = await SaveStockItemAsync(onHand: 2);
-        stockItem.TryReserve(2);
+        stockItem.TryReserve(2, DateTimeOffset.UtcNow);
 
         StockItemOutput.From(stockItem).State.Should().Be(StockState.OutOfStock);
     }

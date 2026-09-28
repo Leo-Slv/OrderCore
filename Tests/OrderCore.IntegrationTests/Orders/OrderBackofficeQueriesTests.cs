@@ -89,7 +89,7 @@ public sealed class OrderBackofficeQueriesTests : IAsyncLifetime
         }
 
         await using var dbContext = CreateDbContext();
-        var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher());
+        var repository = new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher(), TestOutboxes.Orders(dbContext));
         await repository.AddAsync(order, CancellationToken.None);
         await repository.SaveChangesAsync(CancellationToken.None);
         order.TotalAmount.Should().Be(135m);
@@ -99,7 +99,7 @@ public sealed class OrderBackofficeQueriesTests : IAsyncLifetime
     private async Task<T> QueryAsync<T>(Func<EfOrderRepository, Task<T>> query)
     {
         await using var dbContext = CreateDbContext();
-        return await query(new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher()));
+        return await query(new EfOrderRepository(dbContext, new NoOpDomainEventDispatcher(), TestOutboxes.Orders(dbContext)));
     }
 
     [Fact]
