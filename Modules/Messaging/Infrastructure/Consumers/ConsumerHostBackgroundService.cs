@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Messaging.Application.Contracts;
 using OrderCore.Api.Modules.Messaging.Domain.Entities;
 using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
+using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -36,6 +37,7 @@ public sealed class ConsumerHostBackgroundService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly MessagingOptions _messaging;
     private readonly TimeProvider _timeProvider;
+    private readonly MessagingTelemetry _telemetry;
     private readonly ILogger<ConsumerHostBackgroundService> _logger;
     private readonly SemaphoreSlim _publishLock = new(1, 1);
     private readonly List<IChannel> _channels = new();
@@ -48,8 +50,10 @@ public sealed class ConsumerHostBackgroundService : BackgroundService
         IServiceScopeFactory scopeFactory,
         IOptions<MessagingOptions> messaging,
         TimeProvider timeProvider,
+        MessagingTelemetry telemetry,
         ILogger<ConsumerHostBackgroundService> logger)
     {
+        _telemetry = telemetry;
         _connection = connection;
         _registry = registry;
         _processor = processor;
@@ -111,11 +115,12 @@ public sealed class ConsumerHostBackgroundService : BackgroundService
             {
                 envelope = MessageEnvelope.FromBytes(body);
                 await _processor.ProcessAsync(
-                    queue, envelope, ReadString(headers, MessageHeaders.TraceParent), ReadString(headers, MessageHeaders.TraceState), stoppingToken);
+                    queue, envelope, attempt, ReadString(headers, MessageHeaders.TraceParent), ReadString(headers, MessageHeaders.TraceState), stoppingToken);
             }
             catch (Exception exception) when (exception is UnroutableMessageException or JsonException)
             {
                 _logger.LogError(exception, "Message on {Queue} can't be handled; recorded as failed without retrying.", queue);
+                _telemetry.SetAside(queue, envelope?.Type ?? "unknown", "unreadable");
                 await RecordFailedAsync(queue, envelope, body, headers, attempt, exception, stoppingToken);
             }
             catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
@@ -126,6 +131,7 @@ public sealed class ConsumerHostBackgroundService : BackgroundService
                         exception, "Handling {Type} {MessageId} on {Queue} failed (attempt {Attempt}); retrying in {Delay}.",
                         envelope?.Type, envelope?.MessageId, queue, attempt, _messaging.RetryDelays[attempt - 1]);
                     await ScheduleRetryAsync(queue, delivery, attempt, exception, stoppingToken);
+                    _telemetry.Retried(queue, envelope?.Type ?? "unknown", attempt + 1);
                 }
                 else
                 {
@@ -133,6 +139,7 @@ public sealed class ConsumerHostBackgroundService : BackgroundService
                         exception, "Handling {Type} {MessageId} on {Queue} failed {Attempts} times; recorded as failed.",
                         envelope?.Type, envelope?.MessageId, queue, attempt);
                     await RecordFailedAsync(queue, envelope, body, headers, attempt, exception, stoppingToken);
+                    _telemetry.SetAside(queue, envelope?.Type ?? "unknown", "retries_exhausted");
                 }
             }
 

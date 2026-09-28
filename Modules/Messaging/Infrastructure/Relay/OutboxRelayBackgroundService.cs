@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
+using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using RabbitMQ.Client;
 
@@ -30,6 +32,7 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
     private readonly RabbitMqOptions _options;
     private readonly MessagingOptions _messaging;
     private readonly TimeProvider _timeProvider;
+    private readonly MessagingTelemetry _telemetry;
     private readonly ILogger<OutboxRelayBackgroundService> _logger;
     private IChannel? _channel;
 
@@ -40,8 +43,10 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
         IOptions<RabbitMqOptions> options,
         IOptions<MessagingOptions> messaging,
         TimeProvider timeProvider,
+        MessagingTelemetry telemetry,
         ILogger<OutboxRelayBackgroundService> logger)
     {
+        _telemetry = telemetry;
         _scopeFactory = scopeFactory;
         _connection = connection;
         _registry = registry;
@@ -87,6 +92,9 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
         var dbContext = (DbContext)scope.ServiceProvider.GetRequiredService(source);
         var outbox = dbContext.Set<OutboxMessage>();
 
+        var module = ModuleOf(dbContext);
+        await ReportBacklogAsync(outbox, module, cancellationToken);
+
         var pending = await outbox
             .Where(m => m.SentAt == null)
             .OrderBy(m => m.OccurredAt)
@@ -101,11 +109,13 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
                 await PublishAsync(message, cancellationToken);
                 message.SentAt = _timeProvider.GetUtcNow();
                 message.LastError = null;
+                _telemetry.Published(module, message.Type);
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
                 message.PublishAttempts++;
                 message.LastError = exception.Message.Length > 2000 ? exception.Message[..2000] : exception.Message;
+                _telemetry.PublishFailed(module, message.Type);
                 await dbContext.SaveChangesAsync(cancellationToken);
 
                 _logger.LogWarning(
@@ -120,6 +130,23 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
         }
     }
 
+    /// <summary>The module an outbox belongs to, from its table name (<c>{module}_outbox_messages</c>).</summary>
+    private static string ModuleOf(DbContext dbContext)
+    {
+        var table = dbContext.Model.FindEntityType(typeof(OutboxMessage))?.GetTableName() ?? dbContext.GetType().Name;
+        return table.Split("_outbox_messages")[0];
+    }
+
+    /// <summary>How many rows wait and how old the oldest is — what the backlog gauges report.</summary>
+    private async Task ReportBacklogAsync(DbSet<OutboxMessage> outbox, string module, CancellationToken cancellationToken)
+    {
+        var unsent = outbox.Where(m => m.SentAt == null);
+        var pending = await unsent.LongCountAsync(cancellationToken);
+        var oldest = pending == 0 ? (DateTimeOffset?)null : await unsent.MinAsync(m => (DateTimeOffset?)m.OccurredAt, cancellationToken);
+        var age = oldest is { } occurredAt ? _timeProvider.GetUtcNow() - occurredAt : TimeSpan.Zero;
+        _telemetry.ReportBacklog(module, pending, age < TimeSpan.Zero ? TimeSpan.Zero : age);
+    }
+
     private async Task PublishAsync(OutboxMessage message, CancellationToken cancellationToken)
     {
         if (_channel is not { IsOpen: true })
@@ -128,15 +155,22 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
             _channel = await _connection.CreatePublishingChannelAsync(cancellationToken);
         }
 
+        var routingKey = IntegrationEventRegistry.RoutingKey(message.Type, message.Version);
+        using var activity = _telemetry.StartPublish(_options.Exchange, routingKey, message.Id, message.TraceParent, message.TraceState);
+
+        // The consumer continues the producer span (or, with no listener, the
+        // trace of whoever wrote the row).
+        var traceParent = activity?.Id ?? message.TraceParent;
+        var traceState = activity is null ? message.TraceState : activity.TraceStateString;
         var headers = new Dictionary<string, object?> { [MessageHeaders.Attempt] = 1 };
-        if (message.TraceParent is not null)
+        if (traceParent is not null)
         {
-            headers[MessageHeaders.TraceParent] = Encoding.UTF8.GetBytes(message.TraceParent);
+            headers[MessageHeaders.TraceParent] = Encoding.UTF8.GetBytes(traceParent);
         }
 
-        if (message.TraceState is not null)
+        if (traceState is not null)
         {
-            headers[MessageHeaders.TraceState] = Encoding.UTF8.GetBytes(message.TraceState);
+            headers[MessageHeaders.TraceState] = Encoding.UTF8.GetBytes(traceState);
         }
 
         var properties = new BasicProperties
@@ -154,13 +188,16 @@ public sealed class OutboxRelayBackgroundService : BackgroundService
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_messaging.PublishTimeout);
 
-        await _channel.BasicPublishAsync(
-            _options.Exchange,
-            IntegrationEventRegistry.RoutingKey(message.Type, message.Version),
-            mandatory: false,
-            properties,
-            MessageEnvelope.FromOutbox(message).ToBytes(),
-            timeout.Token);
+        try
+        {
+            await _channel.BasicPublishAsync(
+                _options.Exchange, routingKey, mandatory: false, properties, MessageEnvelope.FromOutbox(message).ToBytes(), timeout.Token);
+        }
+        catch (Exception exception)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
+            throw;
+        }
     }
 
     private async Task ResetChannelAsync()

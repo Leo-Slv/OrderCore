@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 
 namespace OrderCore.Api.Modules.Messaging.Infrastructure.Consumers;
@@ -17,8 +18,10 @@ public enum DeliveryOutcome
 /// Handles one delivery for one consumer, broker-agnostic (the host deals
 /// with acknowledgements and retries):
 /// <list type="number">
-/// <item>continues the trace the message carries, so everything the handler
-/// does — including events it publishes — stays in the originating trace;</item>
+/// <item>handles it inside a consumer span continuing the trace the message
+/// carries (<see cref="MessagingTelemetry.StartProcess"/>), so everything the
+/// handler does — including events it publishes — stays in the originating
+/// trace, and records how long it took and how it ended;</item>
 /// <item>opens a scope and marks the message as the causation of anything
 /// published in it;</item>
 /// <item>skips a message id this consumer already handled (the inbox);</item>
@@ -35,24 +38,45 @@ public sealed class MessageProcessor
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IntegrationEventRegistry _registry;
     private readonly TimeProvider _timeProvider;
+    private readonly MessagingTelemetry _telemetry;
 
-    public MessageProcessor(IServiceScopeFactory scopeFactory, IntegrationEventRegistry registry, TimeProvider timeProvider)
+    public MessageProcessor(
+        IServiceScopeFactory scopeFactory, IntegrationEventRegistry registry, TimeProvider timeProvider, MessagingTelemetry telemetry)
     {
+        _telemetry = telemetry;
         _scopeFactory = scopeFactory;
         _registry = registry;
         _timeProvider = timeProvider;
     }
 
     public async Task<DeliveryOutcome> ProcessAsync(
-        string queue, MessageEnvelope envelope, string? traceParent, string? traceState, CancellationToken cancellationToken)
+        string queue, MessageEnvelope envelope, int attempt, string? traceParent, string? traceState, CancellationToken cancellationToken)
     {
         var registration = _registry.Consumers.FirstOrDefault(c =>
                 c.Queue == queue && _registry.ContractOf(c.EventType) == new EventContract(envelope.Type, envelope.Version))
             ?? throw new UnroutableMessageException(
                 $"No handler on '{queue}' for '{IntegrationEventRegistry.RoutingKey(envelope.Type, envelope.Version)}'.");
 
-        using var activity = ContinueTrace(traceParent, traceState);
+        using var activity = _telemetry.StartProcess(queue, envelope.Type, envelope.MessageId, attempt, traceParent, traceState);
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            var outcome = await HandleAsync(registration, queue, envelope, cancellationToken);
+            _telemetry.Handled(queue, envelope.Type, outcome == DeliveryOutcome.Handled ? "handled" : "duplicate", Stopwatch.GetElapsedTime(started));
+            return outcome;
+        }
+        catch (Exception exception)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
+            activity?.AddException(exception);
+            _telemetry.Handled(queue, envelope.Type, "error", Stopwatch.GetElapsedTime(started));
+            throw;
+        }
+    }
 
+    private async Task<DeliveryOutcome> HandleAsync(
+        ConsumerRegistration registration, string queue, MessageEnvelope envelope, CancellationToken cancellationToken)
+    {
         await using var scope = _scopeFactory.CreateAsyncScope();
         scope.ServiceProvider.GetRequiredService<MessageContext>().BeginHandling(envelope.MessageId);
 
@@ -83,24 +107,6 @@ public sealed class MessageProcessor
         }
 
         return DeliveryOutcome.Handled;
-    }
-
-    /// <summary>
-    /// Makes the message's trace the current one. A plain <see cref="Activity"/>
-    /// (not from an <c>ActivitySource</c>) so the context flows even with no
-    /// tracing listener; the Observability feature adds real consumer spans.
-    /// </summary>
-    private static Activity? ContinueTrace(string? traceParent, string? traceState)
-    {
-        if (traceParent is null || !ActivityContext.TryParse(traceParent, traceState, out _))
-        {
-            return null;
-        }
-
-        var activity = new Activity("OrderCore.Messaging.Consume");
-        activity.SetParentId(traceParent);
-        activity.TraceStateString = traceState;
-        return activity.Start();
     }
 
     private static bool IsInboxConflict(DbUpdateException exception) =>

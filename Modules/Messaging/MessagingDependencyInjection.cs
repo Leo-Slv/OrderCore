@@ -6,6 +6,7 @@ using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Relay;
+using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 
 namespace OrderCore.Api.Modules.Messaging;
@@ -37,6 +38,7 @@ public static class MessagingDependencyInjection
 
         services.IntegrationEventRegistry();
         services.AddSingleton<RabbitMqConnection>();
+        services.AddSingleton<MessagingTelemetry>();
         services.AddSingleton<MessageProcessor>();
         services.AddScoped<IFailedMessageRepository, EfFailedMessageRepository>();
         services.AddScoped<IFailedMessageReplayer, RabbitMqFailedMessageReplayer>();
