@@ -156,16 +156,49 @@ de um formato mais completo que o do cliente fica sob `admin/`.
 | Tela | Endpoints |
 |---|---|
 | Dashboard | `GET /api/admin/dashboard?from=&to=` → pedidos por status, receita por moeda, clientes novos, estoque baixo/esgotado e pedidos recentes (padrão: últimos 30 dias) |
-| Pedidos | `GET /api/admin/orders?status=&customerId=&createdFrom=&createdTo=` (com cliente e status do pagamento); `GET /api/admin/orders/{id}` (notas internas, cliente, pagamento completo, reservas); `GET /api/orders/{id}/status-history`; `GET /api/audit-logs?entityName=Order&entityId={id}` (linha do tempo) |
+| Pedidos | `GET /api/admin/orders?status=&customerId=&createdFrom=&createdTo=` (com cliente e status do pagamento); `GET /api/admin/orders/{id}` (notas internas, cliente, pagamento completo, reservas); `GET /api/admin/orders/{id}/timeline` (a vida do pedido em todos os módulos: pedido, pagamento, estoque); `GET /api/orders/{id}/status-history`; `GET /api/audit-logs?entityName=Order&entityId={id}` (quem fez o quê) |
 | Atendimento | `POST /api/orders/{id}/start-processing`, `/ship` (captura o pagamento; `409 payment_capture_failed` se o provedor recusar), `/deliver`, `/cancel` (acerta o pagamento e devolve o estoque; responde o que aconteceu com o pagamento); `PUT /api/orders/{id}/internal-notes` |
 | Produtos e estoque | `GET /api/admin/catalog/products?status=&searchTerm=&stock=LowStock` (com os números de estoque); `PUT /api/catalog/products/{id}/price`, `/compare-at-price`; `POST …/discontinue`; `POST`/`DELETE …/images`, `PUT …/images/order`; `POST`/`DELETE …/variants`; `POST /api/inventory/stock-items/{productId}/receive`, `/adjust`; `PUT …/reorder-level`; `GET …/movements`, `…/reservations` |
 | Pagamentos | `GET /api/payments?status=&method=&createdFrom=&createdTo=`; `GET /api/payments/{id}` (com estornos); `POST /api/payments/{id}/refunds` |
 | Clientes | `GET /api/customers?searchTerm=`; `GET /api/customers/{id}` + `GET /api/orders/customers/{id}` (pedidos do cliente); `POST /api/customers/{id}/deactivate`, `/reactivate` (o cliente desativado não faz login nem checkout) |
+| Mensagens que falharam | `GET /api/messaging/failed-messages?status=Pending`; `GET /api/messaging/failed-messages/{id}` (com a mensagem como foi recebida); `POST …/{id}/replay` (volta para o consumidor que falhou), `POST …/{id}/discard` |
 
 Criar um produto já cria o registro de estoque dele (com 0 unidades); o
 admin só dá entrada e ajusta. Os pagamentos são capturados quando o
 pedido é enviado, e cancelar um pedido pago nunca deixa o dinheiro retido:
 uma autorização é liberada (`Voided`) e uma captura, estornada.
+
+## Eventos entre módulos (RabbitMQ)
+
+Os módulos se avisam de forma assíncrona pelo RabbitMQ
+([`Docs/specs/events/async-messaging.md`](Docs/specs/events/async-messaging.md),
+diagrama em [09-messaging.md](Docs/diagrams/implementation-class/09-messaging.md)):
+
+```text
+use case ── save ──► DbContext do módulo ┬─ agregado
+                                         └─ {módulo}_outbox_messages   (mesma transação)
+                                                 │  relay: publica e marca como enviado
+                                                 ▼
+                         exchange ordercore.events  (routing key <módulo>.<evento>.v<versão>)
+                                                 │
+                        uma fila por consumidor (orders.payment-outcomes, orders.timeline)
+                                                 │  inbox: cada mensagem tratada uma vez
+                                                 ▼
+                                              handler ── falhou? 10 s, 1 min, 5 min, 30 min
+                                                 │
+                                   5ª falha ──► failed_messages (backoffice: reprocessar/descartar)
+```
+
+- **Payments** publica o que acontece com o pagamento; **Orders**, cada
+  mudança do pedido; **Inventory**, as reservas de um pedido e alertas de
+  estoque baixo/esgotado.
+- **Orders** consome o resultado do pagamento (confirma ou falha o
+  pedido) e monta a timeline do pedido para o admin.
+- A entrega é pelo menos uma vez; todo consumidor é idempotente.
+- Um checkout e tudo o que ele causa nos outros módulos ficam no mesmo
+  trace (W3C `traceparent` nas mensagens).
+- Se o RabbitMQ cair, a API continua aceitando pedidos: os eventos
+  esperam no outbox e saem quando a conexão volta.
 
 ## Fluxo de pagamento
 
@@ -241,10 +274,13 @@ atravessam módulos e camadas, então é organizado por regra/convenção —
 incluindo `EndpointAuthorizationTests`, que falha se alguma action não
 declarar explicitamente quem pode chamá-la.
 
-Os testes de integração sobem PostgreSQL via Testcontainers, então
-precisam do Docker rodando. Os testes que passam pela API HTTP usam
-`OrderCoreApiFactory` (host real com uma chave de assinatura de teste) e
-`ApiDatabase` (banco migrado + admin semeado + passos HTTP comuns).
+Os testes de integração sobem PostgreSQL e RabbitMQ via Testcontainers,
+então precisam do Docker rodando. Os testes que passam pela API HTTP usam
+`OrderCoreApiFactory` (host real com uma chave de assinatura de teste e um
+vhost próprio num RabbitMQ compartilhado, com retentativas em
+milissegundos) e `ApiDatabase` (banco migrado + admin semeado + passos
+HTTP comuns). `Messaging/MessagingEndToEndTests` cobre o trace de ponta a
+ponta, entregas duplicadas e o broker fora do ar.
 
 ## Como executar
 
@@ -252,24 +288,27 @@ Pré-requisitos: [.NET 10 SDK](https://dotnet.microsoft.com/download) e
 Docker.
 
 A API não sobe sem uma chave de assinatura de JWT (`Jwt:SigningKey`, no
-mínimo 32 bytes), e o primeiro admin é criado na inicialização a partir
-de `IdentitySeed:AdminEmail`/`AdminPassword`. Nenhum dos dois fica no
+mínimo 32 bytes) nem sem o RabbitMQ (`RabbitMq:Password`), e o primeiro
+admin é criado na inicialização a partir de
+`IdentitySeed:AdminEmail`/`AdminPassword`. Nenhum desses segredos fica no
 repositório:
 
 ```bash
 # Com docker compose: copie .env.example para .env (git-ignored) e preencha
-# JWT_SIGNING_KEY, ADMIN_EMAIL e ADMIN_PASSWORD
+# JWT_SIGNING_KEY, ADMIN_EMAIL, ADMIN_PASSWORD, RABBITMQ_USER e RABBITMQ_PASSWORD
 cp .env.example .env
 
-# Subir PostgreSQL + API
+# Subir PostgreSQL + RabbitMQ + API
 docker compose up --build
 
 # Rodando a API localmente (fora do container): guarde os segredos em user-secrets
-dotnet user-secrets set "Jwt:SigningKey" "1049089openssl rand -base64 48)"
-dotnet user-secrets set "IdentitySeed:AdminEmail" "admin.local"
+dotnet user-secrets set "Jwt:SigningKey" "$(openssl rand -base64 48)"
+dotnet user-secrets set "IdentitySeed:AdminEmail" "admin@ordercore.local"
 dotnet user-secrets set "IdentitySeed:AdminPassword" "<senha com letra e dígito>"
+dotnet user-secrets set "RabbitMq:Password" "<a mesma RABBITMQ_PASSWORD do .env>"
 
-# ...e rode contra o Postgres do compose
+# ...suba só PostgreSQL e RabbitMQ pelo compose e rode a API
+docker compose up -d postgres rabbitmq
 dotnet run --project OrderCore.Api.csproj
 
 # Rodar todos os testes
@@ -277,6 +316,8 @@ dotnet test
 ```
 
 A API expõe `GET /health` para health check e `GET /` como smoke test.
+O painel do RabbitMQ fica em <http://localhost:15672> (usuário e senha do
+`.env`): filas, mensagens em espera e as filas de retentativa.
 
 Em ambiente de Development, a API expõe documentação interativa via
 [Scalar](https://scalar.com/) em `/scalar/v1`, gerada a partir do documento
@@ -301,8 +342,9 @@ dotnet ef database update --context AuditLogsDbContext
 ```
 
 (repetir para `CustomersDbContext`, `CatalogDbContext`,
-`InventoryDbContext`, `OrdersDbContext`, `PaymentsDbContext` e
-`IdentityDbContext`).
+`InventoryDbContext`, `OrdersDbContext`, `PaymentsDbContext`,
+`IdentityDbContext` e `MessagingDbContext`). A mensageria acrescentou
+migrations em Payments, Orders, Inventory e o `MessagingDbContext` novo.
 
 ## Estado atual do scaffold
 
@@ -314,6 +356,9 @@ implementado e persistido no PostgreSQL. `Identity`, o outro módulo técnico, c
 senhas, sessões de refresh e emissão dos JWT, com persistência EF Core
 própria — ver
 [08-identity.md](Docs/diagrams/implementation-class/08-identity.md).
+`Messaging`, o terceiro módulo técnico, leva os eventos entre os módulos
+pelo RabbitMQ — ver
+[09-messaging.md](Docs/diagrams/implementation-class/09-messaging.md).
 `AuditLogs` recebe entradas de verdade: as 27 ações de
 `AuditLogActionNames` (ciclo de vida do pedido, autorização/captura/
 anulação/falha/estorno de pagamento, reserva/liberação/consumo/expiração
@@ -328,17 +373,17 @@ O fluxo de checkout completo está implementado e validado por um teste de
 integração de ponta a ponta (`Tests/OrderCore.IntegrationTests/Orders/CheckoutFlowTests.cs`):
 criar pedido → reservar estoque (`InventoryServiceAdapter`) → solicitar
 pagamento (`PaymentGatewayAdapter`, autorizado por `FakePaymentProvider`) →
-o Transactional Outbox do Payments "publica" o evento de integração
-chamando o `IDomainEventDispatcher` do shared kernel (ponte deliberada e
-temporária até o RabbitMQ existir) → Orders confirma o pedido e consome a
-reserva de estoque permanentemente. O caso de uso de reserva de estoque
+o Payments grava o evento de integração no próprio outbox → Orders
+confirma o pedido e consome a reserva de estoque permanentemente (o teste
+entrega o evento à mão; pelo RabbitMQ, isso é coberto pelos testes do
+storefront e de mensageria). O caso de uso de reserva de estoque
 sob concorrência (`Stock = 1`, N requisições concorrentes, exatamente 1
 reserva bem-sucedida) também está implementado e validado contra Postgres
 real — ver a seção acima.
 
 O caminho do storefront (catálogo → cotação do carrinho → checkout em um
-passo → confirmação pelo outbox → acompanhamento) é testado pela API
-HTTP real contra PostgreSQL, com o `OutboxPublisherBackgroundService` do
+passo → confirmação pelo RabbitMQ → acompanhamento) é testado pela API
+HTTP real contra PostgreSQL e RabbitMQ, com o relay e os consumidores do
 próprio host confirmando (ou falhando, com o provedor em modo `Declined`)
 o pedido: `Tests/OrderCore.IntegrationTests/Orders/StorefrontCheckoutTests.cs`.
 
@@ -357,10 +402,14 @@ pedido entregue pode ser estornado):
 `Inventory/InventoryBackofficeTests`, `Payments/PaymentsBackofficeTests`
 e `Customers/CustomersBackofficeTests`.
 
-A integração com RabbitMQ de verdade (o outbox hoje despacha in-process)
-e a extração opcional de `Payments` para `PayCore` ainda não foram
-implementadas — entram conforme as fases descritas em
-[Arquitetura](#arquitetura), com ADR próprio quando a decisão for tomada.
+A comunicação assíncrona pelo RabbitMQ está implementada (outbox por
+módulo, consumidores idempotentes com retentativas, timeline do pedido,
+mensagens que falharam no backoffice) e testada de ponta a ponta:
+`Tests/OrderCore.IntegrationTests/Messaging` e
+`Orders/OrderTimelineTests`. A extração opcional de `Payments` para
+`PayCore` ainda não foi implementada — entra conforme as fases descritas
+em [Arquitetura](#arquitetura), com ADR próprio quando a decisão for
+tomada.
 
 ## Filosofia
 
