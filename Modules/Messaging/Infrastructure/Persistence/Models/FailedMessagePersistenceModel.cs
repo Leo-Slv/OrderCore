@@ -28,5 +28,7 @@ public sealed class FailedMessagePersistenceModel
 
     public string Status { get; set; } = string.Empty;
 
+    public DateTimeOffset? ResolvedAt { get; set; }
+
     public int Version { get; set; }
 }

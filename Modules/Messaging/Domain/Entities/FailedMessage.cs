@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Messaging.Domain.Enums;
 using OrderCore.Api.Shared.Domain;
+using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Messaging.Domain.Entities;
 
@@ -39,6 +40,9 @@ public sealed class FailedMessage : AggregateRoot<Guid>
     public DateTimeOffset LastFailedAt { get; private set; }
 
     public FailedMessageStatus Status { get; private set; }
+
+    /// <summary>When an admin replayed or discarded it; <c>null</c> while <see cref="FailedMessageStatus.Pending"/>.</summary>
+    public DateTimeOffset? ResolvedAt { get; private set; }
 
     private FailedMessage()
     {
@@ -87,6 +91,37 @@ public sealed class FailedMessage : AggregateRoot<Guid>
         return failed;
     }
 
+    /// <summary>
+    /// Checked before sending the message back, so a message already
+    /// replayed or discarded is never sent again.
+    /// </summary>
+    public void EnsurePending()
+    {
+        if (Status != FailedMessageStatus.Pending)
+        {
+            throw new DomainRuleViolationException(
+                "invalid_failed_message_state", $"Failed message '{Id}' was already {Status.ToString().ToLowerInvariant()}.");
+        }
+    }
+
+    /// <summary>The message was sent back to its consumer's queue, with a fresh count of attempts.</summary>
+    public void MarkReplayed(DateTimeOffset now)
+    {
+        EnsurePending();
+        Status = FailedMessageStatus.Replayed;
+        ResolvedAt = now;
+        IncrementVersion();
+    }
+
+    /// <summary>An admin decided the message will never be handled; it stays here for the record.</summary>
+    public void Discard(DateTimeOffset now)
+    {
+        EnsurePending();
+        Status = FailedMessageStatus.Discarded;
+        ResolvedAt = now;
+        IncrementVersion();
+    }
+
     internal static FailedMessage Rehydrate(
         Guid id,
         Guid messageId,
@@ -101,6 +136,7 @@ public sealed class FailedMessage : AggregateRoot<Guid>
         DateTimeOffset firstFailedAt,
         DateTimeOffset lastFailedAt,
         FailedMessageStatus status,
+        DateTimeOffset? resolvedAt,
         int version) =>
         new(id)
         {
@@ -116,6 +152,7 @@ public sealed class FailedMessage : AggregateRoot<Guid>
             FirstFailedAt = firstFailedAt,
             LastFailedAt = lastFailedAt,
             Status = status,
+            ResolvedAt = resolvedAt,
             Version = version,
         };
 }

@@ -21,6 +21,7 @@ public static class FailedMessageMapper
             model.FirstFailedAt,
             model.LastFailedAt,
             Enum.Parse<FailedMessageStatus>(model.Status),
+            model.ResolvedAt,
             model.Version);
 
     public static FailedMessagePersistenceModel ToPersistence(FailedMessage domain) => new()
@@ -38,6 +39,7 @@ public static class FailedMessageMapper
         FirstFailedAt = domain.FirstFailedAt,
         LastFailedAt = domain.LastFailedAt,
         Status = domain.Status.ToString(),
+        ResolvedAt = domain.ResolvedAt,
         Version = domain.Version,
     };
 
@@ -47,6 +49,7 @@ public static class FailedMessageMapper
         model.Attempts = domain.Attempts;
         model.LastFailedAt = domain.LastFailedAt;
         model.Status = domain.Status.ToString();
+        model.ResolvedAt = domain.ResolvedAt;
         model.Version = domain.Version;
     }
 }

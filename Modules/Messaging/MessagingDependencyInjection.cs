@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Messaging.Application.Contracts;
+using OrderCore.Api.Modules.Messaging.Application.UseCases;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Consumers;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence.Repositories;
@@ -38,6 +39,12 @@ public static class MessagingDependencyInjection
         services.AddSingleton<RabbitMqConnection>();
         services.AddSingleton<MessageProcessor>();
         services.AddScoped<IFailedMessageRepository, EfFailedMessageRepository>();
+        services.AddScoped<IFailedMessageReplayer, RabbitMqFailedMessageReplayer>();
+
+        services.AddScoped<ListFailedMessagesUseCase>();
+        services.AddScoped<GetFailedMessageUseCase>();
+        services.AddScoped<ReplayFailedMessageUseCase>();
+        services.AddScoped<DiscardFailedMessageUseCase>();
 
         // Order matters: hosted services start in registration order, so the
         // broker is reachable and the topology declared before the relay
