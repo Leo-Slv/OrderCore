@@ -19,7 +19,11 @@ public static class CorsExtensions
             .WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
-            .WithExposedHeaders("Location")));
+            // The SignalR browser client sends credentials by default; the API
+            // itself uses bearer tokens, never cookies.
+            .AllowCredentials()
+            // traceparent: so the storefront can report the trace of a failing call.
+            .WithExposedHeaders("Location", "traceparent")));
 
         return services;
     }
