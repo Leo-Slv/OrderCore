@@ -15,6 +15,10 @@ public static class OrderUpdateGroups
 
     public static string Customer(Guid customerId) => $"customer:{customerId}";
 
+    /// <summary>Who the connection is, for metrics: <c>admin</c>, <c>customer</c> or <c>none</c>.</summary>
+    public static string AudienceOf(ICurrentUser user) =>
+        user.Role == UserRoles.Admin ? "admin" : user.Role == UserRoles.Customer && user.CustomerId is not null ? "customer" : "none";
+
     /// <summary>The groups a connection joins; none for a signed-in account that is neither.</summary>
     public static IReadOnlyList<string> For(ICurrentUser user) =>
         user.Role == UserRoles.Admin ? [Admins]

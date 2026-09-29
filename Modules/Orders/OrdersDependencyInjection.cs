@@ -31,6 +31,8 @@ public static class OrdersDependencyInjection
 
     public const string TimelineQueue = "orders.timeline";
 
+    public const string RealtimeQueue = "orders.realtime";
+
     public static IServiceCollection AddOrdersModule(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddDbContext<OrdersDbContext>(options =>
@@ -50,6 +52,7 @@ public static class OrdersDependencyInjection
         // several, add a backplane here, e.g. .AddStackExchangeRedis(...).
         services.AddSignalR();
         services.AddSingleton<IOrderUpdatesNotifier, SignalROrderUpdatesNotifier>();
+        services.AddSingleton<OrderTrackingMetrics>();
 
         services.AddScoped<IDomainEventHandler<OrderCreated>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderPaymentRequested>, OrderStatusHistoryProjector>();
@@ -98,6 +101,16 @@ public static class OrdersDependencyInjection
         services.AddIntegrationEventConsumer<StockReleased, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
         services.AddIntegrationEventConsumer<StockConsumed, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
         services.AddIntegrationEventConsumer<StockReturned, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+
+        // Real-time updates: every status change of an order, pushed to connected screens.
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderCreated, OrderUpdatesBroadcaster, OrdersDbContext>(RealtimeQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderPaymentRequested, OrderUpdatesBroadcaster, OrdersDbContext>(RealtimeQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderConfirmed, OrderUpdatesBroadcaster, OrdersDbContext>(RealtimeQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderProcessingStarted, OrderUpdatesBroadcaster, OrdersDbContext>(RealtimeQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderShipped, OrderUpdatesBroadcaster, OrdersDbContext>(RealtimeQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderDelivered, OrderUpdatesBroadcaster, OrdersDbContext>(RealtimeQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderPaymentFailed, OrderUpdatesBroadcaster, OrdersDbContext>(RealtimeQueue);
+        services.AddIntegrationEventConsumer<IntegrationEvents.OrderCancelled, OrderUpdatesBroadcaster, OrdersDbContext>(RealtimeQueue);
 
         services.AddScoped<CreateOrderHandler>();
         services.AddScoped<SetOrderAddressesUseCase>();

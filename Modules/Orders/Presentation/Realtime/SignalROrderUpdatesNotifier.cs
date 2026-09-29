@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
+using OrderCore.Api.Modules.Orders.Application.Telemetry;
 
 namespace OrderCore.Api.Modules.Orders.Presentation.Realtime;
 
@@ -13,14 +14,19 @@ namespace OrderCore.Api.Modules.Orders.Presentation.Realtime;
 public sealed class SignalROrderUpdatesNotifier : IOrderUpdatesNotifier
 {
     private readonly IHubContext<OrderUpdatesHub> _hub;
+    private readonly OrderTrackingMetrics _metrics;
 
-    public SignalROrderUpdatesNotifier(IHubContext<OrderUpdatesHub> hub)
+    public SignalROrderUpdatesNotifier(IHubContext<OrderUpdatesHub> hub, OrderTrackingMetrics metrics)
     {
         _hub = hub;
+        _metrics = metrics;
     }
 
-    public Task NotifyAsync(OrderUpdate update, CancellationToken cancellationToken) =>
-        _hub.Clients
+    public async Task NotifyAsync(OrderUpdate update, CancellationToken cancellationToken)
+    {
+        await _hub.Clients
             .Groups([OrderUpdateGroups.Customer(update.CustomerId), OrderUpdateGroups.Admins])
             .SendAsync(OrderUpdatesHub.OrderUpdatedMethod, update, cancellationToken);
+        _metrics.UpdateSent(update.Status);
+    }
 }
