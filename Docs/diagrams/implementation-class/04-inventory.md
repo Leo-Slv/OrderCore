@@ -28,6 +28,12 @@ Como [02-customers.md](02-customers.md) e [03-catalog.md](03-catalog.md), este m
   - **Alerta na mudança de estado.** `StockItem.AlertLevel` (`LowStock` com unidades até o ponto de reposição, `OutOfStock` sem nenhuma disponível, `null` fora disso). Cada operação que muda o disponível (`TryReserve`, `Release`, `Receive`, `ReturnConsumed`, `Adjust`, `SetReorderLevel`) levanta `StockAlertRaised` quando o item **entra** num desses estados — inclusive de sem estoque para estoque baixo — e nada enquanto ele continua no mesmo. Para datar o alerta, `TryReserve` e `Release` passaram a receber `now` (`ExpireReservationUseCase` ganhou `TimeProvider`). `Consume` não muda o disponível, então não alerta.
   - `InventoryUnitOfWork` recebe `IInventoryOutbox`: coleta os domain events **antes** do save, traduz (`InventoryIntegrationEventTranslator`, mantendo o id do evento) para `inventory_outbox_messages` e salva tudo junto; se o save falhar, descarta as linhas de outbox ainda não salvas, para uma nova tentativa no mesmo escopo (`ReserveStockUseCase`) não gravar eventos de uma mudança que não aconteceu. O despacho em memória para o histórico de movimentos continua depois do save. Migration `AddInventoryOutbox`.
 
+Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
+
+- **`InventoryMetrics`** (meter `OrderCore.Inventory`): reservas feitas, recusadas por falta de estoque, liberadas ou expiradas (registradas pelos use cases) e alertas de estoque por nível — contados por `StockAlertMetricsRecorder`, um `IDomainEventHandler<StockAlertRaised>`, porque um alerta pode nascer de qualquer operação que muda o disponível.
+- `ReserveStockUseCase` marca o span com `product.id`/`order.id`.
+
+
 ```mermaid
 
 classDiagram
@@ -319,6 +325,7 @@ classDiagram
         -IStockItemRepository stockItems
         -IInventoryReservationRepository reservations
         -IUnitOfWork unitOfWork
+        -InventoryMetrics metrics
         +ExecuteAsync(ReserveStockCommand command) Task~ReserveStockResult~
     }
 
@@ -326,6 +333,7 @@ classDiagram
         -IStockItemRepository stockItems
         -IInventoryReservationRepository reservations
         -IUnitOfWork unitOfWork
+        -InventoryMetrics metrics
         +ExecuteAsync(Guid reservationId) Task
     }
 
@@ -340,6 +348,7 @@ classDiagram
         -IInventoryReservationRepository reservations
         -IStockItemRepository stockItems
         -IUnitOfWork unitOfWork
+        -InventoryMetrics metrics
         -TimeProvider timeProvider
         +ExecuteAsync(Guid reservationId) Task
     }
@@ -663,6 +672,26 @@ classDiagram
     InventoryController --> ListReservationsUseCase
     InventoryController --> StockItemPresenter
     StockItemPresenter --> StockItemResponse
+
+    %% OrderCore.Api.Modules.Inventory.Application.Telemetry
+    class InventoryMetrics {
+        +Reserved() void
+        +ReservationRefused() void
+        +Released(string reason) void
+        +StockAlert(string level) void
+    }
+
+    %% OrderCore.Api.Modules.Inventory.Infrastructure.EventHandlers
+    class StockAlertMetricsRecorder {
+        -InventoryMetrics metrics
+        +HandleAsync(StockAlertRaised domainEvent) Task
+    }
+
+    ReserveStockUseCase --> InventoryMetrics : reserved / refused
+    ReleaseReservationUseCase --> InventoryMetrics : released
+    ExpireReservationUseCase --> InventoryMetrics : expired
+    IDomainEventHandler~TEvent~ <|.. StockAlertMetricsRecorder
+    StockAlertMetricsRecorder --> InventoryMetrics : alerts by level
 
 ```
 

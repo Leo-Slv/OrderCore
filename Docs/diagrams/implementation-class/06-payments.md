@@ -21,6 +21,13 @@ Diferenças entre este diagrama e o código, todas documentadas nos comentários
   - `SettlePaymentForCancellationUseCase` (chamado pelo Orders ao cancelar): `Authorized` → void, `Captured` → estorno do saldo ainda retido via `RequestRefundUseCase`, `Pending`/`Processing` → `409 payment_in_progress`, o resto → nada. Idempotente. Não existe um `VoidPaymentUseCase` separado: o void só acontece aqui.
   - Leitura para o backoffice: `ListPaymentsUseCase` (`GET payments`, filtros por status/forma/período), `GetPaymentByIdUseCase` (`GET payments/{id}`) e `GetPaymentsByOrderIdsUseCase` (a lista de pedidos do admin, via adapter do Orders). `PaymentResponse` ganhou provider, referência, datas de captura/void e os estornos; `RefundResponse`, motivo e datas — só campos a mais.
 
+Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
+
+- **`PaymentsMetrics`** (meter `OrderCore.Payments`): autorizações aprovadas/recusadas com a forma de pagamento e o motivo da recusa (o código do provedor, nunca dado de cartão), capturas, anulações e estornos, registrados pelos use cases depois do save.
+- **`MeasuredPaymentProvider`** envolve o provedor configurado (hoje o `FakePaymentProvider`, registrado como tipo concreto) e mede cada chamada por operação e resultado (`succeeded`, `refused`, `error`) — o Stripe ganha isso sem código a mais.
+- Os use cases marcam o span com `payment.id`/`order.id`.
+
+
 ```mermaid
 
 classDiagram
@@ -196,6 +203,7 @@ classDiagram
         -IPaymentRepository payments
         -IPaymentProvider provider
         -IPaymentsOutbox outbox
+        -PaymentsMetrics metrics
         +ExecuteAsync(CreatePaymentCommand command) Task~CreatePaymentResult~
     }
 
@@ -203,6 +211,7 @@ classDiagram
         -IPaymentRepository payments
         -IPaymentProvider provider
         -IPaymentsOutbox outbox
+        -PaymentsMetrics metrics
         +ExecuteAsync(Guid paymentId) Task~CreatePaymentResult~
     }
 
@@ -210,6 +219,7 @@ classDiagram
         -IPaymentRepository payments
         -IPaymentProvider provider
         -IPaymentsOutbox outbox
+        -PaymentsMetrics metrics
         +ExecuteAsync(Guid paymentId) Task~CreatePaymentResult~
         +ExecuteForOrderAsync(Guid orderId) Task~CreatePaymentResult~
     }
@@ -219,6 +229,7 @@ classDiagram
         -IPaymentProvider provider
         -IPaymentsOutbox outbox
         -RequestRefundUseCase requestRefund
+        -PaymentsMetrics metrics
         +ExecuteAsync(Guid orderId, string reason) Task~PaymentSettlementOutcome~
     }
 
@@ -247,6 +258,7 @@ classDiagram
         -IPaymentRepository payments
         -IPaymentProvider provider
         -IPaymentsOutbox outbox
+        -PaymentsMetrics metrics
         +ExecuteAsync(RequestRefundCommand command) Task~Refund~
     }
 
@@ -535,6 +547,32 @@ classDiagram
     PaymentsController --> PaymentPresenter
     PaymentPresenter --> PaymentResponse
     PaymentPresenter --> RefundResponse
+
+    %% OrderCore.Api.Modules.Payments.Application.Telemetry
+    class PaymentsMetrics {
+        +Authorized(string method) void
+        +Declined(string method, string? reason) void
+        +Captured() void
+        +Voided() void
+        +Refunded(string outcome) void
+        +ProviderCalled(string provider, string operation, string outcome, TimeSpan duration) void
+    }
+
+    %% OrderCore.Api.Modules.Payments.Infrastructure.Providers
+    class MeasuredPaymentProvider {
+        -IPaymentProvider inner
+        -PaymentsMetrics metrics
+        -string providerName
+    }
+
+    IPaymentProvider <|.. MeasuredPaymentProvider
+    MeasuredPaymentProvider --> FakePaymentProvider : wraps (registered as IPaymentProvider)
+    MeasuredPaymentProvider --> PaymentsMetrics : provider call duration
+    CreatePaymentUseCase --> PaymentsMetrics : approved / declined
+    AuthorizePaymentUseCase --> PaymentsMetrics : approved / declined
+    CapturePaymentUseCase --> PaymentsMetrics
+    SettlePaymentForCancellationUseCase --> PaymentsMetrics : voids
+    RequestRefundUseCase --> PaymentsMetrics
 
 ```
 

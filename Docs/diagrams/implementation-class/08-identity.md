@@ -10,7 +10,7 @@ Decisões que moldam o módulo:
 - **Erros sem vazar informação.** Qualquer falha de login é `invalid_credentials` (e-mail desconhecido ainda verifica um hash falso, para o tempo de resposta não denunciar quais e-mails existem); qualquer falha de refresh é `invalid_refresh_token`; sign-out com um token desconhecido ou de outra conta não faz nada, em silêncio.
 - **Cliente desativado pelo admin** (backoffice): `SignInUseCase` (depois de a senha conferir) e `RefreshSessionUseCase` (antes de rotacionar) perguntam `ICustomerRegistry.IsActiveAsync`. No login, com a senha certa, o cliente desativado recebe `401 account_inactive` (a loja pode explicar o motivo; quem erra a senha continua recebendo `invalid_credentials`, então nada vaza para quem não a conhece); no refresh continua `invalid_refresh_token`, e o front manda para o login, que explica. A sessão não é revogada: reativar o cliente devolve o acesso com o mesmo refresh token. Um access token já emitido vale até expirar.
 - **Tokens.** O access token é um JWT HMAC-SHA256 (claims `sub`, `email`, `role`, `customer_id`), de 15 minutos. O refresh token tem 256 bits aleatórios, dura 14 dias e só o SHA-256 dele é guardado. A chave de assinatura vem do ambiente (`Jwt__SigningKey`) ou de user-secrets; a API não sobe sem uma chave de pelo menos 32 bytes.
-- **Primeiro admin.** `AdminSeedHostedService` roda `SeedAdminUseCase` na subida quando `IdentitySeed:AdminEmail`/`AdminPassword` estão configurados; cria só se ainda não existe nenhum admin, e uma falha (ex.: migrações ainda não aplicadas) é registrada no log sem derrubar a API.
+- **Primeiro admin.** `AdminSeedHostedService` roda `SeedAdminUseCase` na subida quando `IdentitySeed:AdminEmail`/`AdminPassword` estão configurados; cria só se ainda não existe nenhum admin, e uma falha (ex.: migrações ainda não aplicadas) é registrada no log sem derrubar a API. O use case devolve o id do admin criado (ou nada, se já existia um), e é esse id — nunca o e-mail — que vai para o log.
 
 A autorização em si (políticas `Customer`/`Admin`, bloqueio por padrão, `ICurrentUser`) é compartilhada e está em [01-shared-kernel.md](01-shared-kernel.md).
 
@@ -246,7 +246,7 @@ classDiagram
         -IPasswordHasher passwordHasher
         -IAuditLogService auditLog
         -TimeProvider timeProvider
-        +ExecuteAsync(string email, string password) Task~bool~
+        +ExecuteAsync(string email, string password) Task~Guid?~
     }
 
 

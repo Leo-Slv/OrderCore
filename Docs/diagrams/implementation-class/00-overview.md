@@ -15,7 +15,8 @@ graph LR
     Identity["Identity module\n(technical/cross-cutting: accounts, credentials, sessions, JWT)"]
     Messaging["Messaging module\n(technical/cross-cutting: RabbitMQ, outbox relay, consumer host,\nretries, failed messages)"]
     Broker[("RabbitMQ\nexchange ordercore.events")]
-    Shared["Shared kernel\n(Entity, AggregateRoot, IDomainEvent, Address, Slug, PagedResult, PagedResponse,\nexceções tipadas + ApiExceptionHandler, CORS,\nICurrentUser + políticas Customer/Admin)"]
+    Shared["Shared kernel\n(Entity, AggregateRoot, IDomainEvent, Address, Slug, PagedResult, PagedResponse,\nexceções tipadas + ApiExceptionHandler, CORS,\nICurrentUser + políticas Customer/Admin,
+observabilidade: OpenTelemetry, ids nos spans, health checks)"]
 
     Orders -->|IProductCatalog| Catalog
     Orders -->|"IInventoryService (reservar, liberar, devolver, alertas)"| Inventory
@@ -50,7 +51,7 @@ graph LR
 
 ## Diagramas detalhados (um por módulo, cada um pequeno o suficiente para renderizar)
 
-1. [Shared kernel](01-shared-kernel.md) — `Entity`, `AggregateRoot`, `IDomainEvent`, value objects, dispatcher de eventos, contrato de erros (exceções tipadas → `ProblemDetails`), CORS.
+1. [Shared kernel](01-shared-kernel.md) — `Entity`, `AggregateRoot`, `IDomainEvent`, value objects, dispatcher de eventos, contrato de erros (exceções tipadas → `ProblemDetails`), CORS, observabilidade (OpenTelemetry, ids nos spans e logs, trace id nas respostas, health checks).
 2. [Customers](02-customers.md) — cliente, endereços, métodos de pagamento salvos.
 3. [Catalog](03-catalog.md) — categorias, produtos, imagens, variações, listagem da vitrine e produto por slug.
 4. [Inventory](04-inventory.md) — saldo de estoque, reservas e consulta de disponibilidade.

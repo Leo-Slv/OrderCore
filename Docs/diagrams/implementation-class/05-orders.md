@@ -42,6 +42,12 @@ Adicionado pela mensageria (`Docs/specs/events/async-messaging.md`; mecânica co
 - **Orders consome.** `PaymentAuthorizedIntegrationEventHandler`/`PaymentFailedIntegrationEventHandler` agora são `IIntegrationEventHandler<T>`, na fila `orders.payment-outcomes`, com o inbox em `orders_processed_messages` (salvo no mesmo save do pedido). Os use cases que eles chamam continuam tolerando um pedido que já seguiu adiante: com retentativas, lançar ali só adiaria a mensagem até a lista de falhas.
 - **Timeline do pedido (admin).** `OrderTimelineProjector` (fila `orders.timeline`) arquiva cada evento sobre o pedido — os do próprio Orders, os de Payments e as reservas do Inventory — em `order_timeline`, uma linha por evento com o id do evento como chave (uma reentrega nunca duplica), com tipo, módulo de origem, quando e alguns detalhes (valor e moeda, motivo, produto e quantidade). `GetOrderTimelineUseCase` + `IOrderTimelineReader`/`EfOrderTimelineReader` servem `GET admin/orders/{id}/timeline`, do mais antigo para o mais recente. Migrations `AddOrdersInbox`, `AddOrdersOutbox`, `AddOrderTimeline`.
 
+Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
+
+- **`OrdersMetrics`** (meter `OrderCore.Orders`, camada Application, só `System.Diagnostics.Metrics`): pedidos criados (`checkout`/`admin`), confirmados com o valor por moeda, pagamento recusado, enviados, entregues, cancelados por quem cancelou; a duração do checkout por resultado (`placed`, `repeated`, `refused`) e as recusas por código de erro. Os use cases registram depois do save; `CheckoutUseCase.ExecuteAsync` passou a envolver o antigo corpo (`PlaceAsync`) para medir a duração e contar a recusa pelo `Code` da exceção tipada.
+- Os use cases marcam o span atual com os ids (`Observed.Order`/`Customer`, ver [01-shared-kernel.md](01-shared-kernel.md)), que chegam a todo log escrito dentro dele.
+
+
 ```mermaid
 
 classDiagram
@@ -600,6 +606,7 @@ classDiagram
         -IProductCatalog productCatalog
         -IOrderNumberGenerator orderNumbers
         -IAuditLogService auditLog
+        -OrdersMetrics metrics
         -TimeProvider timeProvider
         +HandleAsync(CreateOrderCommand command) Task~CreateOrderResult~
     }
@@ -612,6 +619,7 @@ classDiagram
         -IPaymentGateway paymentGateway
         -IOrderNumberGenerator orderNumbers
         -IAuditLogService auditLog
+        -OrdersMetrics metrics
         -TimeProvider timeProvider
         +ExecuteAsync(CheckoutCommand command) Task~Guid~
     }
@@ -655,6 +663,7 @@ classDiagram
     class ConfirmOrderUseCase {
         -IOrderRepository orderRepository
         -IInventoryService inventoryService
+        -OrdersMetrics metrics
         -TimeProvider timeProvider
         -ILogger logger
         +ExecuteAsync(Guid orderId) Task
@@ -663,6 +672,7 @@ classDiagram
     class MarkOrderPaymentFailedUseCase {
         -IOrderRepository orderRepository
         -IInventoryService inventoryService
+        -OrdersMetrics metrics
         -TimeProvider timeProvider
         -ILogger logger
         +ExecuteAsync(Guid orderId, string reason) Task
@@ -672,6 +682,7 @@ classDiagram
         -IOrderRepository orderRepository
         -IInventoryService inventoryService
         -IPaymentGateway paymentGateway
+        -OrdersMetrics metrics
         -TimeProvider timeProvider
         +ExecuteAsync(CancelOrderCommand command) Task~OrderPaymentSettlement~
     }
@@ -679,6 +690,7 @@ classDiagram
     class FulfilOrderUseCase {
         -IOrderRepository orderRepository
         -IPaymentGateway paymentGateway
+        -OrdersMetrics metrics
         +StartProcessingAsync(Guid orderId) Task~OrderDetailsOutput~
         +ShipAsync(Guid orderId) Task~OrderDetailsOutput~
         +DeliverAsync(Guid orderId) Task~OrderDetailsOutput~
@@ -1349,6 +1361,25 @@ classDiagram
     OrderResponse --> OrderAddressResponse
     OrderResponse --> OrderPaymentResponse
     CartQuoteResponse "1" *-- "*" CartQuoteLineResponse
+
+    %% OrderCore.Api.Modules.Orders.Application.Telemetry
+    class OrdersMetrics {
+        +OrderCreated(string channel) void
+        +OrderConfirmed(decimal totalAmount, string currency) void
+        +OrderPaymentFailed() void
+        +OrderShipped() void
+        +OrderDelivered() void
+        +OrderCancelled(string cancelledBy) void
+        +CheckoutFinished(string outcome, TimeSpan duration) void
+        +CheckoutRefused(string code) void
+    }
+
+    CheckoutUseCase --> OrdersMetrics : duration, refusals, created
+    ConfirmOrderUseCase --> OrdersMetrics : confirmed + value
+    MarkOrderPaymentFailedUseCase --> OrdersMetrics
+    FulfilOrderUseCase --> OrdersMetrics : shipped, delivered
+    CancelOrderUseCase --> OrdersMetrics : cancelled_by
+    CreateOrderHandler --> OrdersMetrics
 
 ```
 

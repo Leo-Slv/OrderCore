@@ -16,6 +16,12 @@ Decisões que moldam o módulo:
 
 Onde cada coisa mora: as abstrações que todo módulo usa ficam no Shared (`Shared/Application/Messaging`: `IntegrationEvent`, `IIntegrationEventHandler<T>`, `IOutbox`, `IMessageContext`; `Shared/Infrastructure/Messaging`: envelope, outbox/inbox, registro); os contratos de cada módulo ficam em `Modules/<Módulo>/Contracts/IntegrationEvents`, a única parte de um módulo que um handler de mensagem de outro módulo pode conhecer (regra validada em `OrderCore.ArchitectureTests/IntegrationEventTests`).
 
+Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
+
+- **`MessagingTelemetry`** (activity source e meter `OrderCore.Messaging`): o relay publica dentro de um span *producer*, filho do trace de quem gravou a linha, e manda esse span como `traceparent`; o consumidor trata cada entrega num span *consumer* filho dele, com a tentativa — um checkout até a confirmação é um trace só, com cada retentativa nele. Sem ninguém ouvindo, uma `Activity` simples mantém o contexto fluindo. Métricas: backlog e idade da linha mais antiga por outbox (medidos a cada ciclo do relay), publicadas, falhas de publicação, consumidas, retentativas, postas de lado e duração do tratamento.
+- **Health checks:** `RabbitMqHealthCheck` (a conexão está aberta; faz parte de `/health/ready`) e `MessagingHealthCheck` (só em `/health/details`: backlog dos outboxes e mensagens que falharam esperando um admin; `Degraded` quando há alguma, ou quando uma linha espera há mais de um minuto).
+
+
 ```mermaid
 
 classDiagram
@@ -228,14 +234,17 @@ classDiagram
 
     class OutboxRelayBackgroundService {
         <<background service>>
+        -MessagingTelemetry telemetry
     }
 
     class MessageProcessor {
+        -MessagingTelemetry telemetry
         +ProcessAsync(string queue, MessageEnvelope envelope, string? traceParent, string? traceState) Task~DeliveryOutcome~
     }
 
     class ConsumerHostBackgroundService {
         <<background service>>
+        -MessagingTelemetry telemetry
     }
 
     class RabbitMqFailedMessageReplayer {
@@ -298,6 +307,35 @@ classDiagram
     FailedMessagesController --> GetFailedMessageUseCase
     FailedMessagesController --> ReplayFailedMessageUseCase
     FailedMessagesController --> DiscardFailedMessageUseCase
+    %% OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry
+    class MessagingTelemetry {
+        +IReadOnlyDictionary Backlog
+        +StartPublish(string exchange, string routingKey, Guid messageId, string? traceParent, string? traceState) Activity?
+        +StartProcess(string queue, string type, Guid messageId, int attempt, string? traceParent, string? traceState) Activity?
+        +Published(string module, string type) void
+        +PublishFailed(string module, string type) void
+        +Handled(string queue, string type, string outcome, TimeSpan duration) void
+        +Retried(string queue, string type, int nextAttempt) void
+        +SetAside(string queue, string type, string reason) void
+        +ReportBacklog(string module, long pending, TimeSpan oldestAge) void
+    }
+
+    %% OrderCore.Api.Modules.Messaging.Infrastructure.Health
+    class RabbitMqHealthCheck {
+        +CheckHealthAsync(HealthCheckContext context) Task~HealthCheckResult~
+    }
+
+    class MessagingHealthCheck {
+        +CheckHealthAsync(HealthCheckContext context) Task~HealthCheckResult~
+    }
+
+    OutboxRelayBackgroundService --> MessagingTelemetry : producer span, backlog, published
+    MessageProcessor --> MessagingTelemetry : consumer span, handling duration
+    ConsumerHostBackgroundService --> MessagingTelemetry : retries, set aside
+    RabbitMqHealthCheck --> RabbitMqConnection : ready
+    MessagingHealthCheck --> MessagingTelemetry : outbox backlog
+    MessagingHealthCheck --> IFailedMessageRepository : pending failed messages
+
 ```
 
 ## Quem publica e quem consome

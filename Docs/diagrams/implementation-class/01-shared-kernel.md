@@ -2,6 +2,9 @@
 
 Base usada por todos os módulos: identidade/igualdade de entidades, agregados com eventos de domínio, value objects reutilizáveis e o mecanismo que despacha os eventos de domínio para quem precisa reagir a eles (ex.: o projetor de histórico de status do Orders — ver [05-orders.md](05-orders.md)).
 
+A parte de observabilidade (`Docs/specs/observability/observability.md`) está desenhada junto, e explicada na seção "Observabilidade" no fim deste arquivo.
+
+
 ```mermaid
 
 classDiagram
@@ -182,6 +185,52 @@ classDiagram
     AuthorizationPolicies ..> UserRoles
     AuthorizationPolicies ..> OrderCoreClaimTypes
 
+    %% OrderCore.Api.Shared.Application.Observability
+    class Observed {
+        <<static>>
+        +Order(Guid orderId)$ void
+        +Payment(Guid paymentId)$ void
+        +Customer(Guid? customerId)$ void
+        +Product(Guid productId)$ void
+    }
+
+    class DurationBuckets {
+        <<static>>
+        +InstrumentAdvice~double~ Seconds$
+    }
+
+    %% OrderCore.Api.Shared.Infrastructure.Observability
+    class ObservabilityExtensions {
+        <<static>>
+        +AddOrderCoreObservability(IHostApplicationBuilder builder)$ IHostApplicationBuilder
+    }
+
+    class SpanIdsLogProcessor {
+        +OnEnd(LogRecord data) void
+    }
+
+    class PostgresHealthCheck {
+        +CheckHealthAsync(HealthCheckContext context) Task~HealthCheckResult~
+    }
+
+    %% OrderCore.Api.Shared.Presentation.Observability
+    class TraceResponseExtensions {
+        <<static>>
+        +UseTraceResponseHeader(IApplicationBuilder app)$ IApplicationBuilder
+        +Customize(ProblemDetailsContext context)$ void
+    }
+
+    class HealthEndpoints {
+        <<static>>
+        +AddOrderCoreHealthChecks(IServiceCollection services)$ IServiceCollection
+        +MapOrderCoreHealthChecks(IEndpointRouteBuilder endpoints)$ IEndpointRouteBuilder
+    }
+
+    ObservabilityExtensions ..> SpanIdsLogProcessor : registers
+    SpanIdsLogProcessor ..> Observed : copies its span tags onto logs
+    TraceResponseExtensions ..> ProblemDetailsDefaults : code + traceId
+    HealthEndpoints ..> PostgresHealthCheck : registers (ready)
+
 ```
 
 ## Quem usa o quê
@@ -222,3 +271,14 @@ Os tokens são emitidos e validados pelo módulo Identity ([08-identity.md](08-i
 ## CORS
 
 `CorsExtensions` registra uma política nomeada (`Storefront`) cujas origens vêm só de `Cors:AllowedOrigins` na configuração (`http://localhost:3000` no `appsettings.json`); lista vazia ou ausente não libera nenhuma origem.
+
+
+## Observabilidade
+
+Traces, métricas e logs com OpenTelemetry, exportados por OTLP para o Grafana LGTM do `docker compose` (`Docs/specs/observability/observability.md`):
+
+- **`ObservabilityExtensions.AddOrderCoreObservability`** (Infrastructure, chamado no `Program.cs`): instrumentação de ASP.NET Core, `HttpClient`, Npgsql (o SQL, nunca os valores dos parâmetros) e runtime, mais toda `ActivitySource`/`Meter` `OrderCore.*`; logs também pelo OpenTelemetry, com o trace e o span de cada linha; texto no console em Development e JSON fora. Só exporta quando `OTEL_EXPORTER_OTLP_ENDPOINT` está configurado — em testes e num `dotnet run` sem backend, nada é exportado e nada falha. A amostragem vem de `Observability:TraceSamplingRatio` (padrão: tudo).
+- **Ids, nunca dados pessoais.** Os use cases marcam o span atual com `Observed.Order`/`Payment`/`Customer`/`Product` (Application, só a BCL); `SpanIdsLogProcessor` copia essas marcas para toda linha de log escrita dentro do span. E-mail, nome, endereço, documento, segredos e dados de pagamento nunca entram em logs, spans ou métricas.
+- **Métricas de negócio** ficam em cada módulo (`OrdersMetrics`, `PaymentsMetrics`, `InventoryMetrics`, `MessagingTelemetry`), criadas por `IMeterFactory`. Histogramas de duração em segundos declaram `DurationBuckets.Seconds` — sem isso o SDK usa faixas de milissegundos e todo percentil sai igual.
+- **O trace volta para quem chamou:** `TraceResponseExtensions` põe o `traceparent` em toda resposta e o `traceId` em todo `ProblemDetails` (junto com o `code` de `ProblemDetailsDefaults`).
+- **Health:** `HealthEndpoints` mapeia `/health/live` (e `/health`), `/health/ready` (os checks marcados `ready`: `PostgresHealthCheck` e o `RabbitMqHealthCheck` do Messaging; só `Healthy`/`Unhealthy`, anônimo) e `/health/details` (admin: cada check com status, duração e dados).
