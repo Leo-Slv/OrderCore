@@ -110,6 +110,18 @@ public sealed class StripePaymentProvider : IPaymentProvider
         }
     }
 
+    /// <summary>
+    /// Retrieves the intent: while it still needs the buyer (no card yet, a
+    /// declined card to retry, 3-D Secure pending), its client secret.
+    /// </summary>
+    public async Task<string?> GetClientSecretAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        var intent = await _paymentIntents.GetAsync(IntentOf(payment), options: null, requestOptions: null, cancellationToken);
+        return intent.Status is "requires_payment_method" or "requires_confirmation" or "requires_action"
+            ? intent.ClientSecret
+            : null;
+    }
+
     /// <summary>Refunds the payment's pending refund — the one the use case just requested.</summary>
     public async Task<PaymentRefundResult> RefundAsync(Payment payment, CancellationToken cancellationToken)
     {

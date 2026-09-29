@@ -120,6 +120,28 @@ public sealed class Payment : AggregateRoot<Guid>
         IncrementVersion();
     }
 
+    /// <summary>
+    /// The provider created its side of the payment but needs the buyer to
+    /// confirm it (Stripe: the card is confirmed in the browser). The payment
+    /// stays <see cref="PaymentStatus.Processing"/>, now with the provider's
+    /// reference, until the outcome arrives.
+    /// </summary>
+    public void AwaitBuyer(string providerReference, DateTimeOffset now)
+    {
+        EnsureStatus(PaymentStatus.Processing);
+        if (string.IsNullOrWhiteSpace(providerReference))
+        {
+            throw new ArgumentException("A provider reference is required.", nameof(providerReference));
+        }
+
+        ProviderReference = providerReference;
+        UpdatedAt = now;
+        IncrementVersion();
+    }
+
+    /// <summary>Waiting for the buyer to confirm it at the provider (see <see cref="AwaitBuyer"/>).</summary>
+    public bool IsAwaitingBuyer => Status == PaymentStatus.Processing && ProviderReference is not null;
+
     public void Capture(DateTimeOffset now)
     {
         EnsureStatus(PaymentStatus.Authorized);
@@ -131,11 +153,17 @@ public sealed class Payment : AggregateRoot<Guid>
     /// <summary>
     /// Releases an authorization that was never captured, so the buyer is
     /// never charged (backoffice decision 2: cancelling a paid order). A
-    /// captured payment is refunded instead.
+    /// captured payment is refunded instead. A payment still waiting for the
+    /// buyer ends the same way once the provider has cancelled it: nothing
+    /// was charged or held.
     /// </summary>
     public void Void(DateTimeOffset now)
     {
-        EnsureStatus(PaymentStatus.Authorized);
+        if (!IsAwaitingBuyer)
+        {
+            EnsureStatus(PaymentStatus.Authorized);
+        }
+
         Status = PaymentStatus.Voided;
         VoidedAt = now;
         IncrementVersion();

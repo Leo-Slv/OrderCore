@@ -96,6 +96,10 @@ public sealed class FakePaymentProvider : IPaymentProvider
             : new PaymentVoidResult(Succeeded: false, FailureReason: "void_failed");
     }
 
+    /// <summary>The fake answers at once and never waits for the buyer.</summary>
+    public Task<string?> GetClientSecretAsync(Payment payment, CancellationToken cancellationToken) =>
+        Task.FromResult<string?>(null);
+
     private bool AcceptsReversals => _options.Mode is FakePaymentProviderMode.Success or FakePaymentProviderMode.CaptureDeclined;
 
     private Task SimulateLatencyAsync(CancellationToken cancellationToken) =>

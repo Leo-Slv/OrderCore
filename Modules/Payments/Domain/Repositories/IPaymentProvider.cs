@@ -51,6 +51,17 @@ public interface IPaymentProvider
 
     Task<PaymentRefundResult> RefundAsync(Payment payment, CancellationToken cancellationToken);
 
-    /// <summary>Releases an authorization that was never captured.</summary>
+    /// <summary>
+    /// Releases an authorization that was never captured — or cancels a
+    /// payment still waiting for the buyer, so it can no longer be confirmed
+    /// (Stripe: both cancel the PaymentIntent).
+    /// </summary>
     Task<PaymentVoidResult> VoidAsync(Payment payment, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The client secret the buyer confirms a payment with, asked again of
+    /// the provider (it is never stored) — null once the payment no longer
+    /// waits for the buyer, or for a provider that never waits.
+    /// </summary>
+    Task<string?> GetClientSecretAsync(Payment payment, CancellationToken cancellationToken);
 }

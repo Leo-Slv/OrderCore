@@ -12,11 +12,14 @@ using OrderCore.Api.Shared.Domain.Exceptions;
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
 /// <summary>
-/// Creates a <see cref="Payment"/> and authorizes it synchronously in the
-/// same call (resolved decision — see
-/// Docs/specs/payments/payment-processing.md): the only registered
-/// <see cref="IPaymentProvider"/> is <c>FakePaymentProvider</c>, which
-/// resolves in-process with no async webhook round-trip to wait for.
+/// Creates a <see cref="Payment"/> and asks the provider to authorize it in
+/// the same call (resolved decision — see
+/// Docs/specs/payments/payment-processing.md). The fake provider answers at
+/// once: authorized (<c>PaymentAuthorized</c>) or declined
+/// (<c>PaymentFailed</c>). Stripe answers "waiting for the buyer": the
+/// payment stays <c>Processing</c> with its PaymentIntent, nothing is
+/// published, and the result carries the <see cref="PaymentNextAction"/>
+/// the storefront confirms the card with (Docs/specs/payments/stripe-provider.md).
 /// <see cref="AuthorizePaymentUseCase"/> is the separate, explicit retry
 /// path for a payment that got stuck before an outcome was recorded — this
 /// use case never calls it.
@@ -59,6 +62,17 @@ public sealed class CreatePaymentUseCase
 
         payment.MarkProcessing();
         var result = await _provider.AuthorizeAsync(payment, cancellationToken);
+
+        if (result.RequiresBuyer)
+        {
+            // Nothing to publish yet: the outcome arrives once the buyer has
+            // confirmed the card (Stripe's webhook).
+            payment.AwaitBuyer(result.ProviderReference!, _timeProvider.GetUtcNow());
+            await _payments.SaveChangesAsync(cancellationToken);
+            Observed.Payment(payment.Id);
+            Observed.Order(payment.OrderId);
+            return new CreatePaymentResult(payment.Id, payment.Status.ToString(), PaymentNextAction.ConfirmCardWith(result.ClientSecret!));
+        }
 
         if (result.Succeeded)
         {

@@ -21,6 +21,8 @@ namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 /// <item>a captured one is refunded for whatever is still held, through
 /// the regular refund path (outbox <c>PaymentRefunded</c> included);</item>
 /// <item>no payment, or a failed/voided/refunded one, needs nothing;</item>
+/// <item>a payment waiting for the buyer to confirm the card (Stripe) is
+/// cancelled at the provider and voided the same way;</item>
 /// <item>a payment still waiting on the provider can't be settled yet
 /// (<c>409 payment_in_progress</c>): there is nothing to void until it
 /// answers.</item>
@@ -66,6 +68,12 @@ public sealed class SettlePaymentForCancellationUseCase
         {
             case null or PaymentStatus.Failed or PaymentStatus.Voided or PaymentStatus.Refunded:
                 return PaymentSettlementOutcome.NothingToSettle;
+
+            // Stripe, card not confirmed yet: cancelled at the provider so the
+            // buyer can no longer confirm it, and voided here — nothing was held.
+            case PaymentStatus.Processing when payment.IsAwaitingBuyer:
+                await VoidAsync(payment, reason, cancellationToken);
+                return PaymentSettlementOutcome.Voided;
 
             case PaymentStatus.Pending or PaymentStatus.Processing:
                 throw new ConflictException(

@@ -50,6 +50,21 @@ public sealed class AuthorizePaymentUseCase
 
         var result = await _provider.AuthorizeAsync(payment, cancellationToken);
 
+        if (result.RequiresBuyer)
+        {
+            // Same idempotency key, so the provider hands back the same
+            // intent: the payment keeps waiting for the buyer.
+            if (!payment.IsAwaitingBuyer)
+            {
+                payment.AwaitBuyer(result.ProviderReference!, _timeProvider.GetUtcNow());
+                await _payments.SaveChangesAsync(cancellationToken);
+            }
+
+            Observed.Payment(payment.Id);
+            Observed.Order(payment.OrderId);
+            return new CreatePaymentResult(payment.Id, payment.Status.ToString(), PaymentNextAction.ConfirmCardWith(result.ClientSecret!));
+        }
+
         if (result.Succeeded)
         {
             payment.Authorize(result.ProviderReference!, _timeProvider.GetUtcNow());

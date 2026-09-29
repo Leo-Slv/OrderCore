@@ -36,6 +36,9 @@ public sealed class MeasuredPaymentProvider : IPaymentProvider
     public Task<PaymentVoidResult> VoidAsync(Payment payment, CancellationToken cancellationToken) =>
         MeasureAsync("void", () => _inner.VoidAsync(payment, cancellationToken), r => r.Succeeded);
 
+    public Task<string?> GetClientSecretAsync(Payment payment, CancellationToken cancellationToken) =>
+        MeasureAsync("retrieve", () => _inner.GetClientSecretAsync(payment, cancellationToken), _ => true);
+
     private async Task<TResult> MeasureAsync<TResult>(string operation, Func<Task<TResult>> call, Func<TResult, bool> succeeded)
     {
         var started = Stopwatch.GetTimestamp();
