@@ -35,5 +35,13 @@ public sealed class PaymentResponse
 
     public DateTimeOffset? VoidedAt { get; init; }
 
+    /// <summary>The provider's code for the buyer's last declined attempt while the payment waited for them.</summary>
+    public string? LastDeclineReason { get; init; }
+
+    public DateTimeOffset? LastDeclinedAt { get; init; }
+
+    /// <summary>When the buyer disputed the charge with their bank; null if never.</summary>
+    public DateTimeOffset? DisputedAt { get; init; }
+
     public IReadOnlyList<RefundResponse> Refunds { get; init; } = [];
 }

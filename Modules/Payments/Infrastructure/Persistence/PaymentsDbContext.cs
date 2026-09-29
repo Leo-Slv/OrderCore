@@ -29,5 +29,9 @@ public sealed class PaymentsDbContext : DbContext
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(PaymentsDbContext).Assembly, type =>
             type.Namespace == "OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Configurations");
         modelBuilder.AddOutbox("payments");
+
+        // Stripe webhooks already handled (consumer "stripe-webhooks"), so a
+        // redelivered event changes nothing.
+        modelBuilder.AddInbox("payments");
     }
 }

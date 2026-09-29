@@ -23,6 +23,9 @@ public static class PaymentPresenter
         AuthorizedAt = payment.AuthorizedAt,
         CapturedAt = payment.CapturedAt,
         VoidedAt = payment.VoidedAt,
+        LastDeclineReason = payment.LastDeclineReason,
+        LastDeclinedAt = payment.LastDeclinedAt,
+        DisputedAt = payment.DisputedAt,
         Refunds = payment.Refunds.OrderBy(r => r.RequestedAt).Select(ToResponse).ToList(),
     };
 

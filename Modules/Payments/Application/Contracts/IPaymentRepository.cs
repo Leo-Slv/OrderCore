@@ -16,6 +16,9 @@ public interface IPaymentRepository
 
     Task<Payment?> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken);
 
+    /// <summary>The payment the provider knows by <paramref name="providerReference"/> (e.g. a Stripe PaymentIntent id).</summary>
+    Task<Payment?> GetByProviderReferenceAsync(string providerReference, CancellationToken cancellationToken);
+
     /// <summary>Read-only; orders without a payment are simply absent.</summary>
     Task<IReadOnlyList<Payment>> ListByOrderIdsAsync(IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken);
 

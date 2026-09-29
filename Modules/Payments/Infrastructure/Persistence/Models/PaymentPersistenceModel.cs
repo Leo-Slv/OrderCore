@@ -41,6 +41,12 @@ public sealed class PaymentPersistenceModel
 
     public DateTimeOffset? VoidedAt { get; set; }
 
+    public string? LastDeclineReason { get; set; }
+
+    public DateTimeOffset? LastDeclinedAt { get; set; }
+
+    public DateTimeOffset? DisputedAt { get; set; }
+
     public int Version { get; set; }
 
     public ICollection<RefundPersistenceModel> Refunds { get; set; } = new List<RefundPersistenceModel>();

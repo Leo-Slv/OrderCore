@@ -19,8 +19,12 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentPersi
         builder.Property(p => p.Provider).HasMaxLength(50).IsRequired();
         builder.Property(p => p.ProviderReference).HasMaxLength(200);
         builder.Property(p => p.Amount).HasPrecision(18, 2);
+        builder.Property(p => p.LastDeclineReason).HasMaxLength(100);
 
         builder.HasIndex(p => p.OrderId);
+
+        // Provider webhooks name the payment by the provider's own id.
+        builder.HasIndex(p => p.ProviderReference);
         builder.HasIndex(p => p.IdempotencyKey).IsUnique();
 
         builder.Property(p => p.Version).IsConcurrencyToken();

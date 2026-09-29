@@ -19,6 +19,7 @@ public sealed class PaymentsMetrics
     private readonly Counter<long> _voids;
     private readonly Counter<long> _refunds;
     private readonly Histogram<double> _providerDuration;
+    private readonly Counter<long> _providerUpdates;
 
     public PaymentsMetrics(IMeterFactory meterFactory)
     {
@@ -34,7 +35,16 @@ public sealed class PaymentsMetrics
             "How long a call to the payment provider took, by operation and outcome.",
             tags: null,
             advice: DurationBuckets.Seconds);
+        _providerUpdates = meter.CreateCounter<long>(
+            "ordercore.payments.provider_updates",
+            "{update}",
+            "What the provider told us (webhooks), by kind and whether it changed the payment.");
     }
+
+    /// <param name="kind">What the provider said, e.g. <c>authorized</c>, <c>declined</c>, <c>canceled</c>.</param>
+    /// <param name="outcome"><c>applied</c>, <c>ignored</c> (already so, or moved on), <c>unknown_payment</c> or <c>duplicate</c>.</param>
+    public void ProviderUpdate(string kind, string outcome) =>
+        _providerUpdates.Add(1, new("ordercore.update_kind", kind), new("ordercore.outcome", outcome));
 
     public void Authorized(string method) =>
         _authorizations.Add(1, new("ordercore.outcome", "approved"), new("ordercore.payment_method", method));

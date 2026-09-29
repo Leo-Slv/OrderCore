@@ -52,6 +52,18 @@ public sealed class Payment : AggregateRoot<Guid>
 
     public DateTimeOffset? VoidedAt { get; private set; }
 
+    /// <summary>
+    /// The provider's code for the buyer's last declined attempt (e.g.
+    /// <c>insufficient_funds</c>) while the payment waits for them: a decline
+    /// isn't the end, the buyer may try another card (Stripe spec, decision 9).
+    /// </summary>
+    public string? LastDeclineReason { get; private set; }
+
+    public DateTimeOffset? LastDeclinedAt { get; private set; }
+
+    /// <summary>When the buyer opened a dispute (chargeback) with their bank; null if never.</summary>
+    public DateTimeOffset? DisputedAt { get; private set; }
+
     public IReadOnlyCollection<Refund> Refunds => _refunds.AsReadOnly();
 
     private Payment()
@@ -141,6 +153,72 @@ public sealed class Payment : AggregateRoot<Guid>
 
     /// <summary>Waiting for the buyer to confirm it at the provider (see <see cref="AwaitBuyer"/>).</summary>
     public bool IsAwaitingBuyer => Status == PaymentStatus.Processing && ProviderReference is not null;
+
+    /// <summary>
+    /// The buyer's attempt was declined; the payment keeps waiting for them to
+    /// try again, and the last reason is kept for when it finally fails.
+    /// </summary>
+    public void RecordDecline(string reason, DateTimeOffset at)
+    {
+        if (!IsAwaitingBuyer)
+        {
+            throw new DomainRuleViolationException("invalid_payment_state", $"Payment '{Id}' is not waiting for the buyer.");
+        }
+
+        LastDeclineReason = string.IsNullOrWhiteSpace(reason) ? "declined" : reason;
+        LastDeclinedAt = at;
+        UpdatedAt = at;
+        IncrementVersion();
+    }
+
+    public bool IsDisputed => DisputedAt is not null;
+
+    /// <summary>Records that the buyer disputed the charge. Idempotent: false if it already was.</summary>
+    public bool MarkDisputed(DateTimeOffset at)
+    {
+        if (IsDisputed)
+        {
+            return false;
+        }
+
+        DisputedAt = at;
+        UpdatedAt = at;
+        IncrementVersion();
+        return true;
+    }
+
+    /// <summary>
+    /// The provider settled a refund that was still pending: completed (and,
+    /// once completed refunds cover the whole amount, the payment is
+    /// <see cref="PaymentStatus.Refunded"/>) or failed. False when the refund
+    /// isn't pending any more — the update arrived late or twice.
+    /// </summary>
+    public bool SettleRefund(Guid refundId, bool succeeded, string? failureReason, DateTimeOffset now)
+    {
+        var refund = _refunds.SingleOrDefault(r => r.Id == refundId);
+        if (refund is null || refund.Status != RefundStatus.Pending)
+        {
+            return false;
+        }
+
+        if (succeeded)
+        {
+            refund.Complete(now);
+            if (Status == PaymentStatus.Captured
+                && _refunds.Where(r => r.Status == RefundStatus.Completed).Sum(r => r.Amount) >= Amount)
+            {
+                Status = PaymentStatus.Refunded;
+            }
+        }
+        else
+        {
+            refund.Fail(failureReason ?? "refund_failed", now);
+        }
+
+        UpdatedAt = now;
+        IncrementVersion();
+        return true;
+    }
 
     public void Capture(DateTimeOffset now)
     {
@@ -249,7 +327,10 @@ public sealed class Payment : AggregateRoot<Guid>
         DateTimeOffset? capturedAt,
         DateTimeOffset? voidedAt,
         int version,
-        IEnumerable<Refund> refunds)
+        IEnumerable<Refund> refunds,
+        string? lastDeclineReason = null,
+        DateTimeOffset? lastDeclinedAt = null,
+        DateTimeOffset? disputedAt = null)
     {
         var payment = new Payment(id, orderId, amount, currency, method, idempotencyKey, provider, customerPaymentMethodId, createdAt)
         {
@@ -260,6 +341,9 @@ public sealed class Payment : AggregateRoot<Guid>
             AuthorizedAt = authorizedAt,
             CapturedAt = capturedAt,
             VoidedAt = voidedAt,
+            LastDeclineReason = lastDeclineReason,
+            LastDeclinedAt = lastDeclinedAt,
+            DisputedAt = disputedAt,
             Version = version,
         };
 
