@@ -97,6 +97,14 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
     ports:
       - "8080:8080"
+    healthcheck:
+      # Ready = PostgreSQL and RabbitMQ reachable. The aspnet image has no
+      # curl/wget, so bash's /dev/tcp makes the request.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3 && head -1 <&3 | grep -q ' 200 '"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - ordercore-net
 
