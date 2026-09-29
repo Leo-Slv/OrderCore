@@ -298,7 +298,7 @@ repositório:
 # JWT_SIGNING_KEY, ADMIN_EMAIL, ADMIN_PASSWORD, RABBITMQ_USER e RABBITMQ_PASSWORD
 cp .env.example .env
 
-# Subir PostgreSQL + RabbitMQ + API
+# Subir PostgreSQL + RabbitMQ + Grafana LGTM + API
 docker compose up --build
 
 # Rodando a API localmente (fora do container): guarde os segredos em user-secrets
@@ -315,7 +315,12 @@ dotnet run --project OrderCore.Api.csproj
 dotnet test
 ```
 
-A API expõe `GET /health` para health check e `GET /` como smoke test.
+A API expõe `GET /` como smoke test e três health checks:
+`GET /health/live` (o processo responde; `/health` é um apelido),
+`GET /health/ready` (PostgreSQL e RabbitMQ alcançáveis; 200 ou 503, sem
+detalhes, é o que o container usa como healthcheck) e
+`GET /health/details` (só admin: cada check com status e duração, o
+backlog dos outboxes e as mensagens que falharam esperando alguém).
 O painel do RabbitMQ fica em <http://localhost:15672> (usuário e senha do
 `.env`): filas, mensagens em espera e as filas de retentativa.
 
@@ -345,6 +350,31 @@ dotnet ef database update --context AuditLogsDbContext
 `InventoryDbContext`, `OrdersDbContext`, `PaymentsDbContext`,
 `IdentityDbContext` e `MessagingDbContext`). A mensageria acrescentou
 migrations em Payments, Orders, Inventory e o `MessagingDbContext` novo.
+
+## Observabilidade
+
+Traces, métricas e logs com OpenTelemetry
+([`Docs/specs/observability/observability.md`](Docs/specs/observability/observability.md)),
+exportados por OTLP para o Grafana LGTM do `docker compose`:
+
+- **Grafana** em <http://localhost:3001> (a porta 3000 é da loja), já com
+  os dados do Tempo (traces), Prometheus (métricas) e Loki (logs) e dois
+  dashboards versionados em `deploy/grafana`, na pasta **OrderCore**:
+  **Negócio** (pedidos por etapa, valor confirmado, aprovação de
+  pagamentos e motivos de recusa, duração e recusas do checkout, reservas
+  e alertas de estoque) e **API e mensageria** (requisições, latência e
+  erros por rota, tempo de banco, backlog do outbox, mensagens tratadas,
+  retentativas e falhas, traces recentes com erro).
+- **Um checkout é um trace só**, da requisição até a confirmação pelo
+  RabbitMQ. Toda resposta traz o cabeçalho `traceparent` e todo erro
+  (`ProblemDetails`) o `traceId`: com ele, o trace e os logs daquela
+  chamada são encontrados no Grafana (Explore → Tempo/Loki).
+- **Logs e traces levam só ids** (`order.id`, `payment.id`,
+  `customer.id`, `product.id`), nunca e-mail, nome, endereço, segredos ou
+  dados de pagamento. Os logs de um pedido são encontrados pelo id dele.
+- Fora do compose (`dotnet run`), nada é exportado a menos que
+  `OTEL_EXPORTER_OTLP_ENDPOINT` aponte para um coletor (ex.:
+  `http://localhost:4317` com o LGTM do compose de pé).
 
 ## Estado atual do scaffold
 
