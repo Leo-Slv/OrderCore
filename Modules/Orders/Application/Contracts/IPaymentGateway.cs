@@ -13,13 +13,20 @@ public interface IPaymentGateway
     /// <summary>The methods checkout may accept now (the configured provider's).</summary>
     IReadOnlyCollection<PaymentMethodChoice> GetAvailableMethods();
 
-    Task<Guid> RequestPaymentAsync(
+    /// <returns>What the buyer must do next (confirm the card with Stripe); null when the provider answered at once.</returns>
+    Task<OrderPaymentNextAction?> RequestPaymentAsync(
         Guid orderId,
         decimal amount,
         string currency,
         PaymentMethodChoice method,
         string idempotencyKey,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The next action of a payment already requested and still waiting for
+    /// the buyer (a replayed checkout); null otherwise.
+    /// </summary>
+    Task<OrderPaymentNextAction?> GetPaymentNextActionAsync(Guid orderId, CancellationToken cancellationToken);
 
     /// <summary>Null when no payment has been requested for the order yet.</summary>
     Task<OrderPaymentSummary?> GetPaymentSummaryAsync(Guid orderId, CancellationToken cancellationToken);

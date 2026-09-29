@@ -69,17 +69,21 @@ public sealed class CheckoutUseCase
         _timeProvider = timeProvider;
     }
 
-    /// <returns>The id of the order this checkout created, or the one it had already created for this key.</returns>
-    public async Task<Guid> ExecuteAsync(CheckoutCommand command, CancellationToken cancellationToken)
+    /// <returns>
+    /// The order this checkout created, or the one it had already created for
+    /// this key, with what the buyer must do for its payment to go ahead
+    /// (confirm the card, with Stripe) — handed out again on a replay.
+    /// </returns>
+    public async Task<CheckoutResult> ExecuteAsync(CheckoutCommand command, CancellationToken cancellationToken)
     {
         Observed.Customer(command.CustomerId);
         var started = _timeProvider.GetTimestamp();
         try
         {
-            var (orderId, outcome) = await PlaceAsync(command, cancellationToken);
-            Observed.Order(orderId);
+            var (result, outcome) = await PlaceAsync(command, cancellationToken);
+            Observed.Order(result.OrderId);
             _metrics.CheckoutFinished(outcome, _timeProvider.GetElapsedTime(started));
-            return orderId;
+            return result;
         }
         catch (Exception exception) when (ErrorCodeOf(exception) is { } code)
         {
@@ -98,7 +102,7 @@ public sealed class CheckoutUseCase
         _ => null,
     };
 
-    private async Task<(Guid OrderId, string Outcome)> PlaceAsync(CheckoutCommand command, CancellationToken cancellationToken)
+    private async Task<(CheckoutResult Result, string Outcome)> PlaceAsync(CheckoutCommand command, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(command.IdempotencyKey))
         {
@@ -108,8 +112,8 @@ public sealed class CheckoutUseCase
         var existing = await _orderRepository.FindByCheckoutIdempotencyKeyAsync(command.CustomerId, command.IdempotencyKey, cancellationToken);
         if (existing is not null)
         {
-            await ResumePaymentIfMissingAsync(existing, command.PaymentMethod, cancellationToken);
-            return (existing.Id, "repeated");
+            var nextAction = await ResumePaymentAsync(existing, command.PaymentMethod, cancellationToken);
+            return (new CheckoutResult(existing.Id, nextAction), "repeated");
         }
 
         PaymentMethodAvailability.Ensure(_paymentGateway, command.PaymentMethod);
@@ -158,7 +162,10 @@ public sealed class CheckoutUseCase
         var savedOrder = await SaveReleasingReservationsOnFailureAsync(order, command, cancellationToken);
         if (savedOrder.Id != order.Id)
         {
-            return (savedOrder.Id, "repeated");
+            // The winning request starts the payment itself; this one only
+            // hands out its next action if it is already there.
+            var winnersNextAction = await _paymentGateway.GetPaymentNextActionAsync(savedOrder.Id, cancellationToken);
+            return (new CheckoutResult(savedOrder.Id, winnersNextAction), "repeated");
         }
 
         _metrics.OrderCreated("checkout");
@@ -170,10 +177,10 @@ public sealed class CheckoutUseCase
             userId: null,
             cancellationToken);
 
-        await _paymentGateway.RequestPaymentAsync(
+        var paymentNextAction = await _paymentGateway.RequestPaymentAsync(
             order.Id, order.TotalAmount, order.Currency, command.PaymentMethod, order.Id.ToString(), cancellationToken);
 
-        return (order.Id, "placed");
+        return (new CheckoutResult(order.Id, paymentNextAction), "placed");
     }
 
     /// <summary>
@@ -238,17 +245,26 @@ public sealed class CheckoutUseCase
         }
     }
 
-    private async Task ResumePaymentIfMissingAsync(Order order, PaymentMethodChoice paymentMethod, CancellationToken cancellationToken)
+    /// <summary>
+    /// A replayed checkout: requests the payment if the first attempt failed
+    /// before it could, and otherwise hands out what the buyer still has to
+    /// do for it (the card confirmation, which isn't stored). Nothing for an
+    /// order whose payment is already settled either way.
+    /// </summary>
+    private async Task<OrderPaymentNextAction?> ResumePaymentAsync(
+        Order order, PaymentMethodChoice paymentMethod, CancellationToken cancellationToken)
     {
         if (order.Status != OrderStatus.PendingPayment)
         {
-            return;
+            return null;
         }
 
         if (await _paymentGateway.GetPaymentSummaryAsync(order.Id, cancellationToken) is null)
         {
-            await _paymentGateway.RequestPaymentAsync(
+            return await _paymentGateway.RequestPaymentAsync(
                 order.Id, order.TotalAmount, order.Currency, paymentMethod, order.Id.ToString(), cancellationToken);
         }
+
+        return await _paymentGateway.GetPaymentNextActionAsync(order.Id, cancellationToken);
     }
 }

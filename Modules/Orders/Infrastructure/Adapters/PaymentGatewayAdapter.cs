@@ -24,6 +24,7 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
     private readonly CapturePaymentUseCase _capturePayment;
     private readonly SettlePaymentForCancellationUseCase _settlePayment;
     private readonly GetAvailablePaymentMethodsUseCase _getAvailableMethods;
+    private readonly GetPaymentNextActionUseCase _getNextAction;
 
     public PaymentGatewayAdapter(
         CreatePaymentUseCase createPayment,
@@ -31,9 +32,11 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
         GetPaymentsByOrderIdsUseCase getPaymentsByOrderIds,
         CapturePaymentUseCase capturePayment,
         SettlePaymentForCancellationUseCase settlePayment,
-        GetAvailablePaymentMethodsUseCase getAvailableMethods)
+        GetAvailablePaymentMethodsUseCase getAvailableMethods,
+        GetPaymentNextActionUseCase getNextAction)
     {
         _getAvailableMethods = getAvailableMethods;
+        _getNextAction = getNextAction;
         _createPayment = createPayment;
         _getPaymentByOrderId = getPaymentByOrderId;
         _getPaymentsByOrderIds = getPaymentsByOrderIds;
@@ -44,7 +47,7 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
     public IReadOnlyCollection<PaymentMethodChoice> GetAvailableMethods() =>
         _getAvailableMethods.Execute().Methods.Select(ToChoice).ToList();
 
-    public async Task<Guid> RequestPaymentAsync(
+    public async Task<OrderPaymentNextAction?> RequestPaymentAsync(
         Guid orderId,
         decimal amount,
         string currency,
@@ -54,8 +57,11 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
     {
         var command = new CreatePaymentCommand(orderId, amount, currency, ToPaymentMethod(method), idempotencyKey);
         var result = await _createPayment.ExecuteAsync(command, cancellationToken);
-        return result.PaymentId;
+        return ToNextAction(result.NextAction);
     }
+
+    public async Task<OrderPaymentNextAction?> GetPaymentNextActionAsync(Guid orderId, CancellationToken cancellationToken) =>
+        ToNextAction(await _getNextAction.ExecuteAsync(orderId, cancellationToken));
 
     public async Task<OrderPaymentSummary?> GetPaymentSummaryAsync(Guid orderId, CancellationToken cancellationToken)
     {
@@ -109,6 +115,9 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
             PaymentSettlementOutcome.Refunded => OrderPaymentSettlement.Refunded,
             _ => OrderPaymentSettlement.NothingToSettle,
         };
+
+    private static OrderPaymentNextAction? ToNextAction(PaymentNextAction? action) =>
+        action is null ? null : new OrderPaymentNextAction(action.Type, action.ClientSecret);
 
     private static OrderPaymentSummary ToSummary(Payment payment) =>
         new(payment.Id, payment.Status.ToString(), ToChoice(payment.Method), payment.FailureReason);

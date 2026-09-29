@@ -26,7 +26,8 @@ public static class OrderPresenter
     public static ShipmentInput? ToInput(ShipOrderRequest? request) =>
         request is null ? null : new ShipmentInput(request.Carrier, request.TrackingCode, request.TrackingUrl);
 
-    public static OrderResponse ToResponse(OrderDetailsOutput details)
+    /// <param name="paymentNextAction">Only the checkout passes it: the step the buyer still has to take for the payment.</param>
+    public static OrderResponse ToResponse(OrderDetailsOutput details, OrderPaymentNextAction? paymentNextAction = null)
     {
         var order = details.Order;
 
@@ -60,6 +61,9 @@ public static class OrderPresenter
                     Status = payment.Status,
                     Method = payment.Method.ToString(),
                     FailureReason = payment.FailureReason,
+                    NextAction = paymentNextAction is null
+                        ? null
+                        : new OrderPaymentNextActionResponse(paymentNextAction.Type, paymentNextAction.ClientSecret),
                 }
                 : null,
         };

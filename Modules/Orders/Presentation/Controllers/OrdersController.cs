@@ -84,8 +84,10 @@ public sealed class OrdersController : ControllerBase
     /// Turns a cart into an order awaiting payment: validates, reserves
     /// stock and starts payment in one request. Answers 202 with the order
     /// in <c>PendingPayment</c>; poll <c>GET orders/{id}</c> for the outcome.
+    /// With Stripe, <c>payment.nextAction</c> (<c>confirm_card</c>) carries
+    /// the client secret the storefront confirms the card with first.
     /// Replaying the request with the same <c>Idempotency-Key</c> returns the
-    /// same order and never creates a second one.
+    /// same order (and next action) and never creates a second one.
     /// </summary>
     [HttpPost("checkout")]
     [Authorize(Policy = AuthorizationPolicies.Customer)]
@@ -100,10 +102,11 @@ public sealed class OrdersController : ControllerBase
     {
         // The Customer policy guarantees a customer_id claim.
         var command = OrderPresenter.ToCommand(request, _currentUser.CustomerId!.Value, idempotencyKey);
-        var orderId = await _checkoutUseCase.ExecuteAsync(command, cancellationToken);
-        var details = await _getOrderDetailsUseCase.ExecuteAsync(orderId, command.CustomerId, cancellationToken);
+        var result = await _checkoutUseCase.ExecuteAsync(command, cancellationToken);
+        var details = await _getOrderDetailsUseCase.ExecuteAsync(result.OrderId, command.CustomerId, cancellationToken);
 
-        return AcceptedAtAction(nameof(GetByIdAsync), new { id = orderId }, OrderPresenter.ToResponse(details));
+        return AcceptedAtAction(
+            nameof(GetByIdAsync), new { id = result.OrderId }, OrderPresenter.ToResponse(details, result.PaymentNextAction));
     }
 
     [HttpPost]

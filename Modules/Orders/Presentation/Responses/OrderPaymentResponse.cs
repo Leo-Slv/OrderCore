@@ -15,4 +15,11 @@ public sealed class OrderPaymentResponse
     public string Method { get; init; } = string.Empty;
 
     public string? FailureReason { get; init; }
+
+    /// <summary>
+    /// What the buyer must do for the payment to go ahead — only in the
+    /// checkout response (a replay with the same <c>Idempotency-Key</c>
+    /// returns it again), null elsewhere and with the fake provider.
+    /// </summary>
+    public OrderPaymentNextActionResponse? NextAction { get; init; }
 }
