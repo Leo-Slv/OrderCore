@@ -66,6 +66,9 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.19.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
     <PackageReference Include="Npgsql.OpenTelemetry" Version="10.0.3" />
+    <!-- Payments: Stripe's official SDK (Docs/specs/payments/stripe-provider.md).
+         Used only when Payments:Stripe:SecretKey is configured. -->
+    <PackageReference Include="Stripe.net" Version="52.4.2" />
   </ItemGroup>
 
 </Project>

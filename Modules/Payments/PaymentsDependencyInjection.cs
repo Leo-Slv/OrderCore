@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.Telemetry;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
@@ -9,6 +10,7 @@ using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
+using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Stripe;
 using OrderCore.Api.Modules.Payments.Infrastructure.Webhooks;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 
@@ -26,9 +28,23 @@ public static class PaymentsDependencyInjection
     {
         services.Configure<FakePaymentProviderOptions>(_ => { });
         services.AddSingleton<PaymentsMetrics>();
+        services.AddOptions<StripeOptions>().Bind(configuration.GetSection(StripeOptions.SectionName));
         services.AddSingleton<FakePaymentProvider>();
-        services.AddSingleton<IPaymentProvider>(provider => new MeasuredPaymentProvider(
-            provider.GetRequiredService<FakePaymentProvider>(), provider.GetRequiredService<PaymentsMetrics>()));
+        services.AddHttpClient(StripePaymentProvider.HttpClientName);
+        services.AddSingleton<StripePaymentProvider>();
+
+        // Stripe when its secret key is configured, the fake otherwise (spec
+        // decision 3); either way wrapped to measure every call.
+        services.AddSingleton<IPaymentProvider>(provider =>
+        {
+            var useStripe = provider.GetRequiredService<IOptions<StripeOptions>>().Value.IsEnabled;
+            IPaymentProvider selected = useStripe
+                ? provider.GetRequiredService<StripePaymentProvider>()
+                : provider.GetRequiredService<FakePaymentProvider>();
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("OrderCore.Payments")
+                .LogInformation("Payment provider: {Provider}.", selected.Info.Name);
+            return new MeasuredPaymentProvider(selected, provider.GetRequiredService<PaymentsMetrics>());
+        });
 
         services.AddDbContext<PaymentsDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));

@@ -3,7 +3,21 @@ using OrderCore.Api.Modules.Payments.Domain.Enums;
 
 namespace OrderCore.Api.Modules.Payments.Domain.Repositories;
 
-public sealed record PaymentAuthorizationResult(bool Succeeded, string? ProviderReference, string? FailureReason);
+/// <summary>
+/// How an authorization attempt ended: approved (<see cref="Succeeded"/>),
+/// declined (<see cref="FailureReason"/>), or — for providers whose card form
+/// runs in the browser — waiting for the buyer: the provider created its side
+/// of the payment (<see cref="ProviderReference"/>) and the storefront confirms
+/// it with <see cref="ClientSecret"/>; the outcome arrives later (webhook).
+/// The client secret is handed to the buyer's browser only, never stored.
+/// </summary>
+public sealed record PaymentAuthorizationResult(bool Succeeded, string? ProviderReference, string? FailureReason, string? ClientSecret = null)
+{
+    public bool RequiresBuyer => !Succeeded && ClientSecret is not null;
+
+    public static PaymentAuthorizationResult WaitingForBuyer(string providerReference, string clientSecret) =>
+        new(Succeeded: false, providerReference, FailureReason: null, clientSecret);
+}
 
 public sealed record PaymentCaptureResult(bool Succeeded, string? FailureReason);
 
