@@ -42,6 +42,18 @@ public sealed class EndpointAuthorizationTests
     }
 
     [Fact]
+    public void Every_hub_is_explicitly_classified()
+    {
+        var hubs = typeof(Program).Assembly.GetTypes()
+            .Where(t => typeof(Microsoft.AspNetCore.SignalR.Hub).IsAssignableFrom(t) && !t.IsAbstract)
+            .ToList();
+
+        hubs.Should().NotBeEmpty();
+        hubs.Where(hub => !AccessAttributes(hub).Any()).Select(hub => hub.Name).Should().BeEmpty(
+            "a SignalR hub is an endpoint too: it needs [AllowAnonymous], [Authorize] or [Authorize(Policy = ...)]");
+    }
+
+    [Fact]
     public void Authorization_policies_used_by_controllers_exist()
     {
         var unknown = ControllerActions()
