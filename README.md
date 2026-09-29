@@ -168,6 +168,35 @@ admin só dá entrada e ajusta. Os pagamentos são capturados quando o
 pedido é enviado, e cancelar um pedido pago nunca deixa o dinheiro retido:
 uma autorização é liberada (`Voided`) e uma captura, estornada.
 
+## Pedidos em tempo real (SignalR)
+
+As mudanças de pedido chegam às telas conectadas sem polling
+([`Docs/specs/tracking/realtime-order-tracking.md`](Docs/specs/tracking/realtime-order-tracking.md)).
+O SignalR não faz parte do documento OpenAPI, então o contrato do hub é
+este:
+
+- **Endereço:** `/api/hubs/orders` (cliente `@microsoft/signalr`,
+  `HubConnectionBuilder().withUrl(...)`).
+- **Autenticação:** o mesmo access token da API, obrigatório
+  (`accessTokenFactory`). O navegador não manda cabeçalho em WebSocket,
+  então o cliente o envia na query `access_token` — aceita só nos hubs.
+  Anônimo ou token expirado: a conexão é recusada (401); ao renovar o
+  token, reconecte.
+- **O que cada um recebe (decidido pelo token):** o cliente, só os
+  próprios pedidos; o admin, todos. Não há como pedir para seguir um
+  pedido: a tela de acompanhamento filtra pelo `orderId` que mostra.
+- **Mensagem:** `orderUpdated`, com
+  `{ orderId, orderNumber, status, changedAt, customerId, totalAmount, currency, shipment }`,
+  onde `shipment` (`{ carrier, trackingCode, trackingUrl }`, qualquer
+  parte pode faltar) vem quando o pedido foi enviado com rastreio.
+- **Regras do cliente:** ignore uma atualização com `changedAt` mais
+  antigo do que o estado que a tela já mostra (mensagens podem chegar fora
+  de ordem); ao reconectar, recarregue o pedido (ou a lista) por HTTP — o
+  que mudou durante a desconexão não é reenviado.
+- O envio com rastreio é `POST /api/orders/{id}/ship` (admin) com corpo
+  opcional `{ carrier, trackingCode, trackingUrl }`; o cliente vê o
+  mesmo em `GET /api/orders/{id}` (`shipment`).
+
 ## Eventos entre módulos (RabbitMQ)
 
 Os módulos se avisam de forma assíncrona pelo RabbitMQ
