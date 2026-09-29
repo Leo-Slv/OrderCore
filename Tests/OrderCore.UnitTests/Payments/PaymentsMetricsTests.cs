@@ -23,7 +23,7 @@ public sealed class PaymentsMetricsTests : IDisposable
 
     private CreatePaymentUseCase CreatePayment(bool providerAccepts) => new(
         new FakePaymentRepository(),
-        new MeasuredPaymentProvider(new StubPaymentProvider(providerAccepts), _metrics, "Stub"),
+        new MeasuredPaymentProvider(new StubPaymentProvider(providerAccepts), _metrics),
         new FakePaymentsOutbox(),
         new FakeAuditLogService(),
         _metrics,

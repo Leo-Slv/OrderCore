@@ -9,6 +9,11 @@ internal sealed class FakePaymentGateway : IPaymentGateway
 
     public List<(Guid OrderId, decimal Amount, PaymentMethodChoice Method)> Requests { get; } = new();
 
+    /// <summary>What the provider takes; both methods by default, like the fake provider.</summary>
+    public List<PaymentMethodChoice> AvailableMethods { get; } = [PaymentMethodChoice.Card, PaymentMethodChoice.Pix];
+
+    public IReadOnlyCollection<PaymentMethodChoice> GetAvailableMethods() => AvailableMethods;
+
     /// <summary>Makes the next payment request fail, as an unavailable provider would.</summary>
     public Exception? FailNextRequestWith { get; set; }
 

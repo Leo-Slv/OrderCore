@@ -91,6 +91,20 @@ public sealed class CheckoutUseCaseTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_refuses_a_payment_method_the_provider_does_not_take_before_anything_happens()
+    {
+        var product = InStockProduct();
+        _payments.AvailableMethods.Remove(PaymentMethodChoice.Pix);
+
+        var act = () => CreateUseCase().ExecuteAsync(Command([new CheckoutItem(product.Id, 1)], method: PaymentMethodChoice.Pix), CancellationToken.None);
+
+        await act.Should().ThrowAsync<DomainRuleViolationException>().Where(e => e.Code == "payment_method_unavailable");
+        _orders.Orders.Should().BeEmpty();
+        _inventory.Reserved.Should().BeEmpty();
+        _payments.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_without_enough_stock_persists_nothing()
     {
         var product = InStockProduct(stock: 1);

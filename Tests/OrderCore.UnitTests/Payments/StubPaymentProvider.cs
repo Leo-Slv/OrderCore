@@ -1,4 +1,5 @@
 using OrderCore.Api.Modules.Payments.Domain.Entities;
+using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
 
 namespace OrderCore.UnitTests.Payments;
@@ -18,6 +19,11 @@ internal sealed class StubPaymentProvider : IPaymentProvider
     {
         _succeeds = succeeds;
     }
+
+    /// <summary>The methods it takes; both by default. A test can narrow it to Card, as Stripe does.</summary>
+    public List<PaymentMethod> Methods { get; } = [PaymentMethod.Card, PaymentMethod.Pix];
+
+    public PaymentProviderInfo Info => new("Stub", Methods, PublishableKey: null);
 
     public int CaptureCalls { get; private set; }
 
