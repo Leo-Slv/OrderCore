@@ -135,6 +135,15 @@ public sealed class StripePaymentProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_capture_deadline_is_read_from_the_intents_card_charge()
+    {
+        await Provider().GetCaptureDeadlineAsync("pi_123", CancellationToken.None);
+
+        _recorder.Requests.Should().ContainSingle(r => r.Method == "GET" && r.Path == "/v1/payment_intents/pi_123");
+        _recorder.RawQueries.Should().ContainSingle().Which.Should().Contain("expand[0]=latest_charge");
+    }
+
+    [Fact]
     public async Task A_refund_sends_its_amount_keyed_by_the_refund()
     {
         var payment = Authorized();
@@ -186,6 +195,9 @@ public sealed class StripePaymentProviderTests : IAsyncLifetime
 
         public (HttpStatusCode Status, string Body)? Respond { get; set; }
 
+        /// <summary>The decoded query strings of GET requests (expansions travel there).</summary>
+        public List<string> RawQueries { get; } = [];
+
         public (string Method, string Path, Dictionary<string, string> Form, string? IdempotencyKey) Single(string method, string path) =>
             Requests.Should().ContainSingle(r => r.Method == method && r.Path == path).Subject;
 
@@ -197,6 +209,10 @@ public sealed class StripePaymentProviderTests : IAsyncLifetime
                 .ToDictionary(p => Uri.UnescapeDataString(p[0]), p => p.Length > 1 ? Uri.UnescapeDataString(p[1].Replace('+', ' ')) : string.Empty);
             var key = request.Headers.TryGetValues("Idempotency-Key", out var keys) ? keys.Single() : null;
             Requests.Add((request.Method.Method, request.RequestUri!.AbsolutePath, form, key));
+            if (!string.IsNullOrEmpty(request.RequestUri.Query))
+            {
+                RawQueries.Add(Uri.UnescapeDataString(request.RequestUri.Query));
+            }
 
             if (Respond is { } canned)
             {

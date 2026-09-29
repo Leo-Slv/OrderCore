@@ -66,6 +66,16 @@ internal sealed class FakePaymentGateway : IPaymentGateway
         Task.FromResult<IReadOnlyDictionary<Guid, OrderPaymentSummary>>(
             _payments.Where(p => orderIds.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value));
 
+    /// <summary>What the dashboard gets for "authorizations expiring soon".</summary>
+    public int ExpiringAuthorizations { get; set; }
+
+    public Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) =>
+        Task.FromResult(ExpiringAuthorizations);
+
+    /// <summary>Makes a requested payment look authorized until <paramref name="expiresAt"/>.</summary>
+    public void AuthorizeUntil(Guid orderId, DateTimeOffset expiresAt) =>
+        _payments[orderId] = _payments[orderId] with { Status = "Authorized", AuthorizationExpiresAt = expiresAt };
+
     public Task<OrderPaymentDetails?> GetPaymentDetailsAsync(Guid orderId, CancellationToken cancellationToken) =>
         Task.FromResult<OrderPaymentDetails?>(null);
 

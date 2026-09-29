@@ -153,17 +153,30 @@ public sealed class StripeWebhookTests : IClassFixture<ApiDatabase>
     }
 
     [Fact]
-    public async Task An_expired_authorization_voids_the_payment_and_is_announced()
+    public async Task An_expired_authorization_voids_the_payment_and_cancels_the_order()
     {
         await using var factory = Factory();
         var (admin, customer, orderId, intent) = await OrderWaitingForTheBuyerAsync(factory);
         await PostSignedAsync(factory, IntentEvent("payment_intent.amount_capturable_updated", intent, "requires_capture"));
         await PollOrderUntilAsync(customer, orderId, status => status == "Confirmed");
 
+        // Without Stripe keys the capture deadline can't be asked for: seven days.
+        var authorized = await PaymentAsync(admin, orderId);
+        (authorized.GetProperty("authorizationExpiresAt").GetDateTimeOffset() - authorized.GetProperty("authorizedAt").GetDateTimeOffset())
+            .Should().Be(TimeSpan.FromDays(7));
+
         await PostSignedAsync(factory, IntentEvent("payment_intent.canceled", intent, "canceled", cancellationReason: "automatic"));
 
         (await PaymentAsync(admin, orderId)).GetProperty("status").GetString().Should().Be("Voided");
         await _database.WaitForPublishedEventAsync<PaymentsDbContext>(PaymentAuthorizationExpired.Name, orderId);
+
+        // Orders cancels it as the system; the consumed units go back on hand.
+        await PollOrderUntilAsync(customer, orderId, status => status == "Cancelled");
+        var history = await customer.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}/status-history", Json);
+        history.EnumerateArray().Last().GetProperty("reason").GetString().Should().Be("authorization_expired");
+        var detail = await admin.GetFromJsonAsync<JsonElement>($"/api/admin/orders/{orderId}", Json);
+        detail.GetProperty("reservations").EnumerateArray().Should().ContainSingle()
+            .Which.GetProperty("status").GetString().Should().Be("Returned");
     }
 
     [Fact]

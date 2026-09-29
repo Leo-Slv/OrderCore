@@ -17,6 +17,18 @@ internal sealed class FakePaymentRepository : IPaymentRepository
     public Task<Payment?> GetByProviderReferenceAsync(string providerReference, CancellationToken cancellationToken) =>
         Task.FromResult(_payments.Values.FirstOrDefault(p => p.ProviderReference == providerReference));
 
+    public Task<IReadOnlyList<Guid>> ListAwaitingBuyerCreatedBeforeAsync(DateTimeOffset cutoff, int limit, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Guid>>(_payments.Values
+            .Where(p => p.IsAwaitingBuyer && p.CreatedAt < cutoff)
+            .OrderBy(p => p.CreatedAt)
+            .Take(limit)
+            .Select(p => p.Id)
+            .ToList());
+
+    public Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) =>
+        Task.FromResult(_payments.Values.Count(p =>
+            p.Status == Api.Modules.Payments.Domain.Enums.PaymentStatus.Authorized && p.AuthorizationExpiresAt < cutoff));
+
     /// <summary>How many times a use case saved; a no-op update saves nothing.</summary>
     public int Saves { get; private set; }
 

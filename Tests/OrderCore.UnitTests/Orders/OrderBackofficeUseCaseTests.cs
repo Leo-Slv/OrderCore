@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
@@ -73,7 +74,7 @@ public sealed class OrderBackofficeUseCaseTests
 
     private CancelOrderUseCase Cancel() => new(_orders, _inventory, _payments, _auditLog, TestMetrics.Orders, TimeProvider.System);
 
-    private ListOrdersUseCase ListOrders() => new(_orders, _customers, _payments);
+    private ListOrdersUseCase ListOrders() => new(_orders, _customers, _payments, new FakeTimeProvider(Now));
 
     [Fact]
     public void Each_fulfilment_step_raises_the_event_the_status_history_records()
@@ -299,7 +300,7 @@ public sealed class OrderBackofficeUseCaseTests
         await StoredOrderAsync(OrderStatus.Confirmed, createdAt: Now.AddDays(-60));
         _customers.NewCustomers = 4;
         _inventory.StockAlerts = new StockAlertCounts(LowStock: 2, OutOfStock: 1);
-        var dashboard = new GetDashboardUseCase(_orders, _customers, _inventory, ListOrders(), TimeProvider.System);
+        var dashboard = new GetDashboardUseCase(_orders, _customers, _inventory, ListOrders(), _payments, TimeProvider.System);
 
         var output = await dashboard.ExecuteAsync(Now.AddDays(-30), Now.AddMinutes(1), CancellationToken.None);
 
@@ -315,10 +316,68 @@ public sealed class OrderBackofficeUseCaseTests
     [Fact]
     public async Task The_dashboard_rejects_a_period_that_ends_before_it_starts()
     {
-        var dashboard = new GetDashboardUseCase(_orders, _customers, _inventory, ListOrders(), TimeProvider.System);
+        var dashboard = new GetDashboardUseCase(_orders, _customers, _inventory, ListOrders(), _payments, TimeProvider.System);
 
         var act = () => dashboard.ExecuteAsync(Now, Now.AddDays(-1), CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task The_admin_list_and_detail_flag_an_authorization_that_expires_within_two_days()
+    {
+        var soon = await StoredOrderAsync(OrderStatus.Confirmed);
+        var later = await StoredOrderAsync(OrderStatus.Confirmed);
+        _payments.AuthorizeUntil(soon.Id, Now.AddDays(1));
+        _payments.AuthorizeUntil(later.Id, Now.AddDays(5));
+
+        var page = await ListOrders().ExecuteAsync(new ListOrdersFilter(), CancellationToken.None);
+
+        page.Items.Single(o => o.Order.Id == soon.Id).AuthorizationExpiringSoon.Should().BeTrue();
+        page.Items.Single(o => o.Order.Id == later.Id).AuthorizationExpiringSoon.Should().BeFalse();
+        AuthorizationExpiry.IsExpiringSoon("Captured", Now.AddHours(1), Now).Should().BeFalse("a captured payment can't expire");
+    }
+
+    [Fact]
+    public async Task The_dashboard_counts_the_authorizations_about_to_expire()
+    {
+        _payments.ExpiringAuthorizations = 3;
+        var dashboard = new GetDashboardUseCase(_orders, _customers, _inventory, ListOrders(), _payments, new FakeTimeProvider(Now));
+
+        var output = await dashboard.ExecuteAsync(null, null, CancellationToken.None);
+
+        output.ExpiringAuthorizations.Should().Be(3);
+    }
+
+    private CancelOrderOnExpiredAuthorizationUseCase CancelOnExpiry() =>
+        new(_orders, Cancel(), NullLogger<CancelOrderOnExpiredAuthorizationUseCase>.Instance);
+
+    [Fact]
+    public async Task An_expired_authorization_cancels_the_order_as_the_system_and_returns_its_stock()
+    {
+        var order = await StoredOrderAsync(OrderStatus.Confirmed);
+        _payments.SettlementOutcome = OrderPaymentSettlement.NothingToSettle;
+
+        await CancelOnExpiry().ExecuteAsync(order.Id, CancellationToken.None);
+
+        order.Status.Should().Be(OrderStatus.Cancelled);
+        _payments.Settlements.Should().ContainSingle().Which.Reason.Should().Be("authorization_expired");
+        _inventory.ReturnedOrders.Should().Contain(order.Id);
+        _auditLog.Entries.Should().ContainSingle(e => e.Action == "OrderCancelled")
+            .Which.Metadata!["cancelledBy"].Should().Be("System");
+    }
+
+    [Theory]
+    [InlineData(OrderStatus.Shipped)]
+    [InlineData(OrderStatus.Delivered)]
+    public async Task An_expired_authorization_leaves_an_order_that_has_moved_on_alone(OrderStatus status)
+    {
+        var order = await StoredOrderAsync(status);
+
+        await CancelOnExpiry().ExecuteAsync(order.Id, CancellationToken.None);
+        await CancelOnExpiry().ExecuteAsync(Guid.NewGuid(), CancellationToken.None);
+
+        order.Status.Should().Be(status);
+        _payments.Settlements.Should().BeEmpty();
     }
 }
