@@ -52,14 +52,20 @@ public sealed class StripeWebhookHandler
     private readonly ApplyPaymentProviderUpdateUseCase _applyUpdate;
     private readonly PaymentsMetrics _metrics;
     private readonly TimeProvider _timeProvider;
+    private readonly StripePaymentProvider _stripe;
+    private readonly ILogger<StripeWebhookHandler> _logger;
 
     public StripeWebhookHandler(
         IOptions<StripeOptions> options,
         PaymentsDbContext dbContext,
         ApplyPaymentProviderUpdateUseCase applyUpdate,
         PaymentsMetrics metrics,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        StripePaymentProvider stripe,
+        ILogger<StripeWebhookHandler> logger)
     {
+        _stripe = stripe;
+        _logger = logger;
         _options = options.Value;
         _dbContext = dbContext;
         _applyUpdate = applyUpdate;
@@ -85,6 +91,11 @@ public sealed class StripeWebhookHandler
             return StripeWebhookOutcome.Duplicate;
         }
 
+        if (update.Kind == PaymentProviderUpdateKind.Authorized)
+        {
+            update = update with { AuthorizationExpiresAt = await CaptureDeadlineAsync(update.ProviderReference, cancellationToken) };
+        }
+
         inbox.Add(new InboxMessage { MessageId = messageId, Consumer = Consumer, ProcessedAt = _timeProvider.GetUtcNow() });
         try
         {
@@ -99,6 +110,30 @@ public sealed class StripeWebhookHandler
         }
 
         return StripeWebhookOutcome.Handled;
+    }
+
+    /// <summary>
+    /// The card's real capture deadline, asked of Stripe (webhooks carry the
+    /// charge only by id). Only informative — Stripe itself cancels an expired
+    /// authorization — so when it can't be had the payment falls back to the
+    /// default validity instead of failing the webhook.
+    /// </summary>
+    private async Task<DateTimeOffset?> CaptureDeadlineAsync(string paymentIntentId, CancellationToken cancellationToken)
+    {
+        if (!_options.IsEnabled)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _stripe.GetCaptureDeadlineAsync(paymentIntentId, cancellationToken);
+        }
+        catch (StripeException exception)
+        {
+            _logger.LogWarning(exception, "Could not read the capture deadline of {PaymentIntent}; using the default validity.", paymentIntentId);
+            return null;
+        }
     }
 
     private Event Verify(string payload, string? signature)

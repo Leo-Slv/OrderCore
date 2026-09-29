@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Payments.Application.Contracts;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
+using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Mappers;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Models;
 
@@ -40,6 +41,25 @@ public sealed class EfPaymentRepository : IPaymentRepository
     {
         var model = await Query().FirstOrDefaultAsync(p => p.ProviderReference == providerReference, cancellationToken);
         return model is null ? null : Track(model);
+    }
+
+    public async Task<IReadOnlyList<Guid>> ListAwaitingBuyerCreatedBeforeAsync(DateTimeOffset cutoff, int limit, CancellationToken cancellationToken)
+    {
+        var processing = nameof(PaymentStatus.Processing);
+        return await _dbContext.Payments
+            .AsNoTracking()
+            .Where(p => p.Status == processing && p.ProviderReference != null && p.CreatedAt < cutoff)
+            .OrderBy(p => p.CreatedAt)
+            .Select(p => p.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken)
+    {
+        var authorized = nameof(PaymentStatus.Authorized);
+        return _dbContext.Payments.CountAsync(
+            p => p.Status == authorized && p.AuthorizationExpiresAt != null && p.AuthorizationExpiresAt < cutoff, cancellationToken);
     }
 
     public async Task<IReadOnlyList<Payment>> ListByOrderIdsAsync(IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken)

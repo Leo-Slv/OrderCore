@@ -37,7 +37,8 @@ public static class PaymentMapper
             refunds,
             model.LastDeclineReason,
             model.LastDeclinedAt,
-            model.DisputedAt);
+            model.DisputedAt,
+            model.AuthorizationExpiresAt);
     }
 
     public static PaymentPersistenceModel ToPersistence(Payment domain) => new()
@@ -61,6 +62,7 @@ public static class PaymentMapper
         LastDeclineReason = domain.LastDeclineReason,
         LastDeclinedAt = domain.LastDeclinedAt,
         DisputedAt = domain.DisputedAt,
+        AuthorizationExpiresAt = domain.AuthorizationExpiresAt,
         Version = domain.Version,
         Refunds = domain.Refunds.Select(ToPersistence).ToList(),
     };
@@ -77,6 +79,7 @@ public static class PaymentMapper
         model.LastDeclineReason = domain.LastDeclineReason;
         model.LastDeclinedAt = domain.LastDeclinedAt;
         model.DisputedAt = domain.DisputedAt;
+        model.AuthorizationExpiresAt = domain.AuthorizationExpiresAt;
         model.Version = domain.Version;
 
         ChildCollectionReconciler.Reconcile(domain.Refunds, model.Refunds, ToPersistence, ApplyChanges, r => r.Id);

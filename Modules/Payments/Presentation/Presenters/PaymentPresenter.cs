@@ -23,6 +23,7 @@ public static class PaymentPresenter
         AuthorizedAt = payment.AuthorizedAt,
         CapturedAt = payment.CapturedAt,
         VoidedAt = payment.VoidedAt,
+        AuthorizationExpiresAt = payment.AuthorizationExpiresAt,
         LastDeclineReason = payment.LastDeclineReason,
         LastDeclinedAt = payment.LastDeclinedAt,
         DisputedAt = payment.DisputedAt,

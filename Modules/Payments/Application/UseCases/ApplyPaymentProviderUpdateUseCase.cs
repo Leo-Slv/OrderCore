@@ -98,7 +98,7 @@ public sealed class ApplyPaymentProviderUpdateUseCase
         switch (update.Kind)
         {
             case PaymentProviderUpdateKind.Authorized when payment.IsAwaitingBuyer:
-                payment.Authorize(update.ProviderReference, now);
+                payment.Authorize(update.ProviderReference, now, update.AuthorizationExpiresAt);
                 _outbox.Enqueue(new PaymentAuthorized
                 {
                     EventId = Guid.NewGuid(),

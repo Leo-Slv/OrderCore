@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Payments.Application.Telemetry;
 using OrderCore.Api.Modules.Payments.Application.UseCases;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
+using OrderCore.Api.Modules.Payments.Infrastructure.Jobs;
 using OrderCore.Api.Modules.Payments.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence.Repositories;
@@ -78,6 +79,12 @@ public static class PaymentsDependencyInjection
 
         services.AddScoped<ApplyPaymentProviderUpdateUseCase>();
         services.AddScoped<StripeWebhookHandler>();
+        services.AddScoped<CountExpiringAuthorizationsUseCase>();
+
+        // The payment window: payments left waiting for the buyer are given up on.
+        services.AddOptions<PaymentWindowOptions>().Bind(configuration.GetSection(PaymentWindowOptions.SectionName));
+        services.AddScoped<ExpirePaymentWindowUseCase>();
+        services.AddHostedService<PaymentWindowBackgroundService>();
 
         return services;
     }

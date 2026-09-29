@@ -19,6 +19,12 @@ public interface IPaymentRepository
     /// <summary>The payment the provider knows by <paramref name="providerReference"/> (e.g. a Stripe PaymentIntent id).</summary>
     Task<Payment?> GetByProviderReferenceAsync(string providerReference, CancellationToken cancellationToken);
 
+    /// <summary>Payments still waiting for the buyer that were created before <paramref name="cutoff"/>, oldest first.</summary>
+    Task<IReadOnlyList<Guid>> ListAwaitingBuyerCreatedBeforeAsync(DateTimeOffset cutoff, int limit, CancellationToken cancellationToken);
+
+    /// <summary>Authorized payments whose authorization expires before <paramref name="cutoff"/>.</summary>
+    Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken);
+
     /// <summary>Read-only; orders without a payment are simply absent.</summary>
     Task<IReadOnlyList<Payment>> ListByOrderIdsAsync(IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken);
 

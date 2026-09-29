@@ -122,6 +122,20 @@ public sealed class StripePaymentProvider : IPaymentProvider
             : null;
     }
 
+    /// <summary>
+    /// Until when an authorized intent can be captured: its card charge's
+    /// <c>capture_before</c> (it varies by card network and country); null
+    /// when Stripe doesn't say.
+    /// </summary>
+    public async Task<DateTimeOffset?> GetCaptureDeadlineAsync(string paymentIntentId, CancellationToken cancellationToken)
+    {
+        var intent = await _paymentIntents.GetAsync(
+            paymentIntentId, new PaymentIntentGetOptions { Expand = ["latest_charge"] }, requestOptions: null, cancellationToken);
+        return intent.LatestCharge?.PaymentMethodDetails?.Card?.CaptureBefore is { } captureBefore
+            ? new DateTimeOffset(DateTime.SpecifyKind(captureBefore, DateTimeKind.Utc))
+            : null;
+    }
+
     /// <summary>Refunds the payment's pending refund — the one the use case just requested.</summary>
     public async Task<PaymentRefundResult> RefundAsync(Payment payment, CancellationToken cancellationToken)
     {

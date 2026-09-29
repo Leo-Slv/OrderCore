@@ -25,6 +25,9 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentPersi
 
         // Provider webhooks name the payment by the provider's own id.
         builder.HasIndex(p => p.ProviderReference);
+
+        // The payment window job looks for payments still Processing past a cutoff.
+        builder.HasIndex(p => new { p.Status, p.CreatedAt });
         builder.HasIndex(p => p.IdempotencyKey).IsUnique();
 
         builder.Property(p => p.Version).IsConcurrencyToken();

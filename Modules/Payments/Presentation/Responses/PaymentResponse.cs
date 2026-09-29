@@ -35,6 +35,9 @@ public sealed class PaymentResponse
 
     public DateTimeOffset? VoidedAt { get; init; }
 
+    /// <summary>Until when an authorized payment can be captured (the provider's deadline, or seven days).</summary>
+    public DateTimeOffset? AuthorizationExpiresAt { get; init; }
+
     /// <summary>The provider's code for the buyer's last declined attempt while the payment waited for them.</summary>
     public string? LastDeclineReason { get; init; }
 

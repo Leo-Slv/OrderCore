@@ -47,6 +47,8 @@ public sealed class PaymentPersistenceModel
 
     public DateTimeOffset? DisputedAt { get; set; }
 
+    public DateTimeOffset? AuthorizationExpiresAt { get; set; }
+
     public int Version { get; set; }
 
     public ICollection<RefundPersistenceModel> Refunds { get; set; } = new List<RefundPersistenceModel>();

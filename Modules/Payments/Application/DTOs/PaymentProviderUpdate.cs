@@ -29,13 +29,15 @@ public enum PaymentProviderUpdateKind
 /// <param name="Reason">A decline, refund failure or dispute reason code, when there is one.</param>
 /// <param name="RefundId">OrderCore's refund, for the refund updates.</param>
 /// <param name="AuthorizationExpired">For <see cref="PaymentProviderUpdateKind.Canceled"/>: the provider cancelled it because the authorization expired.</param>
+/// <param name="AuthorizationExpiresAt">For <see cref="PaymentProviderUpdateKind.Authorized"/>: the provider's capture deadline, when known.</param>
 public sealed record PaymentProviderUpdate(
     PaymentProviderUpdateKind Kind,
     string ProviderReference,
     DateTimeOffset OccurredAt,
     string? Reason = null,
     Guid? RefundId = null,
-    bool AuthorizationExpired = false);
+    bool AuthorizationExpired = false,
+    DateTimeOffset? AuthorizationExpiresAt = null);
 
 public enum PaymentProviderUpdateOutcome
 {

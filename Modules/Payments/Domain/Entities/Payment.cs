@@ -48,6 +48,13 @@ public sealed class Payment : AggregateRoot<Guid>
 
     public DateTimeOffset? AuthorizedAt { get; private set; }
 
+    /// <summary>
+    /// Until when the authorization can be captured: the provider's deadline
+    /// (Stripe gives it per card) or <see cref="DefaultAuthorizationValidity"/>
+    /// after authorizing. Past it the provider releases the money by itself.
+    /// </summary>
+    public DateTimeOffset? AuthorizationExpiresAt { get; private set; }
+
     public DateTimeOffset? CapturedAt { get; private set; }
 
     public DateTimeOffset? VoidedAt { get; private set; }
@@ -123,12 +130,18 @@ public sealed class Payment : AggregateRoot<Guid>
         IncrementVersion();
     }
 
-    public void Authorize(string providerReference, DateTimeOffset now)
+    /// <summary>How long a card authorization lasts when the provider doesn't say (Stripe's default for online card payments).</summary>
+    public static readonly TimeSpan DefaultAuthorizationValidity = TimeSpan.FromDays(7);
+
+    /// <param name="expiresAt">The provider's capture deadline, when it gives one.</param>
+    public void Authorize(string providerReference, DateTimeOffset now, DateTimeOffset? expiresAt = null)
     {
         EnsureStatus(PaymentStatus.Processing);
         Status = PaymentStatus.Authorized;
         ProviderReference = providerReference;
         AuthorizedAt = now;
+        AuthorizationExpiresAt = expiresAt ?? now + DefaultAuthorizationValidity;
+        UpdatedAt = now;
         IncrementVersion();
     }
 
@@ -330,7 +343,8 @@ public sealed class Payment : AggregateRoot<Guid>
         IEnumerable<Refund> refunds,
         string? lastDeclineReason = null,
         DateTimeOffset? lastDeclinedAt = null,
-        DateTimeOffset? disputedAt = null)
+        DateTimeOffset? disputedAt = null,
+        DateTimeOffset? authorizationExpiresAt = null)
     {
         var payment = new Payment(id, orderId, amount, currency, method, idempotencyKey, provider, customerPaymentMethodId, createdAt)
         {
@@ -344,6 +358,7 @@ public sealed class Payment : AggregateRoot<Guid>
             LastDeclineReason = lastDeclineReason,
             LastDeclinedAt = lastDeclinedAt,
             DisputedAt = disputedAt,
+            AuthorizationExpiresAt = authorizationExpiresAt,
             Version = version,
         };
 
