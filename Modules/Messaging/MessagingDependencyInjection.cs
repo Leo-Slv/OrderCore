@@ -2,12 +2,14 @@ using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Messaging.Application.Contracts;
 using OrderCore.Api.Modules.Messaging.Application.UseCases;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Consumers;
+using OrderCore.Api.Modules.Messaging.Infrastructure.Health;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Relay;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
+using OrderCore.Api.Shared.Presentation.Observability;
 
 namespace OrderCore.Api.Modules.Messaging;
 
@@ -47,6 +49,10 @@ public static class MessagingDependencyInjection
         services.AddScoped<GetFailedMessageUseCase>();
         services.AddScoped<ReplayFailedMessageUseCase>();
         services.AddScoped<DiscardFailedMessageUseCase>();
+
+        services.AddHealthChecks()
+            .AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: [HealthEndpoints.Ready], timeout: TimeSpan.FromSeconds(5))
+            .AddCheck<MessagingHealthCheck>("messaging", timeout: TimeSpan.FromSeconds(5));
 
         // Order matters: hosted services start in registration order, so the
         // broker is reachable and the topology declared before the relay

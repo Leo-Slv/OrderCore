@@ -143,6 +143,9 @@ public sealed class MessagingTelemetry : IDisposable
     public void SetAside(string queue, string type, string reason) =>
         _failed.Add(1, new("messaging.destination.name", queue), new("ordercore.messaging.type", type), new("ordercore.messaging.reason", reason));
 
+    /// <summary>What the relay last measured, per module (the health details show it).</summary>
+    public IReadOnlyDictionary<string, (long Pending, double OldestAgeSeconds)> Backlog => _backlog;
+
     /// <summary>Called by the relay on every poll, per outbox.</summary>
     public void ReportBacklog(string module, long pending, TimeSpan oldestAge) =>
         _backlog[module] = (pending, oldestAge.TotalSeconds);

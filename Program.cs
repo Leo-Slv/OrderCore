@@ -66,7 +66,7 @@ builder.Services
 builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = TraceResponseExtensions.Customize);
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddStorefrontCors(builder.Configuration);
-builder.Services.AddHealthChecks();
+builder.Services.AddOrderCoreHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
 
 // Deny by default: every endpoint needs a signed-in user unless it is
@@ -102,7 +102,7 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference().AllowAnonymous();
 }
 
-app.MapHealthChecks("/health").AllowAnonymous();
+app.MapOrderCoreHealthChecks();
 
 app.MapGet("/", () => Results.Ok(new { service = "OrderCore.Api", status = "ok" })).AllowAnonymous();
 
