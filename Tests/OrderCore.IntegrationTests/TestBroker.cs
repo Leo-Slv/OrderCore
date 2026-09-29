@@ -97,6 +97,13 @@ public static class TestBroker
         return connections.Count;
     }
 
+    /// <summary>Removes a virtual host, closing its connections for good: the broker is gone as far as that host can tell.</summary>
+    public static async Task DeleteVirtualHostAsync(string virtualHost)
+    {
+        using var management = Management();
+        (await management.DeleteAsync($"vhosts/{virtualHost}")).EnsureSuccessStatusCode();
+    }
+
     private static HttpClient Management()
     {
         var management = new HttpClient
