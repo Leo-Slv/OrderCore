@@ -14,6 +14,12 @@ internal sealed class FakePaymentRepository : IPaymentRepository
     public Task<Payment?> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken) =>
         Task.FromResult(_payments.Values.FirstOrDefault(p => p.OrderId == orderId));
 
+    public Task<Payment?> GetByProviderReferenceAsync(string providerReference, CancellationToken cancellationToken) =>
+        Task.FromResult(_payments.Values.FirstOrDefault(p => p.ProviderReference == providerReference));
+
+    /// <summary>How many times a use case saved; a no-op update saves nothing.</summary>
+    public int Saves { get; private set; }
+
     public Task AddAsync(Payment payment, CancellationToken cancellationToken)
     {
         _payments[payment.Id] = payment;
@@ -34,5 +40,9 @@ internal sealed class FakePaymentRepository : IPaymentRepository
         return Task.FromResult<(IReadOnlyList<Payment>, int)>((items, matching.Count));
     }
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        Saves++;
+        return Task.CompletedTask;
+    }
 }
