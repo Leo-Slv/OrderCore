@@ -1,13 +1,11 @@
-using System.Security.Claims;
 using OrderCore.Api.Shared.Application.Abstractions;
 
 namespace OrderCore.Api.Shared.Presentation.Authentication;
 
 /// <summary>
 /// <see cref="ICurrentUser"/> over the current request's authenticated
-/// principal. With no request (background services) or no valid token,
-/// every property is null. A claim that is present but not a valid GUID
-/// is treated as absent rather than trusted.
+/// principal (read by <see cref="PrincipalCurrentUser"/>). With no request
+/// (background services) or no valid token, every property is null.
 /// </summary>
 public sealed class HttpContextCurrentUser : ICurrentUser
 {
@@ -18,15 +16,11 @@ public sealed class HttpContextCurrentUser : ICurrentUser
         _httpContextAccessor = httpContextAccessor;
     }
 
-    public Guid? UserId => ReadGuid(OrderCoreClaimTypes.UserId);
+    public Guid? UserId => Current.UserId;
 
-    public Guid? CustomerId => ReadGuid(OrderCoreClaimTypes.CustomerId);
+    public Guid? CustomerId => Current.CustomerId;
 
-    public string? Role => Principal?.FindFirstValue(OrderCoreClaimTypes.Role);
+    public string? Role => Current.Role;
 
-    private ClaimsPrincipal? Principal =>
-        _httpContextAccessor.HttpContext?.User is { Identity.IsAuthenticated: true } user ? user : null;
-
-    private Guid? ReadGuid(string claimType) =>
-        Guid.TryParse(Principal?.FindFirstValue(claimType), out var value) ? value : null;
+    private PrincipalCurrentUser Current => new(_httpContextAccessor.HttpContext?.User);
 }

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OrderCore.Api.Shared.Presentation.Authentication;
+using OrderCore.Api.Shared.Presentation.Realtime;
 
 namespace OrderCore.Api.Modules.Identity.Infrastructure.Security;
 
@@ -32,6 +33,22 @@ public static class JwtBearerSetup
                     NameClaimType = OrderCoreClaimTypes.UserId,
                     RoleClaimType = OrderCoreClaimTypes.Role,
                     ClockSkew = TimeSpan.FromSeconds(30),
+                };
+
+                // SignalR (WebSockets/SSE) can't send the header from a browser: accept
+                // the token from the query string, only on hub paths.
+                bearer.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        if (context.HttpContext.Request.Path.StartsWithSegments(HubRoutes.Prefix)
+                            && context.Request.Query[HubRoutes.AccessTokenQueryParameter] is { Count: > 0 } token)
+                        {
+                            context.Token = token;
+                        }
+
+                        return Task.CompletedTask;
+                    },
                 };
             });
 

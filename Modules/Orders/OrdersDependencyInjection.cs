@@ -10,6 +10,7 @@ using OrderCore.Api.Modules.Orders.Infrastructure.IntegrationEventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Modules.Orders.Presentation.Realtime;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
@@ -44,6 +45,11 @@ public static class OrdersDependencyInjection
         services.AddScoped<ICustomerDirectory, CustomerDirectoryAdapter>();
         services.AddScoped<IOrderStatusHistoryReader, EfOrderStatusHistoryReader>();
         services.AddScoped<IOrderTimelineReader, EfOrderTimelineReader>();
+
+        // Real-time order updates (SignalR). One instance is assumed; to run
+        // several, add a backplane here, e.g. .AddStackExchangeRedis(...).
+        services.AddSignalR();
+        services.AddSingleton<IOrderUpdatesNotifier, SignalROrderUpdatesNotifier>();
 
         services.AddScoped<IDomainEventHandler<OrderCreated>, OrderStatusHistoryProjector>();
         services.AddScoped<IDomainEventHandler<OrderPaymentRequested>, OrderStatusHistoryProjector>();

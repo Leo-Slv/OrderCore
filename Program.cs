@@ -6,6 +6,7 @@ using OrderCore.Api.Modules.Identity;
 using OrderCore.Api.Modules.Inventory;
 using OrderCore.Api.Modules.Messaging;
 using OrderCore.Api.Modules.Orders;
+using OrderCore.Api.Modules.Orders.Presentation.Realtime;
 using OrderCore.Api.Modules.Payments;
 using OrderCore.Api.Shared;
 using OrderCore.Api.Shared.Presentation.Authentication;
@@ -107,6 +108,7 @@ app.MapOrderCoreHealthChecks();
 app.MapGet("/", () => Results.Ok(new { service = "OrderCore.Api", status = "ok" })).AllowAnonymous();
 
 app.MapControllers();
+app.MapOrderUpdatesHub();
 
 app.Run();
 
