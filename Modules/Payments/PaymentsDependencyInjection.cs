@@ -61,6 +61,7 @@ public static class PaymentsDependencyInjection
         services.AddIntegrationEvent<PaymentCaptured>(PaymentCaptured.Name, 1);
         services.AddIntegrationEvent<PaymentVoided>(PaymentVoided.Name, 1);
         services.AddIntegrationEvent<PaymentRefunded>(PaymentRefunded.Name, 1);
+        services.AddIntegrationEvent<PaymentAuthorizationExpired>(PaymentAuthorizationExpired.Name, 1);
 
         services.AddScoped<CreatePaymentUseCase>();
         services.AddScoped<AuthorizePaymentUseCase>();
@@ -75,7 +76,8 @@ public static class PaymentsDependencyInjection
         services.AddScoped<ListPaymentsUseCase>();
         services.AddScoped<SettlePaymentForCancellationUseCase>();
 
-        services.AddScoped<PaymentWebhookHandler>();
+        services.AddScoped<ApplyPaymentProviderUpdateUseCase>();
+        services.AddScoped<StripeWebhookHandler>();
 
         return services;
     }
