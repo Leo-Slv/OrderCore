@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
+using OrderCore.Api.Modules.Payments.Domain.Enums;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
 
 namespace OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
@@ -44,6 +45,9 @@ public sealed class FakePaymentProvider : IPaymentProvider
     {
         _options = options.Value;
     }
+
+    /// <summary>The fake takes every method the store knows, including Pix (spec decision 2: Pix only on the fake).</summary>
+    public PaymentProviderInfo Info { get; } = new("Fake", [PaymentMethod.Card, PaymentMethod.Pix], PublishableKey: null);
 
     public async Task<PaymentAuthorizationResult> AuthorizeAsync(Payment payment, CancellationToken cancellationToken)
     {

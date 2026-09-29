@@ -10,6 +10,9 @@ namespace OrderCore.Api.Modules.Orders.Application.Contracts;
 /// </summary>
 public interface IPaymentGateway
 {
+    /// <summary>The methods checkout may accept now (the configured provider's).</summary>
+    IReadOnlyCollection<PaymentMethodChoice> GetAvailableMethods();
+
     Task<Guid> RequestPaymentAsync(
         Guid orderId,
         decimal amount,

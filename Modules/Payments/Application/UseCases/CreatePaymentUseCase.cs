@@ -6,8 +6,8 @@ using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Modules.Payments.Application.DTOs;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Repositories;
-
 using OrderCore.Api.Shared.Application.Observability;
+using OrderCore.Api.Shared.Domain.Exceptions;
 
 namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 
@@ -23,14 +23,6 @@ namespace OrderCore.Api.Modules.Payments.Application.UseCases;
 /// </summary>
 public sealed class CreatePaymentUseCase
 {
-    /// <summary>
-    /// 06-payments.md's CreatePaymentCommand has no `provider` field, but
-    /// `Payment.Create` requires one — same class of gap as
-    /// `Customer.Create` gaining `now`. Hardcoded until a second provider
-    /// (e.g. Stripe) exists and this needs to become a real choice.
-    /// </summary>
-    private const string Provider = "Fake";
-
     private readonly IPaymentRepository _payments;
     private readonly IPaymentProvider _provider;
     private readonly IPaymentsOutbox _outbox;
@@ -51,9 +43,17 @@ public sealed class CreatePaymentUseCase
 
     public async Task<CreatePaymentResult> ExecuteAsync(CreatePaymentCommand command, CancellationToken cancellationToken)
     {
+        // Checked before anything is created: a method the configured provider
+        // doesn't take (Pix under Stripe) is refused, not attempted.
+        if (!_provider.Info.SupportedMethods.Contains(command.Method))
+        {
+            throw new DomainRuleViolationException(
+                "payment_method_unavailable", $"{command.Method} payments are not available with {_provider.Info.Name}.");
+        }
+
         var now = _timeProvider.GetUtcNow();
         var payment = Payment.Create(
-            command.OrderId, command.Amount, command.Currency, command.Method, command.IdempotencyKey, Provider, customerPaymentMethodId: null, now);
+            command.OrderId, command.Amount, command.Currency, command.Method, command.IdempotencyKey, _provider.Info.Name, customerPaymentMethodId: null, now);
 
         await _payments.AddAsync(payment, cancellationToken);
 

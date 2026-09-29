@@ -112,6 +112,8 @@ public sealed class CheckoutUseCase
             return (existing.Id, "repeated");
         }
 
+        PaymentMethodAvailability.Ensure(_paymentGateway, command.PaymentMethod);
+
         if (command.Items.Count == 0)
         {
             throw new DomainRuleViolationException("order_without_items", "An order must contain at least one item.");

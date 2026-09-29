@@ -35,6 +35,8 @@ public sealed class RequestOrderPaymentUseCase
         var order = await _orderRepository.GetByIdAsync(orderId, cancellationToken)
             ?? throw new NotFoundException("order_not_found", $"Order '{orderId}' was not found.");
 
+        PaymentMethodAvailability.Ensure(_paymentGateway, paymentMethod);
+
         var reserved = await _inventoryService.TryReserveOrderItemsAsync(order, cancellationToken);
         if (!reserved)
         {

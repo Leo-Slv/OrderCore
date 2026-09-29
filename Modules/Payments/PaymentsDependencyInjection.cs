@@ -28,7 +28,7 @@ public static class PaymentsDependencyInjection
         services.AddSingleton<PaymentsMetrics>();
         services.AddSingleton<FakePaymentProvider>();
         services.AddSingleton<IPaymentProvider>(provider => new MeasuredPaymentProvider(
-            provider.GetRequiredService<FakePaymentProvider>(), provider.GetRequiredService<PaymentsMetrics>(), "Fake"));
+            provider.GetRequiredService<FakePaymentProvider>(), provider.GetRequiredService<PaymentsMetrics>()));
 
         services.AddDbContext<PaymentsDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
@@ -54,6 +54,7 @@ public static class PaymentsDependencyInjection
         services.AddScoped<GetPaymentByOrderIdUseCase>();
         services.AddScoped<GetPaymentsByOrderIdsUseCase>();
         services.AddScoped<GetPaymentByIdUseCase>();
+        services.AddScoped<GetAvailablePaymentMethodsUseCase>();
         services.AddScoped<ListPaymentsUseCase>();
         services.AddScoped<SettlePaymentForCancellationUseCase>();
 

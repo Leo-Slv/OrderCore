@@ -23,20 +23,26 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
     private readonly GetPaymentsByOrderIdsUseCase _getPaymentsByOrderIds;
     private readonly CapturePaymentUseCase _capturePayment;
     private readonly SettlePaymentForCancellationUseCase _settlePayment;
+    private readonly GetAvailablePaymentMethodsUseCase _getAvailableMethods;
 
     public PaymentGatewayAdapter(
         CreatePaymentUseCase createPayment,
         GetPaymentByOrderIdUseCase getPaymentByOrderId,
         GetPaymentsByOrderIdsUseCase getPaymentsByOrderIds,
         CapturePaymentUseCase capturePayment,
-        SettlePaymentForCancellationUseCase settlePayment)
+        SettlePaymentForCancellationUseCase settlePayment,
+        GetAvailablePaymentMethodsUseCase getAvailableMethods)
     {
+        _getAvailableMethods = getAvailableMethods;
         _createPayment = createPayment;
         _getPaymentByOrderId = getPaymentByOrderId;
         _getPaymentsByOrderIds = getPaymentsByOrderIds;
         _capturePayment = capturePayment;
         _settlePayment = settlePayment;
     }
+
+    public IReadOnlyCollection<PaymentMethodChoice> GetAvailableMethods() =>
+        _getAvailableMethods.Execute().Methods.Select(ToChoice).ToList();
 
     public async Task<Guid> RequestPaymentAsync(
         Guid orderId,

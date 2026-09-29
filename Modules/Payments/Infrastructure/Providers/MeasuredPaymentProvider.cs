@@ -16,14 +16,13 @@ public sealed class MeasuredPaymentProvider : IPaymentProvider
 {
     private readonly IPaymentProvider _inner;
     private readonly PaymentsMetrics _metrics;
-    private readonly string _providerName;
-
-    public MeasuredPaymentProvider(IPaymentProvider inner, PaymentsMetrics metrics, string providerName)
+    public MeasuredPaymentProvider(IPaymentProvider inner, PaymentsMetrics metrics)
     {
         _inner = inner;
         _metrics = metrics;
-        _providerName = providerName;
     }
+
+    public PaymentProviderInfo Info => _inner.Info;
 
     public Task<PaymentAuthorizationResult> AuthorizeAsync(Payment payment, CancellationToken cancellationToken) =>
         MeasureAsync("authorize", () => _inner.AuthorizeAsync(payment, cancellationToken), r => r.Succeeded);
@@ -43,12 +42,12 @@ public sealed class MeasuredPaymentProvider : IPaymentProvider
         try
         {
             var result = await call();
-            _metrics.ProviderCalled(_providerName, operation, succeeded(result) ? "succeeded" : "refused", Stopwatch.GetElapsedTime(started));
+            _metrics.ProviderCalled(_inner.Info.Name, operation, succeeded(result) ? "succeeded" : "refused", Stopwatch.GetElapsedTime(started));
             return result;
         }
         catch
         {
-            _metrics.ProviderCalled(_providerName, operation, "error", Stopwatch.GetElapsedTime(started));
+            _metrics.ProviderCalled(_inner.Info.Name, operation, "error", Stopwatch.GetElapsedTime(started));
             throw;
         }
     }
