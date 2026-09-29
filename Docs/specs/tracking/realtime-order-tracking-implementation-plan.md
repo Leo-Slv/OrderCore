@@ -132,3 +132,34 @@ Unit: the event → `OrderUpdate` mapping; group names from the token.
 3. `feat(orders): push order lifecycle events to connected customers and admins`
 4. `test: real-time order updates over SignalR`
 5. `docs: ...`
+
+
+## Execution notes (what differed from this plan)
+
+- **Stage 1.** The shipment details are validated before the payment is
+  captured (the use case builds `ShipmentDetails` right after
+  `EnsureCanShip`), so a bad tracking link never leaves a captured payment
+  behind. `FulfilOrderUseCase.ShipAsync` kept its old signature as an
+  overload.
+- **Stage 2.** Claims are read by a new `PrincipalCurrentUser` (Shared),
+  used by `HttpContextCurrentUser` for requests and by the hub with
+  `Context.User` — SignalR advises against `IHttpContextAccessor` in hubs.
+  The hub path prefix lives in `Shared/Presentation/Realtime/HubRoutes`,
+  so the JWT setup (Identity) and the hub (Orders) share it without a
+  module reference. CORS gained `AllowCredentials()` (the SignalR browser
+  client sends credentials by default; the API uses no cookies) and exposes
+  `traceparent` (observability). `EndpointAuthorizationTests` now checks
+  hubs too. The notifier and the `OrderUpdate` message came with the hub.
+- **Stage 3.** The tracking meter lives with the Orders metrics
+  (`OrderTrackingMetrics`, Application); connections are counted by the hub
+  and updates by the notifier.
+- **Stage 4.** The tests connect the way a browser does (negotiate, then a
+  WebSocket with the token in the query string), so the query-string rule
+  is exercised by every connection. They found a bug in the messaging
+  feature: events raised in one save share a timestamp and the relay broke
+  ties by the random event id, so "payment requested" could be published
+  before "created". `OutboxWriter` now spaces such events by 1 µs in the
+  order they were enqueued (an identity column wouldn't do: EF orders the
+  inserts of one save by key).
+- The anonymous/expired-token and query-string checks were written in
+  stage 2, with the hub.
