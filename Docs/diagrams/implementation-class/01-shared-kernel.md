@@ -147,6 +147,15 @@ classDiagram
         -IHttpContextAccessor httpContextAccessor
     }
 
+    class PrincipalCurrentUser {
+        -ClaimsPrincipal? principal
+    }
+
+    %% OrderCore.Api.Shared.Presentation.Realtime
+    class HubRoutes {
+        <<static>>
+        +string Prefixn        +string AccessTokenQueryParametern    }
+
     class AuthorizationPolicies {
         <<static>>
         +string Customer$
@@ -180,7 +189,9 @@ classDiagram
     ApiExceptionHandler ..> ConflictException : 409
     ProblemDetailsDefaults ..> ApiExceptionHandler : same code extension
     ICurrentUser <|.. HttpContextCurrentUser
-    HttpContextCurrentUser ..> OrderCoreClaimTypes : reads
+    ICurrentUser <|.. PrincipalCurrentUser
+    HttpContextCurrentUser --> PrincipalCurrentUser : the request's principal
+    PrincipalCurrentUser ..> OrderCoreClaimTypes : reads
     ICurrentUser ..> UserRoles
     AuthorizationPolicies ..> UserRoles
     AuthorizationPolicies ..> OrderCoreClaimTypes
@@ -264,7 +275,7 @@ Além das exceções, `ProblemDetailsDefaults` dá um `code` às respostas de er
 
 Os tokens são emitidos e validados pelo módulo Identity ([08-identity.md](08-identity.md)). O que todos os módulos compartilham fica aqui:
 
-- **`ICurrentUser`**: quem está chamando (id da conta, id do cliente, papel), lido das claims do token por `HttpContextCurrentUser`. Casos de uso e o `AuditLogService` perguntam a ele em vez de ler HTTP. Fora de uma requisição (background) é "ninguém".
+- **`ICurrentUser`**: quem está chamando (id da conta, id do cliente, papel), lido das claims do token por `PrincipalCurrentUser` — `HttpContextCurrentUser` o usa com o principal da requisição, e os hubs do SignalR com o da conexão (`Context.User`), que é o recomendado dentro de um hub. Casos de uso e o `AuditLogService` perguntam a ele em vez de ler HTTP. Fora de uma requisição (background) é "ninguém".
 - **`AuthorizationPolicies`**: `Customer` (papel `Customer` e claim `customer_id`) e `Admin`, mais uma política de fallback que exige usuário logado. Ou seja, **bloqueio por padrão**: o que não for marcado `[AllowAnonymous]` exige token, inclusive rotas que não existem (401 para anônimo, 404 para logado, para não revelar quais rotas existem). `EndpointAuthorizationTests` (testes de arquitetura) falha se alguma action não estiver classificada explicitamente.
 - **`BearerSecurityTransformer`**: declara o esquema Bearer no documento OpenAPI e marca as operações protegidas com suas respostas 401/403, para o Scalar conseguir enviar o token.
 

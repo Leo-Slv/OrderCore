@@ -48,6 +48,14 @@ Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
 - Os use cases marcam o span atual com os ids (`Observed.Order`/`Customer`, ver [01-shared-kernel.md](01-shared-kernel.md)), que chegam a todo log escrito dentro dele.
 
 
+Adicionado pelo rastreamento em tempo real (`Docs/specs/tracking/realtime-order-tracking.md`):
+
+- **Dados de envio.** `ShipmentDetails` (value object do Orders): transportadora, código de rastreio e link, todos opcionais; o código exige a transportadora e o link é http(s) absoluto. `Order.Ship(now, shipment)` guarda e `OrderShipped` (domain event e contrato `orders.order-shipped`, mudança aditiva) carrega. `POST orders/{id}/ship` aceita um corpo opcional (`ShipOrderRequest`), validado **antes** da captura; `OrderResponse.Shipment`. Migration `AddShipmentTracking`.
+- **Hub.** `OrderUpdatesHub` em `/api/hubs/orders` (`[Authorize]`, sem métodos para o cliente): ao conectar, o cliente entra em `customer:{customerId}` e o admin em `admins`, tirados do token (`OrderUpdateGroups`, sobre `PrincipalCurrentUser`) — ninguém escolhe o que segue. O token pode vir na query `access_token`, só em `/api/hubs`.
+- **Do evento à tela.** `OrderUpdatesBroadcaster` (fila `orders.realtime`) transforma cada evento de ciclo de vida do pedido num `OrderUpdate` leve e chama `IOrderUpdatesNotifier` (Application), implementado por `SignalROrderUpdatesNotifier` (Presentation) sobre `IHubContext`. Os envios nascem dos eventos, nunca de um use case. Uma instância só; o backplane entraria na DI do Orders.
+- **`OrderTrackingMetrics`** (meter `OrderCore.Tracking`): conexões abertas por público e atualizações enviadas por status.
+
+
 ```mermaid
 
 classDiagram
@@ -232,7 +240,8 @@ classDiagram
         +Confirm(DateTimeOffset now) void
         +StartProcessing(DateTimeOffset now) void
         +EnsureCanShip() void
-        +Ship(DateTimeOffset now) void
+        +ShipmentDetails? Shipment
+        +Ship(DateTimeOffset now, ShipmentDetails? shipment) void
         +Deliver(DateTimeOffset now) void
         +FailPayment(string reason, DateTimeOffset now) void
         +EnsureCanBeCancelled() void
@@ -314,6 +323,16 @@ classDiagram
         +Guid EventId
         +DateTimeOffset OccurredAt
         +Guid OrderId
+        +ShipmentDetails? Shipment
+    }
+
+    %% OrderCore.Api.Modules.Orders.Domain.ValueObjects
+    class ShipmentDetails {
+        <<value object>>
+        +string? Carrier
+        +string? TrackingCode
+        +string? TrackingUrl
+        +Create(string? carrier, string? trackingCode, string? trackingUrl)$ ShipmentDetails?
     }
 
     class OrderDelivered {
@@ -693,6 +712,7 @@ classDiagram
         -OrdersMetrics metrics
         +StartProcessingAsync(Guid orderId) Task~OrderDetailsOutput~
         +ShipAsync(Guid orderId) Task~OrderDetailsOutput~
+        +ShipAsync(Guid orderId, ShipmentInput? shipment) Task~OrderDetailsOutput~
         +DeliverAsync(Guid orderId) Task~OrderDetailsOutput~
     }
 
@@ -995,7 +1015,7 @@ classDiagram
         -CancelOrderUseCase cancelOrder
         -SetOrderInternalNotesUseCase setInternalNotes
         +StartProcessingAsync(Guid id) Task~ActionResult~OrderResponse~~
-        +ShipAsync(Guid id) Task~ActionResult~OrderResponse~~
+        +ShipAsync(Guid id, ShipOrderRequest? request) Task~ActionResult~OrderResponse~~
         +DeliverAsync(Guid id) Task~ActionResult~OrderResponse~~
         +CancelAsync(Guid id, CancelOrderRequest request) Task~ActionResult~CancelOrderResponse~~
         +SetInternalNotesAsync(Guid id, SetOrderInternalNotesRequest request) Task~IActionResult~
@@ -1380,6 +1400,93 @@ classDiagram
     FulfilOrderUseCase --> OrdersMetrics : shipped, delivered
     CancelOrderUseCase --> OrdersMetrics : cancelled_by
     CreateOrderHandler --> OrdersMetrics
+
+    %% Real-time tracking (Docs/specs/tracking)
+    class ShipmentInput {
+        <<record>>
+        +string? Carrier
+        +string? TrackingCode
+        +string? TrackingUrl
+    }
+
+    class ShipOrderRequest {
+        +string? Carrier
+        +string? TrackingCode
+        +string? TrackingUrl
+    }
+
+    class OrderShipmentResponse {
+        <<record>>
+        +string? Carrier
+        +string? TrackingCode
+        +string? TrackingUrl
+    }
+
+    class OrderUpdate {
+        <<record>>
+        +Guid OrderId
+        +string OrderNumber
+        +string Status
+        +DateTimeOffset ChangedAt
+        +Guid CustomerId
+        +decimal TotalAmount
+        +string Currency
+        +OrderUpdateShipment? Shipment
+    }
+
+    class IOrderUpdatesNotifier {
+        <<interface>>
+        +NotifyAsync(OrderUpdate update) Task
+    }
+
+    class OrderTrackingMetrics {
+        +Connected(string audience) void
+        +Disconnected(string audience) void
+        +UpdateSent(string status) void
+    }
+
+    class OrderUpdatesBroadcaster {
+        -IOrderUpdatesNotifier notifier
+        +HandleAsync(OrderShipped integrationEvent) Task
+    }
+
+    note for OrderUpdatesBroadcaster "fila orders.realtime; um HandleAsync por contrato de ciclo de vida do pedido (os 8)"
+    note for OrderUpdatesHub "mapeado em /api/hubs/orders; manda orderUpdated"
+
+    class OrderUpdatesHub {
+        <<hub>>
+        -OrderTrackingMetrics metrics
+        +OnConnectedAsync() Task
+        +OnDisconnectedAsync(Exception? exception) Task
+    }
+
+    class OrderUpdateGroups {
+        <<static>>
+        +string Admins$
+        +Customer(Guid customerId)$ string
+        +For(ICurrentUser user)$ IReadOnlyList~string~
+        +AudienceOf(ICurrentUser user)$ string
+    }
+
+    class SignalROrderUpdatesNotifier {
+        -IHubContext~OrderUpdatesHub~ hub
+        -OrderTrackingMetrics metrics
+    }
+
+    Order --> ShipmentDetails
+    OrderShipped --> ShipmentDetails
+    FulfilOrderUseCase ..> ShipmentInput
+    FulfilOrderUseCase ..> ShipmentDetails : validates before the capture
+    OrderFulfilmentController ..> ShipOrderRequest
+    OrderResponse --> OrderShipmentResponse
+    IIntegrationEventHandler~TEvent~ <|.. OrderUpdatesBroadcaster
+    OrderUpdatesBroadcaster --> IOrderUpdatesNotifier
+    OrderUpdatesBroadcaster ..> OrderUpdate : creates
+    IOrderUpdatesNotifier <|.. SignalROrderUpdatesNotifier
+    SignalROrderUpdatesNotifier --> OrderUpdatesHub : customer:{id} + admins
+    SignalROrderUpdatesNotifier --> OrderTrackingMetrics
+    OrderUpdatesHub ..> OrderUpdateGroups : groups from the token
+    OrderUpdatesHub --> OrderTrackingMetrics
 
 ```
 
