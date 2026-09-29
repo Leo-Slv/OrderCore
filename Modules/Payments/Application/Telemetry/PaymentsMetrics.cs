@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Payments.Application.Telemetry;
 
@@ -27,8 +28,12 @@ public sealed class PaymentsMetrics
         _captures = meter.CreateCounter<long>("ordercore.payments.captures", "{payment}", "Payments captured.");
         _voids = meter.CreateCounter<long>("ordercore.payments.voids", "{payment}", "Authorizations released without charging.");
         _refunds = meter.CreateCounter<long>("ordercore.payments.refunds", "{refund}", "Refunds, by outcome.");
-        _providerDuration = meter.CreateHistogram<double>(
-            "ordercore.payments.provider.duration", "s", "How long a call to the payment provider took, by operation and outcome.");
+        _providerDuration = meter.CreateHistogram(
+            "ordercore.payments.provider.duration",
+            "s",
+            "How long a call to the payment provider took, by operation and outcome.",
+            tags: null,
+            advice: DurationBuckets.Seconds);
     }
 
     public void Authorized(string method) =>

@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Orders.Application.Telemetry;
 
@@ -35,7 +36,8 @@ public sealed class OrdersMetrics
         _shipped = meter.CreateCounter<long>("ordercore.orders.shipped", "{order}", "Orders shipped.");
         _delivered = meter.CreateCounter<long>("ordercore.orders.delivered", "{order}", "Orders delivered.");
         _cancelled = meter.CreateCounter<long>("ordercore.orders.cancelled", "{order}", "Orders cancelled, by who cancelled them.");
-        _checkoutDuration = meter.CreateHistogram<double>("ordercore.checkout.duration", "s", "How long a checkout took, by outcome.");
+        _checkoutDuration = meter.CreateHistogram(
+            "ordercore.checkout.duration", "s", "How long a checkout took, by outcome.", tags: null, advice: DurationBuckets.Seconds);
         _checkoutRefusals = meter.CreateCounter<long>("ordercore.checkout.refusals", "{checkout}", "Checkouts refused, by error code.");
     }
 

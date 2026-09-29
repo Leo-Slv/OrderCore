@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using OrderCore.Api.Shared.Application.Observability;
 
 namespace OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 
@@ -49,8 +50,8 @@ public sealed class MessagingTelemetry : IDisposable
             "ordercore.messaging.retries", "{message}", "Deliveries sent to a waiting queue for another attempt.");
         _failed = _meter.CreateCounter<long>(
             "ordercore.messaging.failed", "{message}", "Messages set aside in failed_messages.");
-        _handlingDuration = _meter.CreateHistogram<double>(
-            "ordercore.messaging.handling.duration", "s", "How long a consumer took to handle a delivery.");
+        _handlingDuration = _meter.CreateHistogram(
+            "ordercore.messaging.handling.duration", "s", "How long a consumer took to handle a delivery.", tags: null, advice: DurationBuckets.Seconds);
         _meter.CreateObservableGauge(
             "ordercore.messaging.outbox.pending",
             () => _backlog.Select(b => new Measurement<long>(b.Value.Pending, new KeyValuePair<string, object?>("ordercore.module", b.Key))),
