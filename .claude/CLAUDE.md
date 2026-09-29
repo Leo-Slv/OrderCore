@@ -330,6 +330,27 @@ Modules talk asynchronously through RabbitMQ, never in-process: see
   (`TestBroker`) and millisecond retries; `TestOutboxes` wires module
   outboxes for tests that build repositories by hand.
 
+## Real-time updates (SignalR)
+
+Screens get order changes pushed over SignalR
+(`Docs/specs/tracking/realtime-order-tracking.md`):
+
+- **Hubs live in the owning module's `Presentation/Realtime`**, mapped
+  under `HubRoutes.Prefix` (`/api/hubs/...`) by a `Map<Name>Hub()`
+  extension composed in `Program.cs`, and classified like controllers
+  (`[Authorize]`, `EndpointAuthorizationTests` checks hubs too).
+- **Groups come from the token, never from the client.** A hub has no
+  client-callable "follow this" method; on connect it joins the groups
+  the caller's claims entitle it to (read with `PrincipalCurrentUser`
+  over `Context.User`, not `IHttpContextAccessor`).
+- **Pushes are driven by integration events, never sent from a use
+  case**: a consumer maps the event to a light message and calls an
+  Application contract (`IOrderUpdatesNotifier`) that Presentation
+  implements over `IHubContext`. Every message carries the time of the
+  change, so a screen can ignore an older one; a screen reloads on
+  reconnect instead of expecting a replay.
+- One instance is assumed; running several needs a SignalR backplane.
+
 ## Observability
 
 Traces, metrics and logs go through OpenTelemetry

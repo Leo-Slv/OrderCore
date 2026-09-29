@@ -1085,6 +1085,32 @@ direto, sem framework de mensageria):
   uma queda, a API continua aceitando pedidos: os eventos esperam no outbox.
 - Tudo roda no processo da API por enquanto; consumidores em processo
   separado ficam para quando houver motivo (PayCore).
+- **Ordem dos eventos.** Um agregado que levanta vários eventos num save
+  dá a todos o mesmo horário; o `OutboxWriter` os espaça de 1 µs na ordem
+  em que foram enfileirados, e o relay publica por `OccurredAt` — o
+  "pedido criado" sai antes do "pagamento solicitado".
+
+**Atualizações em tempo real** (`Docs/specs/tracking/realtime-order-tracking.md`):
+a tela de acompanhamento, os avisos da loja e o backoffice recebem as
+mudanças de pedido por SignalR, sem polling.
+
+- Um hub, `/api/hubs/orders`, no `Presentation/Realtime` do Orders. Quem
+  recebe o quê vem só do token: o cliente entra no grupo
+  `customer:{id}` (só os próprios pedidos) e o admin em `admins` (todos);
+  o cliente nunca escolhe o que segue. O token pode vir na query string
+  (`access_token`) apenas em `/api/hubs`, porque o navegador não manda o
+  cabeçalho em WebSocket.
+- Os envios nascem dos eventos: o consumidor `orders.realtime` transforma
+  cada evento de ciclo de vida do pedido num resumo (`OrderUpdate`) e o
+  manda pelo hub — nenhum use case envia nada direto, então qualquer
+  mudança chega às telas pelo mesmo caminho, depois de salva, e dentro do
+  trace do pedido.
+- Mensagens podem chegar fora de ordem ou se perder numa reconexão: cada
+  atualização traz `changedAt`, a tela ignora uma mais antiga do que o que
+  mostra e recarrega o pedido ao reconectar.
+- **Uma instância só.** Com várias, uma conexão aberta em outra instância
+  não receberia o envio: seria preciso um backplane do SignalR (Redis),
+  que entraria na DI do Orders.
 
 ---
 
