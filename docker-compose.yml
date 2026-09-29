@@ -68,6 +68,9 @@ services:
       - "4318:4318"   # OTLP HTTP
     volumes:
       - ordercore-otel-lgtm-data:/data
+      # OrderCore's dashboards, provisioned from the repository (read-only).
+      - ./deploy/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ordercore.yaml:ro
+      - ./deploy/grafana/dashboards:/otel-lgtm/ordercore-dashboards:ro
     networks:
       - ordercore-net
 
@@ -95,6 +98,8 @@ services:
       RabbitMq__Username: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env (see .env.example)}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env (see .env.example)}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+      # Metrics every 10 s (the SDK default is 60 s), so local dashboards react quickly.
+      OTEL_METRIC_EXPORT_INTERVAL: "10000"
     ports:
       - "8080:8080"
     healthcheck:

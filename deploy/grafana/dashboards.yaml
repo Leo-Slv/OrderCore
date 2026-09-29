@@ -1,0 +1,13 @@
+# Provisions OrderCore's dashboards (versioned in deploy/grafana/dashboards)
+# into the Grafana of the grafana/otel-lgtm container — see docker-compose.yml.
+apiVersion: 1
+
+providers:
+  - name: OrderCore
+    folder: OrderCore
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /otel-lgtm/ordercore-dashboards
+      foldersFromFilesStructure: false
