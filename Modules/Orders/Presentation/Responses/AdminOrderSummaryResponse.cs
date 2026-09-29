@@ -25,4 +25,7 @@ public sealed class AdminOrderSummaryResponse
     public OrderCustomerResponse? Customer { get; init; }
 
     public string? PaymentStatus { get; init; }
+
+    /// <summary>The payment is authorized and the authorization expires within two days: ship it first.</summary>
+    public bool AuthorizationExpiringSoon { get; init; }
 }

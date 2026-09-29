@@ -7,7 +7,8 @@ namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 /// <summary>
 /// The backoffice dashboard, computed on demand (backoffice decision 3):
 /// each figure comes from the module that owns it — orders and revenue
-/// from Orders, new customers from Customers, stock alerts from Inventory
+/// from Orders, new customers from Customers, stock alerts from Inventory, expiring
+/// authorizations from Payments
 /// — through Orders' existing contracts; nothing is kept in sync. Lives in
 /// Orders because it is order-centric and Orders already reaches the other
 /// two. The period defaults to the last 30 days.
@@ -25,6 +26,7 @@ public sealed class GetDashboardUseCase
     private readonly ICustomerDirectory _customerDirectory;
     private readonly IInventoryService _inventoryService;
     private readonly ListOrdersUseCase _listOrders;
+    private readonly IPaymentGateway _paymentGateway;
     private readonly TimeProvider _timeProvider;
 
     public GetDashboardUseCase(
@@ -32,8 +34,10 @@ public sealed class GetDashboardUseCase
         ICustomerDirectory customerDirectory,
         IInventoryService inventoryService,
         ListOrdersUseCase listOrders,
+        IPaymentGateway paymentGateway,
         TimeProvider timeProvider)
     {
+        _paymentGateway = paymentGateway;
         _orderRepository = orderRepository;
         _customerDirectory = customerDirectory;
         _inventoryService = inventoryService;
@@ -55,8 +59,10 @@ public sealed class GetDashboardUseCase
         var revenue = await _orderRepository.SumConfirmedTotalsAsync(periodStart, periodEnd, RevenueStatuses, cancellationToken);
         var newCustomers = await _customerDirectory.CountNewCustomersAsync(periodStart, periodEnd, cancellationToken);
         var stock = await _inventoryService.GetStockAlertCountsAsync(cancellationToken);
+        var expiringAuthorizations = await _paymentGateway.CountAuthorizationsExpiringBeforeAsync(
+            _timeProvider.GetUtcNow() + AuthorizationExpiry.WarningPeriod, cancellationToken);
         var recent = await _listOrders.ExecuteAsync(new ListOrdersFilter { PageSize = RecentOrderCount }, cancellationToken);
 
-        return new DashboardOutput(periodStart, periodEnd, ordersByStatus, revenue, newCustomers, stock, recent.Items);
+        return new DashboardOutput(periodStart, periodEnd, ordersByStatus, revenue, newCustomers, stock, recent.Items, expiringAuthorizations);
     }
 }

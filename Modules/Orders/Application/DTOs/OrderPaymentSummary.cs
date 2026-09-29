@@ -5,4 +5,6 @@ namespace OrderCore.Api.Modules.Orders.Application.DTOs;
 /// Payments' status name (e.g. <c>Authorized</c>, <c>Failed</c>), and
 /// <see cref="FailureReason"/> is the provider's reason code when it failed.
 /// </summary>
-public sealed record OrderPaymentSummary(Guid PaymentId, string Status, PaymentMethodChoice Method, string? FailureReason);
+/// <see cref="AuthorizationExpiresAt"/> is until when an authorized payment can be captured.
+public sealed record OrderPaymentSummary(
+    Guid PaymentId, string Status, PaymentMethodChoice Method, string? FailureReason, DateTimeOffset? AuthorizationExpiresAt = null);

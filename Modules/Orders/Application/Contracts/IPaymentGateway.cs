@@ -35,6 +35,9 @@ public interface IPaymentGateway
     Task<IReadOnlyDictionary<Guid, OrderPaymentSummary>> GetPaymentSummariesAsync(
         IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken);
 
+    /// <summary>How many authorized payments expire before <paramref name="cutoff"/> (for the dashboard).</summary>
+    Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken);
+
     /// <summary>Null when no payment has been requested for the order.</summary>
     Task<OrderPaymentDetails?> GetPaymentDetailsAsync(Guid orderId, CancellationToken cancellationToken);
 

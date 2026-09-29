@@ -81,6 +81,8 @@ public static class OrdersDependencyInjection
             PaymentOutcomesQueue);
         services.AddIntegrationEventConsumer<PaymentFailed, PaymentFailedIntegrationEventHandler, OrdersDbContext>(
             PaymentOutcomesQueue);
+        services.AddIntegrationEventConsumer<PaymentAuthorizationExpired, PaymentAuthorizationExpiredIntegrationEventHandler, OrdersDbContext>(
+            PaymentOutcomesQueue);
 
         // The admin order timeline: every event about an order, from every module.
         services.AddIntegrationEventConsumer<IntegrationEvents.OrderCreated, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
@@ -97,6 +99,7 @@ public static class OrdersDependencyInjection
         services.AddIntegrationEventConsumer<PaymentCaptured, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
         services.AddIntegrationEventConsumer<PaymentVoided, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
         services.AddIntegrationEventConsumer<PaymentRefunded, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
+        services.AddIntegrationEventConsumer<PaymentAuthorizationExpired, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
         services.AddIntegrationEventConsumer<StockReserved, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
         services.AddIntegrationEventConsumer<StockReleased, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
         services.AddIntegrationEventConsumer<StockConsumed, OrderTimelineProjector, OrdersDbContext>(TimelineQueue);
@@ -118,6 +121,7 @@ public static class OrdersDependencyInjection
         services.AddScoped<ConfirmOrderUseCase>();
         services.AddScoped<MarkOrderPaymentFailedUseCase>();
         services.AddScoped<CancelOrderUseCase>();
+        services.AddScoped<CancelOrderOnExpiredAuthorizationUseCase>();
         services.AddScoped<GetOrderByIdUseCase>();
         services.AddScoped<ListCustomerOrdersUseCase>();
         services.AddScoped<CheckoutUseCase>();

@@ -25,6 +25,7 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
     private readonly SettlePaymentForCancellationUseCase _settlePayment;
     private readonly GetAvailablePaymentMethodsUseCase _getAvailableMethods;
     private readonly GetPaymentNextActionUseCase _getNextAction;
+    private readonly CountExpiringAuthorizationsUseCase _countExpiringAuthorizations;
 
     public PaymentGatewayAdapter(
         CreatePaymentUseCase createPayment,
@@ -33,8 +34,10 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
         CapturePaymentUseCase capturePayment,
         SettlePaymentForCancellationUseCase settlePayment,
         GetAvailablePaymentMethodsUseCase getAvailableMethods,
-        GetPaymentNextActionUseCase getNextAction)
+        GetPaymentNextActionUseCase getNextAction,
+        CountExpiringAuthorizationsUseCase countExpiringAuthorizations)
     {
+        _countExpiringAuthorizations = countExpiringAuthorizations;
         _getAvailableMethods = getAvailableMethods;
         _getNextAction = getNextAction;
         _createPayment = createPayment;
@@ -102,8 +105,12 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
                 payment.Refunds
                     .OrderBy(r => r.RequestedAt)
                     .Select(r => new OrderRefundSummary(r.Id, r.Amount, r.Reason, r.Status.ToString(), r.RequestedAt, r.ProcessedAt))
-                    .ToList());
+                    .ToList(),
+                payment.AuthorizationExpiresAt);
     }
+
+    public Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) =>
+        _countExpiringAuthorizations.ExecuteAsync(cutoff, cancellationToken);
 
     public Task CaptureForOrderAsync(Guid orderId, CancellationToken cancellationToken) =>
         _capturePayment.ExecuteForOrderAsync(orderId, cancellationToken);
@@ -120,7 +127,7 @@ public sealed class PaymentGatewayAdapter : IPaymentGateway
         action is null ? null : new OrderPaymentNextAction(action.Type, action.ClientSecret);
 
     private static OrderPaymentSummary ToSummary(Payment payment) =>
-        new(payment.Id, payment.Status.ToString(), ToChoice(payment.Method), payment.FailureReason);
+        new(payment.Id, payment.Status.ToString(), ToChoice(payment.Method), payment.FailureReason, payment.AuthorizationExpiresAt);
 
     private static PaymentMethod ToPaymentMethod(PaymentMethodChoice choice) => choice switch
     {

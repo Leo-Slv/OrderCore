@@ -11,4 +11,5 @@ public sealed record AdminOrderDetailsOutput(
     Order Order,
     OrderCustomerSnapshot? Customer,
     OrderPaymentDetails? Payment,
-    IReadOnlyList<OrderReservationSummary> Reservations);
+    IReadOnlyList<OrderReservationSummary> Reservations,
+    bool AuthorizationExpiringSoon = false);

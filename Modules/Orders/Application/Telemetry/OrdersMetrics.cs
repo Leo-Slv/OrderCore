@@ -57,7 +57,7 @@ public sealed class OrdersMetrics
 
     public void OrderDelivered() => _delivered.Add(1);
 
-    /// <param name="cancelledBy"><c>customer</c> or <c>admin</c>.</param>
+    /// <param name="cancelledBy"><c>customer</c>, <c>admin</c> or <c>system</c> (an expired authorization).</param>
     public void OrderCancelled(string cancelledBy) =>
         _cancelled.Add(1, new KeyValuePair<string, object?>("ordercore.cancelled_by", cancelledBy));
 

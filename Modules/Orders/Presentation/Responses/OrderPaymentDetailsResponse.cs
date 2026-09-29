@@ -27,5 +27,11 @@ public sealed class OrderPaymentDetailsResponse
 
     public DateTimeOffset? VoidedAt { get; init; }
 
+    /// <summary>Until when an authorized payment can be captured; past it the provider releases the money.</summary>
+    public DateTimeOffset? AuthorizationExpiresAt { get; init; }
+
+    /// <summary>Authorized, and the authorization expires within two days.</summary>
+    public bool AuthorizationExpiringSoon { get; init; }
+
     public IReadOnlyList<OrderRefundResponse> Refunds { get; init; } = [];
 }

@@ -15,12 +15,15 @@ public sealed class ListOrdersUseCase
     private readonly IOrderRepository _orderRepository;
     private readonly ICustomerDirectory _customerDirectory;
     private readonly IPaymentGateway _paymentGateway;
+    private readonly TimeProvider _timeProvider;
 
-    public ListOrdersUseCase(IOrderRepository orderRepository, ICustomerDirectory customerDirectory, IPaymentGateway paymentGateway)
+    public ListOrdersUseCase(
+        IOrderRepository orderRepository, ICustomerDirectory customerDirectory, IPaymentGateway paymentGateway, TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _customerDirectory = customerDirectory;
         _paymentGateway = paymentGateway;
+        _timeProvider = timeProvider;
     }
 
     public async Task<PagedResult<AdminOrderSummaryOutput>> ExecuteAsync(ListOrdersFilter filter, CancellationToken cancellationToken)
@@ -64,12 +67,18 @@ public sealed class ListOrdersUseCase
 
         var customers = await _customerDirectory.GetCustomersAsync(orders.Select(o => o.CustomerId).Distinct().ToList(), cancellationToken);
         var payments = await _paymentGateway.GetPaymentSummariesAsync(orders.Select(o => o.Id).ToList(), cancellationToken);
+        var now = _timeProvider.GetUtcNow();
 
         return orders
-            .Select(o => new AdminOrderSummaryOutput(
-                OrderSummaryOutput.From(o),
-                customers.GetValueOrDefault(o.CustomerId),
-                payments.GetValueOrDefault(o.Id)?.Status))
+            .Select(o =>
+            {
+                var payment = payments.GetValueOrDefault(o.Id);
+                return new AdminOrderSummaryOutput(
+                    OrderSummaryOutput.From(o),
+                    customers.GetValueOrDefault(o.CustomerId),
+                    payment?.Status,
+                    AuthorizationExpiry.IsExpiringSoon(payment?.Status, payment?.AuthorizationExpiresAt, now));
+            })
             .ToList();
     }
 }

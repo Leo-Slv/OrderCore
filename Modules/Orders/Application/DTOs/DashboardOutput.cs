@@ -12,6 +12,8 @@ namespace OrderCore.Api.Modules.Orders.Application.DTOs;
 /// that weren't cancelled afterwards (Confirmed, Processing, Shipped, Delivered);</item>
 /// <item><see cref="NewCustomers"/>: customers who signed up in the period;</item>
 /// <item><see cref="Stock"/>: low- and out-of-stock products right now, not per period;</item>
+/// <item><see cref="ExpiringAuthorizations"/>: authorized payments whose authorization expires
+/// within <c>AuthorizationExpiry.WarningPeriod</c>  14 orders to ship first (right now);</item>
 /// <item><see cref="RecentOrders"/>: the latest orders overall.</item>
 /// </list>
 /// </summary>
@@ -22,4 +24,5 @@ public sealed record DashboardOutput(
     IReadOnlyDictionary<string, decimal> RevenueByCurrency,
     int NewCustomers,
     StockAlertCounts Stock,
-    IReadOnlyList<AdminOrderSummaryOutput> RecentOrders);
+    IReadOnlyList<AdminOrderSummaryOutput> RecentOrders,
+    int ExpiringAuthorizations = 0);

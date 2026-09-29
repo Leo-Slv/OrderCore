@@ -18,4 +18,5 @@ public sealed record OrderPaymentDetails(
     DateTimeOffset? AuthorizedAt,
     DateTimeOffset? CapturedAt,
     DateTimeOffset? VoidedAt,
-    IReadOnlyList<OrderRefundSummary> Refunds);
+    IReadOnlyList<OrderRefundSummary> Refunds,
+    DateTimeOffset? AuthorizationExpiresAt = null);

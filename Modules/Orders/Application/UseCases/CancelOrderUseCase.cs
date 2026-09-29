@@ -79,7 +79,8 @@ public sealed class CancelOrderUseCase
 
         order.Cancel(command.Reason, _timeProvider.GetUtcNow());
         await _orderRepository.SaveChangesAsync(cancellationToken);
-        _metrics.OrderCancelled(command.RequestingCustomerId is null ? "admin" : "customer");
+        var cancelledBy = command.BySystem ? "System" : command.RequestingCustomerId is null ? "Admin" : "Customer";
+        _metrics.OrderCancelled(cancelledBy.ToLowerInvariant());
 
         await _auditLog.RecordAsync(
             AuditLogActionNames.OrderCancelled,
@@ -88,7 +89,7 @@ public sealed class CancelOrderUseCase
             new Dictionary<string, string?>
             {
                 ["reason"] = command.Reason,
-                ["cancelledBy"] = command.RequestingCustomerId is null ? "Admin" : "Customer",
+                ["cancelledBy"] = cancelledBy,
                 ["payment"] = settlement.ToString(),
                 ["returnedUnits"] = returnedUnits.ToString(CultureInfo.InvariantCulture),
             },

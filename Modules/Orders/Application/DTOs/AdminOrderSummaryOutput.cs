@@ -5,5 +5,7 @@ namespace OrderCore.Api.Modules.Orders.Application.DTOs;
 /// it and where its payment stands. <see cref="Customer"/> is null only if
 /// the customer no longer exists; <see cref="PaymentStatus"/> is null when
 /// no payment was requested (Payments' status name otherwise).
+/// <see cref="AuthorizationExpiringSoon"/>: see <c>AuthorizationExpiry</c>.
 /// </summary>
-public sealed record AdminOrderSummaryOutput(OrderSummaryOutput Order, OrderCustomerSnapshot? Customer, string? PaymentStatus);
+public sealed record AdminOrderSummaryOutput(
+    OrderSummaryOutput Order, OrderCustomerSnapshot? Customer, string? PaymentStatus, bool AuthorizationExpiringSoon = false);

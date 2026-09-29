@@ -19,6 +19,7 @@ public static class AdminOrderPresenter
         ItemCount = output.Order.ItemCount,
         Customer = ToResponse(output.Customer),
         PaymentStatus = output.PaymentStatus,
+        AuthorizationExpiringSoon = output.AuthorizationExpiringSoon,
     };
 
     public static PagedResponse<AdminOrderSummaryResponse> ToResponse(PagedResult<AdminOrderSummaryOutput> page) => new()
@@ -39,7 +40,7 @@ public static class AdminOrderPresenter
                 : null)),
         InternalNotes = output.Order.InternalNotes,
         Customer = ToResponse(output.Customer),
-        Payment = output.Payment is { } details ? ToResponse(details) : null,
+        Payment = output.Payment is { } details ? ToResponse(details, output.AuthorizationExpiringSoon) : null,
         Reservations = output.Reservations.Select(r => new OrderReservationResponse
         {
             ReservationId = r.ReservationId,
@@ -65,6 +66,7 @@ public static class AdminOrderPresenter
         NewCustomers = output.NewCustomers,
         Stock = new DashboardStockResponse { LowStock = output.Stock.LowStock, OutOfStock = output.Stock.OutOfStock },
         RecentOrders = output.RecentOrders.Select(ToResponse).ToList(),
+        ExpiringAuthorizations = output.ExpiringAuthorizations,
     };
 
     private static OrderCustomerResponse? ToResponse(OrderCustomerSnapshot? customer) =>
@@ -72,7 +74,7 @@ public static class AdminOrderPresenter
             ? null
             : new OrderCustomerResponse { Id = customer.Id, Name = customer.Name, Email = customer.Email, Active = customer.Active };
 
-    private static OrderPaymentDetailsResponse ToResponse(OrderPaymentDetails payment) => new()
+    private static OrderPaymentDetailsResponse ToResponse(OrderPaymentDetails payment, bool expiringSoon) => new()
     {
         PaymentId = payment.PaymentId,
         Status = payment.Status,
@@ -86,6 +88,8 @@ public static class AdminOrderPresenter
         AuthorizedAt = payment.AuthorizedAt,
         CapturedAt = payment.CapturedAt,
         VoidedAt = payment.VoidedAt,
+        AuthorizationExpiresAt = payment.AuthorizationExpiresAt,
+        AuthorizationExpiringSoon = expiringSoon,
         Refunds = payment.Refunds.Select(r => new OrderRefundResponse
         {
             Id = r.Id,

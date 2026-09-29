@@ -15,17 +15,20 @@ public sealed class GetAdminOrderDetailsUseCase
     private readonly ICustomerDirectory _customerDirectory;
     private readonly IPaymentGateway _paymentGateway;
     private readonly IInventoryService _inventoryService;
+    private readonly TimeProvider _timeProvider;
 
     public GetAdminOrderDetailsUseCase(
         IOrderRepository orderRepository,
         ICustomerDirectory customerDirectory,
         IPaymentGateway paymentGateway,
-        IInventoryService inventoryService)
+        IInventoryService inventoryService,
+        TimeProvider timeProvider)
     {
         _orderRepository = orderRepository;
         _customerDirectory = customerDirectory;
         _paymentGateway = paymentGateway;
         _inventoryService = inventoryService;
+        _timeProvider = timeProvider;
     }
 
     public async Task<AdminOrderDetailsOutput> ExecuteAsync(Guid orderId, CancellationToken cancellationToken)
@@ -37,6 +40,11 @@ public sealed class GetAdminOrderDetailsUseCase
         var payment = await _paymentGateway.GetPaymentDetailsAsync(orderId, cancellationToken);
         var reservations = await _inventoryService.GetReservationsAsync(orderId, cancellationToken);
 
-        return new AdminOrderDetailsOutput(order, customers.GetValueOrDefault(order.CustomerId), payment, reservations);
+        return new AdminOrderDetailsOutput(
+            order,
+            customers.GetValueOrDefault(order.CustomerId),
+            payment,
+            reservations,
+            AuthorizationExpiry.IsExpiringSoon(payment?.Status, payment?.AuthorizationExpiresAt, _timeProvider.GetUtcNow()));
     }
 }

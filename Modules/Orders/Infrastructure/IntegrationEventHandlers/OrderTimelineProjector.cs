@@ -34,6 +34,7 @@ public sealed class OrderTimelineProjector :
     IIntegrationEventHandler<PaymentCaptured>,
     IIntegrationEventHandler<PaymentVoided>,
     IIntegrationEventHandler<PaymentRefunded>,
+    IIntegrationEventHandler<PaymentAuthorizationExpired>,
     IIntegrationEventHandler<StockReserved>,
     IIntegrationEventHandler<StockReleased>,
     IIntegrationEventHandler<StockConsumed>,
@@ -88,6 +89,9 @@ public sealed class OrderTimelineProjector :
         FileAsync(integrationEvent.OrderId, integrationEvent, [], cancellationToken);
 
     public Task HandleAsync(PaymentRefunded integrationEvent, CancellationToken cancellationToken) =>
+        FileAsync(integrationEvent.OrderId, integrationEvent, [], cancellationToken);
+
+    public Task HandleAsync(PaymentAuthorizationExpired integrationEvent, CancellationToken cancellationToken) =>
         FileAsync(integrationEvent.OrderId, integrationEvent, [], cancellationToken);
 
     public Task HandleAsync(StockReserved integrationEvent, CancellationToken cancellationToken) =>

@@ -21,5 +21,8 @@ public sealed class DashboardResponse
 
     public DashboardStockResponse Stock { get; init; } = new();
 
+    /// <summary>Authorized payments whose authorization expires within two days: ship those orders first (right now, not per period).</summary>
+    public int ExpiringAuthorizations { get; init; }
+
     public IReadOnlyList<AdminOrderSummaryResponse> RecentOrders { get; init; } = [];
 }
