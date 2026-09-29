@@ -122,6 +122,19 @@ public sealed class StripePaymentProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_client_secret_of_a_waiting_payment_is_asked_of_stripe_again()
+    {
+        var payment = NewPayment();
+        payment.MarkProcessing();
+        payment.AwaitBuyer("pi_123", Now);
+
+        var secret = await Provider().GetClientSecretAsync(payment, CancellationToken.None);
+
+        secret.Should().NotBeNullOrEmpty("stripe-mock's intent still needs a payment method");
+        _recorder.Single("GET", "/v1/payment_intents/pi_123");
+    }
+
+    [Fact]
     public async Task A_refund_sends_its_amount_keyed_by_the_refund()
     {
         var payment = Authorized();

@@ -17,7 +17,13 @@ internal sealed class FakePaymentGateway : IPaymentGateway
     /// <summary>Makes the next payment request fail, as an unavailable provider would.</summary>
     public Exception? FailNextRequestWith { get; set; }
 
-    public Task<Guid> RequestPaymentAsync(
+    /// <summary>
+    /// Set to answer as Stripe does: every payment waits for the buyer, with
+    /// this next action — on the request and asked again afterwards.
+    /// </summary>
+    public OrderPaymentNextAction? NextAction { get; set; }
+
+    public Task<OrderPaymentNextAction?> RequestPaymentAsync(
         Guid orderId,
         decimal amount,
         string currency,
@@ -32,10 +38,13 @@ internal sealed class FakePaymentGateway : IPaymentGateway
         }
 
         Requests.Add((orderId, amount, method));
-        var paymentId = Guid.NewGuid();
-        _payments[orderId] = new OrderPaymentSummary(paymentId, "Authorized", method, FailureReason: null);
-        return Task.FromResult(paymentId);
+        var status = NextAction is null ? "Authorized" : "Processing";
+        _payments[orderId] = new OrderPaymentSummary(Guid.NewGuid(), status, method, FailureReason: null);
+        return Task.FromResult(NextAction);
     }
+
+    public Task<OrderPaymentNextAction?> GetPaymentNextActionAsync(Guid orderId, CancellationToken cancellationToken) =>
+        Task.FromResult(_payments.TryGetValue(orderId, out var payment) && payment.Status == "Processing" ? NextAction : null);
 
     public Task<OrderPaymentSummary?> GetPaymentSummaryAsync(Guid orderId, CancellationToken cancellationToken) =>
         Task.FromResult(_payments.GetValueOrDefault(orderId));

@@ -31,10 +31,19 @@ internal sealed class StubPaymentProvider : IPaymentProvider
 
     public int RefundCalls { get; private set; }
 
+    /// <summary>Answers authorizations the way Stripe does: "waiting for the buyer", with a client secret.</summary>
+    public bool NeedsBuyer { get; init; }
+
     public Task<PaymentAuthorizationResult> AuthorizeAsync(Payment payment, CancellationToken cancellationToken) =>
-        Task.FromResult(_succeeds
-            ? new PaymentAuthorizationResult(true, $"stub_ref_{payment.Id:N}", null)
+        Task.FromResult(
+            NeedsBuyer ? PaymentAuthorizationResult.WaitingForBuyer($"stub_ref_{payment.Id:N}", SecretOf(payment))
+            : _succeeds ? new PaymentAuthorizationResult(true, $"stub_ref_{payment.Id:N}", null)
             : new PaymentAuthorizationResult(false, null, "stub_declined"));
+
+    public Task<string?> GetClientSecretAsync(Payment payment, CancellationToken cancellationToken) =>
+        Task.FromResult(NeedsBuyer && payment.IsAwaitingBuyer ? SecretOf(payment) : null);
+
+    public static string SecretOf(Payment payment) => $"stub_secret_{payment.Id:N}";
 
     public Task<PaymentCaptureResult> CaptureAsync(Payment payment, CancellationToken cancellationToken)
     {

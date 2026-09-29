@@ -285,7 +285,8 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
             new GetPaymentsByOrderIdsUseCase(paymentRepository),
             new CapturePaymentUseCase(paymentRepository, provider, outbox, NoOpAuditLog(), TestMetrics.Payments, TimeProvider.System),
             new SettlePaymentForCancellationUseCase(paymentRepository, provider, outbox, refund, NoOpAuditLog(), TestMetrics.Payments, TimeProvider.System),
-            new GetAvailablePaymentMethodsUseCase(provider));
+            new GetAvailablePaymentMethodsUseCase(provider),
+            new GetPaymentNextActionUseCase(paymentRepository, provider));
     }
 
     private static CreatePaymentUseCase CreatePaymentUseCase(PaymentsDbContext paymentsDb)

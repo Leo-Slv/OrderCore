@@ -90,7 +90,7 @@ public sealed class OrdersMetricsTests : IDisposable
     public async Task A_confirmed_order_counts_once_with_its_value_per_currency()
     {
         var productId = ProductWithStock(5, price: 40m);
-        var orderId = await Checkout().ExecuteAsync(Command(productId, quantity: 2), CancellationToken.None);
+        var orderId = (await Checkout().ExecuteAsync(Command(productId, quantity: 2), CancellationToken.None)).OrderId;
         var confirm = new ConfirmOrderUseCase(
             _orders, _inventory, _auditLog, _metrics, TimeProvider.System, NullLogger<ConfirmOrderUseCase>.Instance);
 
@@ -108,7 +108,7 @@ public sealed class OrdersMetricsTests : IDisposable
     public async Task A_cancellation_counts_who_cancelled(bool byTheCustomer, string cancelledBy)
     {
         var productId = ProductWithStock(5);
-        var orderId = await Checkout().ExecuteAsync(Command(productId), CancellationToken.None);
+        var orderId = (await Checkout().ExecuteAsync(Command(productId), CancellationToken.None)).OrderId;
         var cancel = new CancelOrderUseCase(_orders, _inventory, _payments, _auditLog, _metrics, TimeProvider.System);
 
         await cancel.ExecuteAsync(new CancelOrderCommand(orderId, "changed my mind", byTheCustomer ? CustomerId : null), CancellationToken.None);

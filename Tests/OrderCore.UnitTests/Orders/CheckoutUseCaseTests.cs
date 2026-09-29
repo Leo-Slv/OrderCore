@@ -47,8 +47,9 @@ public sealed class CheckoutUseCaseTests
     {
         var product = InStockProduct(price: 50m);
 
-        var orderId = await CreateUseCase().ExecuteAsync(Command([new CheckoutItem(product.Id, 2)]), CancellationToken.None);
+        var (orderId, nextAction) = await CreateUseCase().ExecuteAsync(Command([new CheckoutItem(product.Id, 2)]), CancellationToken.None);
 
+        nextAction.Should().BeNull("the fake provider answers at once");
         var order = _orders.Orders.Should().ContainSingle().Subject;
         order.Id.Should().Be(orderId);
         order.Status.Should().Be(OrderStatus.PendingPayment);
@@ -75,6 +76,32 @@ public sealed class CheckoutUseCaseTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_hands_out_the_card_confirmation_when_the_provider_waits_for_the_buyer()
+    {
+        var product = InStockProduct();
+        _payments.NextAction = new OrderPaymentNextAction("confirm_card", "pi_secret");
+
+        var result = await CreateUseCase().ExecuteAsync(Command([new CheckoutItem(product.Id, 1)], method: PaymentMethodChoice.Card), CancellationToken.None);
+
+        result.PaymentNextAction.Should().Be(new OrderPaymentNextAction("confirm_card", "pi_secret"));
+        _orders.Orders.Should().ContainSingle().Which.Status.Should().Be(OrderStatus.PendingPayment);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_replayed_while_the_buyer_has_not_confirmed_hands_out_the_same_step_again()
+    {
+        var product = InStockProduct();
+        _payments.NextAction = new OrderPaymentNextAction("confirm_card", "pi_secret");
+        var useCase = CreateUseCase();
+
+        var first = await useCase.ExecuteAsync(Command([new CheckoutItem(product.Id, 1)], method: PaymentMethodChoice.Card), CancellationToken.None);
+        var replay = await useCase.ExecuteAsync(Command([new CheckoutItem(product.Id, 1)], method: PaymentMethodChoice.Card), CancellationToken.None);
+
+        replay.Should().Be(first);
+        _payments.Requests.Should().ContainSingle("the replay asks for the step again, it doesn't pay again");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_replayed_after_payment_failed_to_start_requests_payment_again()
     {
         var product = InStockProduct();
@@ -84,7 +111,7 @@ public sealed class CheckoutUseCaseTests
         var firstAttempt = () => useCase.ExecuteAsync(Command([new CheckoutItem(product.Id, 1)]), CancellationToken.None);
         await firstAttempt.Should().ThrowAsync<TimeoutException>();
 
-        var orderId = await useCase.ExecuteAsync(Command([new CheckoutItem(product.Id, 1)]), CancellationToken.None);
+        var (orderId, _) = await useCase.ExecuteAsync(Command([new CheckoutItem(product.Id, 1)]), CancellationToken.None);
 
         _orders.Orders.Should().ContainSingle().Which.Id.Should().Be(orderId);
         _payments.Requests.Should().ContainSingle().Which.OrderId.Should().Be(orderId);
@@ -138,7 +165,7 @@ public sealed class CheckoutUseCaseTests
         _orders.FailNextSaveWith = new InvalidOperationException("duplicate key");
         _orders.OnFailingSave = () => _orders.Store(winner);
 
-        var orderId = await CreateUseCase().ExecuteAsync(Command([new CheckoutItem(product.Id, 1)]), CancellationToken.None);
+        var (orderId, _) = await CreateUseCase().ExecuteAsync(Command([new CheckoutItem(product.Id, 1)]), CancellationToken.None);
 
         orderId.Should().Be(winner.Id);
         _inventory.Reserved.Should().BeEmpty();
