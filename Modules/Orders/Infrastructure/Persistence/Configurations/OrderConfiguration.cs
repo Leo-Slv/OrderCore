@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using OrderCore.Api.Modules.Orders.Domain.ValueObjects;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Models;
 
 namespace OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Configurations;
@@ -45,6 +46,9 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<OrderPersisten
         // Postgres treats NULLs as distinct, so any number of orders without
         // a key (created outside checkout) can coexist under this index.
         builder.Property(o => o.CheckoutIdempotencyKey).HasMaxLength(100);
+        builder.Property(o => o.ShipmentCarrier).HasMaxLength(ShipmentDetails.MaxCarrierLength);
+        builder.Property(o => o.ShipmentTrackingCode).HasMaxLength(ShipmentDetails.MaxTrackingCodeLength);
+        builder.Property(o => o.ShipmentTrackingUrl).HasMaxLength(ShipmentDetails.MaxTrackingUrlLength);
         builder.HasIndex(o => new { o.CustomerId, o.CheckoutIdempotencyKey }).IsUnique();
 
         builder.Property(o => o.Version).IsConcurrencyToken();

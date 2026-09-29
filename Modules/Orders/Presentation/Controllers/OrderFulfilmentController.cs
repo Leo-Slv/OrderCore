@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Presentation.Presenters;
@@ -39,7 +40,9 @@ public sealed class OrderFulfilmentController : ControllerBase
         Ok(OrderPresenter.ToResponse(await _fulfilOrder.StartProcessingAsync(id, cancellationToken)));
 
     /// <summary>
-    /// Captures the payment, then marks the order shipped. If the provider
+    /// Captures the payment, then marks the order shipped. An optional body gives the carrier,
+    /// tracking code and link the customer will see (400 <c>validation_error</c> when
+    /// they don't hold up — checked before the capture). If the provider
     /// refuses the capture: <c>409 payment_capture_failed</c>, and the order
     /// stays <c>Processing</c>.
     /// </summary>
@@ -48,8 +51,9 @@ public sealed class OrderFulfilmentController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<OrderResponse>> ShipAsync(Guid id, CancellationToken cancellationToken) =>
-        Ok(OrderPresenter.ToResponse(await _fulfilOrder.ShipAsync(id, cancellationToken)));
+    public async Task<ActionResult<OrderResponse>> ShipAsync(
+        Guid id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ShipOrderRequest? request, CancellationToken cancellationToken) =>
+        Ok(OrderPresenter.ToResponse(await _fulfilOrder.ShipAsync(id, OrderPresenter.ToInput(request), cancellationToken)));
 
     [HttpPost("deliver")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]

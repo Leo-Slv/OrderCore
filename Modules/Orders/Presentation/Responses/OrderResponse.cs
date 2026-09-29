@@ -23,6 +23,9 @@ public sealed class OrderResponse
 
     public DateTimeOffset? ShippedAt { get; init; }
 
+    /// <summary>Carrier, tracking code and link, when the store gave them on shipping.</summary>
+    public OrderShipmentResponse? Shipment { get; init; }
+
     public DateTimeOffset? DeliveredAt { get; init; }
 
     public decimal SubtotalAmount { get; init; }

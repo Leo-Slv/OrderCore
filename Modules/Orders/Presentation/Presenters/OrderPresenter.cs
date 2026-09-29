@@ -23,6 +23,9 @@ public static class OrderPresenter
     public static IReadOnlyList<QuoteCartLine> ToLines(QuoteCartRequest request) =>
         request.Items.Select(i => new QuoteCartLine(i.ProductId, i.Quantity, i.ExpectedUnitPrice)).ToList();
 
+    public static ShipmentInput? ToInput(ShipOrderRequest? request) =>
+        request is null ? null : new ShipmentInput(request.Carrier, request.TrackingCode, request.TrackingUrl);
+
     public static OrderResponse ToResponse(OrderDetailsOutput details)
     {
         var order = details.Order;
@@ -36,6 +39,9 @@ public static class OrderPresenter
             ConfirmedAt = order.ConfirmedAt,
             CancelledAt = order.CancelledAt,
             ShippedAt = order.ShippedAt,
+            Shipment = order.Shipment is { } shipment
+                ? new OrderShipmentResponse(shipment.Carrier, shipment.TrackingCode, shipment.TrackingUrl)
+                : null,
             DeliveredAt = order.DeliveredAt,
             SubtotalAmount = order.SubtotalAmount,
             DiscountAmount = order.DiscountAmount,

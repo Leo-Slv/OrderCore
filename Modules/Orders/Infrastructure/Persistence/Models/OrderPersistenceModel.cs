@@ -74,6 +74,12 @@ public sealed class OrderPersistenceModel
 
     public DateTimeOffset? ShippedAt { get; set; }
 
+    public string? ShipmentCarrier { get; set; }
+
+    public string? ShipmentTrackingCode { get; set; }
+
+    public string? ShipmentTrackingUrl { get; set; }
+
     public DateTimeOffset? DeliveredAt { get; set; }
 
     public int Version { get; set; }

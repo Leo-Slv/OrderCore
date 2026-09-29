@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Orders.Domain.Enums;
 using OrderCore.Api.Modules.Orders.Domain.Events;
+using OrderCore.Api.Modules.Orders.Domain.ValueObjects;
 using OrderCore.Api.Shared.Domain;
 using OrderCore.Api.Shared.Domain.Exceptions;
 using OrderCore.Api.Shared.Domain.ValueObjects;
@@ -63,6 +64,9 @@ public sealed class Order : AggregateRoot<Guid>
     public DateTimeOffset? CancelledAt { get; private set; }
 
     public DateTimeOffset? ShippedAt { get; private set; }
+
+    /// <summary>Carrier, tracking code and link, when the admin gave them on shipping.</summary>
+    public ShipmentDetails? Shipment { get; private set; }
 
     public DateTimeOffset? DeliveredAt { get; private set; }
 
@@ -298,14 +302,16 @@ public sealed class Order : AggregateRoot<Guid>
     public void EnsureCanShip() =>
         EnsureStatus(OrderStatus.Processing, $"Cannot ship an order in status '{Status}'.");
 
-    public void Ship(DateTimeOffset now)
+    /// <param name="shipment">How the customer can follow it at the carrier, if the admin gave it.</param>
+    public void Ship(DateTimeOffset now, ShipmentDetails? shipment = null)
     {
         EnsureCanShip();
 
         Status = OrderStatus.Shipped;
         ShippedAt = now;
+        Shipment = shipment;
         IncrementVersion();
-        Raise(new OrderShipped(Guid.NewGuid(), now, Id));
+        Raise(new OrderShipped(Guid.NewGuid(), now, Id, shipment));
     }
 
     public void Deliver(DateTimeOffset now)
@@ -406,7 +412,8 @@ public sealed class Order : AggregateRoot<Guid>
         DateTimeOffset? shippedAt,
         DateTimeOffset? deliveredAt,
         int version,
-        IEnumerable<OrderItem> items)
+        IEnumerable<OrderItem> items,
+        ShipmentDetails? shipment = null)
     {
         var order = new Order(id, customerId, currency, orderNumber, createdAt)
         {
@@ -423,6 +430,7 @@ public sealed class Order : AggregateRoot<Guid>
             ConfirmedAt = confirmedAt,
             CancelledAt = cancelledAt,
             ShippedAt = shippedAt,
+            Shipment = shipment,
             DeliveredAt = deliveredAt,
             Version = version,
         };

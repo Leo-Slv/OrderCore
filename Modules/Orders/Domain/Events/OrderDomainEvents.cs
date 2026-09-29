@@ -1,3 +1,4 @@
+using OrderCore.Api.Modules.Orders.Domain.ValueObjects;
 using OrderCore.Api.Shared.Domain;
 
 namespace OrderCore.Api.Modules.Orders.Domain.Events;
@@ -36,8 +37,12 @@ public sealed record OrderPaymentRequested(Guid EventId, DateTimeOffset Occurred
 public sealed record OrderProcessingStarted(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)
     : IDomainEvent;
 
-/// <summary>The order left for delivery; its payment was captured just before (backoffice decision 1).</summary>
-public sealed record OrderShipped(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)
+/// <summary>
+/// The order left for delivery; its payment was captured just before
+/// (backoffice decision 1). <see cref="Shipment"/> is how to follow it at the
+/// carrier, when the admin gave it.
+/// </summary>
+public sealed record OrderShipped(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId, ShipmentDetails? Shipment = null)
     : IDomainEvent;
 
 public sealed record OrderDelivered(Guid EventId, DateTimeOffset OccurredAt, Guid OrderId)

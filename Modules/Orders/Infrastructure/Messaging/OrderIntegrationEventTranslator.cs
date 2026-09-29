@@ -77,6 +77,9 @@ public static class OrderIntegrationEventTranslator
             Status = nameof(OrderStatus.Shipped),
             TotalAmount = order.TotalAmount,
             Currency = order.Currency,
+            Carrier = e.Shipment?.Carrier,
+            TrackingCode = e.Shipment?.TrackingCode,
+            TrackingUrl = e.Shipment?.TrackingUrl,
         },
         DomainEvents.OrderDelivered e => new IntegrationEvents.OrderDelivered
         {

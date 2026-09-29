@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 using OrderCore.Api.Modules.Orders.Domain.Enums;
+using OrderCore.Api.Modules.Orders.Domain.ValueObjects;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Models;
 using OrderCore.Api.Shared.Domain.ValueObjects;
 
@@ -41,7 +42,8 @@ public static class OrderMapper
             model.ShippedAt,
             model.DeliveredAt,
             model.Version,
-            items);
+            items,
+            ShipmentDetails.Rehydrate(model.ShipmentCarrier, model.ShipmentTrackingCode, model.ShipmentTrackingUrl));
     }
 
     public static OrderPersistenceModel ToPersistence(Order domain)
@@ -64,6 +66,9 @@ public static class OrderMapper
             ConfirmedAt = domain.ConfirmedAt,
             CancelledAt = domain.CancelledAt,
             ShippedAt = domain.ShippedAt,
+            ShipmentCarrier = domain.Shipment?.Carrier,
+            ShipmentTrackingCode = domain.Shipment?.TrackingCode,
+            ShipmentTrackingUrl = domain.Shipment?.TrackingUrl,
             DeliveredAt = domain.DeliveredAt,
             Version = domain.Version,
             Items = domain.Items.Select(ToPersistence).ToList(),
@@ -91,6 +96,9 @@ public static class OrderMapper
         model.ConfirmedAt = domain.ConfirmedAt;
         model.CancelledAt = domain.CancelledAt;
         model.ShippedAt = domain.ShippedAt;
+        model.ShipmentCarrier = domain.Shipment?.Carrier;
+        model.ShipmentTrackingCode = domain.Shipment?.TrackingCode;
+        model.ShipmentTrackingUrl = domain.Shipment?.TrackingUrl;
         model.DeliveredAt = domain.DeliveredAt;
         model.Version = domain.Version;
         ApplyAddresses(domain, model);

@@ -4,6 +4,7 @@ using OrderCore.Api.Modules.Orders.Application.Contracts;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
+using OrderCore.Api.Modules.Orders.Domain.ValueObjects;
 using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Application.Observability;
 
@@ -45,13 +46,22 @@ public sealed class FulfilOrderUseCase
         return await SaveAsync(order, AuditLogActionNames.OrderProcessingStarted, cancellationToken);
     }
 
-    public async Task<OrderDetailsOutput> ShipAsync(Guid orderId, CancellationToken cancellationToken)
+    public Task<OrderDetailsOutput> ShipAsync(Guid orderId, CancellationToken cancellationToken) =>
+        ShipAsync(orderId, shipment: null, cancellationToken);
+
+    /// <summary>
+    /// Captures the payment, then ships, recording how to follow the order at
+    /// the carrier when given. The details are validated before the capture,
+    /// so a bad tracking link never leaves a captured payment behind.
+    /// </summary>
+    public async Task<OrderDetailsOutput> ShipAsync(Guid orderId, ShipmentInput? shipment, CancellationToken cancellationToken)
     {
         var order = await LoadAsync(orderId, cancellationToken);
 
         order.EnsureCanShip();
+        var details = shipment is null ? null : ShipmentDetails.Create(shipment.Carrier, shipment.TrackingCode, shipment.TrackingUrl);
         await _paymentGateway.CaptureForOrderAsync(orderId, cancellationToken);
-        order.Ship(_timeProvider.GetUtcNow());
+        order.Ship(_timeProvider.GetUtcNow(), details);
 
         var shipped = await SaveAsync(order, AuditLogActionNames.OrderShipped, cancellationToken);
         _metrics.OrderShipped();
