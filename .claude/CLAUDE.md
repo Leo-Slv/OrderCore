@@ -330,6 +330,32 @@ Modules talk asynchronously through RabbitMQ, never in-process: see
   (`TestBroker`) and millisecond retries; `TestOutboxes` wires module
   outboxes for tests that build repositories by hand.
 
+## Observability
+
+Traces, metrics and logs go through OpenTelemetry
+(`Shared/Infrastructure/Observability`, `Docs/specs/observability/observability.md`).
+When writing new code:
+
+- **Use cases record their module's metrics** through the module's
+  `<Module>Metrics` class in `Application/Telemetry` (BCL
+  `System.Diagnostics.Metrics`, created from `IMeterFactory`, meter
+  `OrderCore.<Module>`, instruments `ordercore.<module>.<thing>`),
+  after the save that makes the event true. A new module adds its own
+  class under the `OrderCore.*` prefix, which the host already exports.
+  Duration histograms are in seconds and pass `DurationBuckets.Seconds`
+  as advice — the SDK's default buckets are millisecond-sized.
+- **Tag the span with the ids you work on** (`Observed.Order`,
+  `Payment`, `Customer`, `Product` from `Shared/Application/Observability`);
+  they are copied onto every log line written inside the span, so don't
+  open log scopes for them.
+- **Never put personal data, secrets or payment data in logs, spans,
+  tags or metrics** — ids only (log an account id, never an e-mail).
+- Activity sources are named `OrderCore.<Module>` too; messaging spans
+  follow the OpenTelemetry messaging conventions (`MessagingTelemetry`).
+- A dependency the API can't serve without gets a health check tagged
+  `HealthEndpoints.Ready`; anything else worth watching goes to
+  `/health/details` only. Dashboards live as code in `deploy/grafana`.
+
 ## Cross-Cutting Concerns
 
 Cross-cutting concerns shared across multiple business modules belong under
@@ -346,7 +372,11 @@ Cross-cutting concerns shared across multiple business modules belong under
   module, e.g. `PagedResponse<T>`; `ExceptionHandling/ApiExceptionHandler`;
   `Cors/CorsExtensions`; `Conventions/ApiRoutePrefixConvention`;
   `Authentication/` (`AuthorizationPolicies`, `HttpContextCurrentUser`,
-  `OrderCoreClaimTypes`); `OpenApi/BearerSecurityTransformer`.
+  `OrderCoreClaimTypes`); `OpenApi/BearerSecurityTransformer`;
+  `Observability/` (`TraceResponseExtensions`, `HealthEndpoints`).
+- `Shared/Application/Observability` (`Observed`, `DurationBuckets`) and
+  `Shared/Infrastructure/Observability` (`ObservabilityExtensions`,
+  `SpanIdsLogProcessor`, `PostgresHealthCheck`) — see Observability above.
 
 Do not move module-specific business logic into `Shared/` merely for reuse.
 

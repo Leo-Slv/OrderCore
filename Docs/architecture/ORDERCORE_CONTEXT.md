@@ -1403,6 +1403,43 @@ OrderConfirmed
 
 Idealmente tudo deve ser associado ao mesmo distributed trace.
 
+**Como está implementado** (`Docs/specs/observability/observability.md`):
+
+- **Sinais e backend.** OpenTelemetry para traces, métricas e logs,
+  exportados por OTLP para o `grafana/otel-lgtm` do `docker compose`
+  (Tempo, Prometheus, Loki e Grafana num container, com os dados num
+  volume; Grafana em http://localhost:3001). Sem
+  `OTEL_EXPORTER_OTLP_ENDPOINT` nada é exportado (testes, um `dotnet run`
+  sem backend). Logs no console em texto (Development) ou JSON.
+- **O trace é o correlation id.** Um checkout é um trace só, da
+  requisição até a confirmação: o outbox guarda o trace de quem gravou o
+  evento, o relay publica num span *producer* filho dele, e o consumidor
+  trata a mensagem num span *consumer* filho do producer — cada
+  retentativa é mais um span nele, com a tentativa. Toda resposta leva o
+  `traceparent`, e todo erro (`ProblemDetails`) o `traceId`.
+- **Ids, nunca dados pessoais.** Os use cases marcam o span com
+  `order.id`, `payment.id`, `customer.id`, `product.id`, e essas marcas
+  são copiadas para todo log escrito dentro do span. E-mail, nome,
+  endereço, documento, segredos e dados de pagamento nunca entram em
+  logs, spans ou métricas (o seed do admin registra o id da conta).
+- **Métricas.** ASP.NET Core, `HttpClient`, Npgsql e runtime, mais um
+  meter por módulo: `OrderCore.Orders` (pedidos por etapa, valor
+  confirmado por moeda, duração e recusas do checkout),
+  `OrderCore.Payments` (autorizações com o motivo da recusa, capturas,
+  anulações, estornos, duração das chamadas ao provedor),
+  `OrderCore.Inventory` (reservas, recusas por falta de estoque,
+  alertas) e `OrderCore.Messaging` (backlog e idade do outbox,
+  publicadas, consumidas, retentativas, falhas, duração). Nomes em
+  `ordercore.*`, rótulos de negócio em `ordercore.*`, e os de protocolo
+  seguem as convenções do OpenTelemetry (`messaging.*`, `http.*`).
+- **Dashboards como código** em `deploy/grafana`: "Negócio" e "API e
+  mensageria", provisionados no Grafana na subida.
+- **Health checks.** `/health/live` (o processo responde),
+  `/health/ready` (PostgreSQL e RabbitMQ; só `Healthy`/`Unhealthy`) e
+  `/health/details` para o admin (cada check, o backlog dos outboxes e as
+  mensagens que falharam esperando alguém). O container da API usa
+  `ready` como healthcheck.
+
 **Audit log.** O `AuditLogs` guarda cada ação relevante (pedido criado,
 enviado, cancelado; pagamento autorizado, capturado, anulado; produto
 publicado; cliente desativado...) com o autor (o usuário autenticado, ou
@@ -1909,6 +1946,7 @@ Hoje (`docker-compose.yml`), com as credenciais do RabbitMQ no `.env`:
 OrderCore
 PostgreSQL
 RabbitMQ (management UI em http://localhost:15672)
+Grafana LGTM (observabilidade: Grafana em http://localhost:3001)
 ```
 
 Posteriormente, quando algo precisar de cache/locks de verdade:
