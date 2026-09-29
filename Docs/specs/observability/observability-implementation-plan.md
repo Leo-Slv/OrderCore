@@ -151,3 +151,43 @@ shipping, a refused payment); no automated test for dashboard JSON.
 4. `feat(observability): live, ready and admin health details`
 5. `feat(observability): Grafana dashboards as code`
 6. `docs: ...`
+
+
+## Execution notes (what differed from this plan)
+
+- **Stage 1.** The trace id in `ProblemDetails` is the 32-hex trace id
+  (what Grafana searches by), not ASP.NET Core's default full activity id.
+  An incoming `traceparent` is continued. Sampling comes from
+  `Observability:TraceSamplingRatio`.
+- **Stage 2.** The `traceparent` a message carries is the producer span's,
+  so the consumer span is its child; with no listener, a plain `Activity`
+  keeps the context flowing (the correlation in the outbox never depends on
+  exporting). The backlog gauges are fed by the relay on each poll (a count
+  and the oldest row per outbox), since observable callbacks can't query
+  the database.
+- **Stage 3.** Ids reach the logs through `SpanIdsLogProcessor`, which
+  copies the ids a use case tagged on its span (`Observed`) onto every log
+  line written inside it — instead of each use case opening a log scope,
+  which would have put an `ILogger` into dozens of constructors. The
+  payment provider's call duration is measured by a decorator
+  (`MeasuredPaymentProvider`), and stock alerts by a handler of the
+  `StockAlertRaised` domain event, since alerts come from many operations.
+  The admin seed now returns the created admin's id, which is what it logs.
+- **Stage 4.** `/health/details` answers with the overall status too
+  (503 when a check is unhealthy). The `messaging` check is `Degraded`
+  while failed messages wait for an admin or an outbox row has waited over
+  a minute (details only; readiness ignores it). The API container's
+  health check uses bash's `/dev/tcp`, since the `aspnet` image has no
+  curl or wget.
+- **Stage 5.** Checking the dashboards against real traffic found a bug
+  from stage 3: duration histograms recorded in seconds used the SDK's
+  default millisecond-sized buckets, so every percentile read 4.75 s. They
+  now pass `DurationBuckets.Seconds` as advice, and a unit test holds every
+  seconds histogram to it. Counts in the panels are rounded (`increase()`
+  extrapolates), the database panel is an overall p50/p95 (Npgsql doesn't
+  label the operation), and compose sets `OTEL_METRIC_EXPORT_INTERVAL` to
+  10 s. The dashboards are committed as plain JSON (generated once, then
+  maintained as JSON); there is no automated test for them.
+- **Not covered by the local check:** panels for declined payments,
+  refunds, retries and failed messages stay empty with the fake provider in
+  compose, which always approves.
