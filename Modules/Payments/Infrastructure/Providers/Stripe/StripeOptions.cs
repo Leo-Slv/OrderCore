@@ -25,5 +25,12 @@ public sealed class StripeOptions
 
     public int MaxNetworkRetries { get; set; } = 2;
 
+    /// <summary>
+    /// A live secret key (<c>sk_live_…</c>, real money) is refused at startup
+    /// unless this is true — a live key only on purpose (production-readiness
+    /// spec, decision 5).
+    /// </summary>
+    public bool AllowLiveKeys { get; set; }
+
     public bool IsEnabled => !string.IsNullOrWhiteSpace(SecretKey);
 }

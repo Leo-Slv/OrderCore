@@ -13,7 +13,11 @@ public static class CorsExtensions
 
     public static IServiceCollection AddStorefrontCors(this IServiceCollection services, IConfiguration configuration)
     {
-        var allowedOrigins = configuration.GetSection(AllowedOriginsKey).Get<string[]>() ?? [];
+        // Blank entries are ignored: appsettings.Production.json blanks the development
+        // origin so a deployment has to provide its own (ProductionSettingsCheck).
+        var allowedOrigins = (configuration.GetSection(AllowedOriginsKey).Get<string[]>() ?? [])
+            .Where(origin => !string.IsNullOrWhiteSpace(origin))
+            .ToArray();
 
         services.AddCors(options => options.AddPolicy(StorefrontPolicy, policy => policy
             .WithOrigins(allowedOrigins)

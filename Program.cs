@@ -77,6 +77,10 @@ builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = 
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddStorefrontCors(builder.Configuration);
 builder.Services.AddOrderCoreForwardedHeaders(builder.Configuration);
+
+// Outside development, a setting a deployment must provide (database, CORS
+// origins, host names, broker) that is missing or still local stops startup.
+builder.Services.AddProductionSettingsCheck(builder.Configuration, builder.Environment);
 builder.Services.AddOrderCoreRateLimiting();
 builder.Services.AddHsts(options =>
 {

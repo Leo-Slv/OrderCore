@@ -32,7 +32,9 @@ public static class PaymentsDependencyInjection
         services.Configure<FakePaymentProviderOptions>(_ => { });
         services.AddSingleton<PaymentsMetrics>();
         services.AddPaymentsRateLimits(configuration);
-        services.AddOptions<StripeOptions>().Bind(configuration.GetSection(StripeOptions.SectionName));
+        // A Stripe configuration that would run but misbehave stops the API at startup.
+        services.AddOptions<StripeOptions>().Bind(configuration.GetSection(StripeOptions.SectionName)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<StripeOptions>, StripeOptionsValidator>();
         services.AddSingleton<FakePaymentProvider>();
         services.AddHttpClient(StripePaymentProvider.HttpClientName);
         services.AddSingleton<StripePaymentProvider>();
