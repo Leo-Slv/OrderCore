@@ -4,6 +4,8 @@ Base usada por todos os módulos: identidade/igualdade de entidades, agregados c
 
 A parte de observabilidade (`Docs/specs/observability/observability.md`) está desenhada junto, e explicada na seção "Observabilidade" no fim deste arquivo.
 
+A prontidão para produção (V4, `Docs/specs/operations/production-readiness.md`) acrescentou: o executor do comando `migrate` (`DatabaseMigrator`, cada módulo registra o próprio `DbContext` com `AddDatabaseMigrations`), os cabeçalhos encaminhados só de proxies confiáveis (`TrustedProxiesOptions`), a verificação das configurações de produção na subida (`ProductionSettingsValidator`, fora de Development), os cabeçalhos de segurança e `no-store` (`SecurityHeadersExtensions`) e os limites de requisição (`RateLimitingExtensions`: cada módulo declara as políticas dos próprios endpoints; acima do limite, `429 too_many_requests` com `Retry-After`, contado em `RateLimitingMetrics` e declarado no OpenAPI por `RateLimitResponseTransformer`).
+
 
 ```mermaid
 
@@ -154,7 +156,9 @@ classDiagram
     %% OrderCore.Api.Shared.Presentation.Realtime
     class HubRoutes {
         <<static>>
-        +string Prefixn        +string AccessTokenQueryParametern    }
+        +string Prefix$
+        +string AccessTokenQueryParameter$
+    }
 
     class AuthorizationPolicies {
         <<static>>
@@ -241,6 +245,67 @@ classDiagram
     SpanIdsLogProcessor ..> Observed : copies its span tags onto logs
     TraceResponseExtensions ..> ProblemDetailsDefaults : code + traceId
     HealthEndpoints ..> PostgresHealthCheck : registers (ready)
+
+    %% OrderCore.Api.Shared.Infrastructure.Persistence (V4)
+    class DatabaseMigrationTarget {
+        +Type DbContextType
+        +int Order
+    }
+
+    class DatabaseMigrator {
+        -IReadOnlyList~DatabaseMigrationTarget~ targets
+        +RunAsync() Task~int~
+    }
+
+    %% OrderCore.Api.Shared.Presentation.Hosting (V4)
+    class TrustedProxiesOptions {
+        +List~string~ KnownProxies
+        +List~string~ KnownNetworks
+        +bool TrustAllProxies
+    }
+
+    class ProductionSettings {
+        +string? ConnectionString
+        +IReadOnlyList~string~ AllowedOrigins
+        +string? AllowedHosts
+        +string? BrokerHost
+    }
+
+    class ProductionSettingsValidator {
+        +Validate(string? name, ProductionSettings settings) ValidateOptionsResult
+    }
+
+    %% OrderCore.Api.Shared.Presentation.Security (V4)
+    class SecurityHeadersExtensions {
+        <<static>>
+        +UseSecurityHeaders(IApplicationBuilder app)$ IApplicationBuilder
+    }
+
+    %% OrderCore.Api.Shared.Presentation.RateLimiting (V4)
+    class RateLimitingExtensions {
+        <<static>>
+        +AddOrderCoreRateLimiting(IServiceCollection services)$ IServiceCollection
+        +AddFixedWindowPolicy(IServiceCollection services, IConfiguration configuration, string name, int permitLimit, TimeSpan window, bool perCustomer)$ IServiceCollection
+    }
+
+    class FixedWindowLimit {
+        +int PermitLimit
+        +TimeSpan Window
+    }
+
+    class RateLimitingMetrics {
+        +Rejected(string policy) void
+    }
+
+    class RateLimitResponseTransformer {
+        +TransformAsync(OpenApiOperation operation, OpenApiOperationTransformerContext context) Task
+    }
+
+    DatabaseMigrator --> DatabaseMigrationTarget : one per module DbContext, in order
+    ProductionSettingsValidator ..> ProductionSettings : outside Development
+    RateLimitingExtensions ..> FixedWindowLimit : RateLimits section
+    RateLimitingExtensions ..> RateLimitingMetrics : 429 counted
+    RateLimitingExtensions ..> ProblemDetailsDefaults : too_many_requests
 
 ```
 
