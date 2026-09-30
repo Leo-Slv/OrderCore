@@ -18,7 +18,7 @@ namespace OrderCore.ArchitectureTests;
 /// </summary>
 public sealed class ModuleBoundaryTests
 {
-    private static readonly string[] Modules = { "Orders", "Customers", "Catalog", "Inventory", "Payments", "AuditLogs", "Identity", "Messaging" };
+    private static readonly string[] Modules = { "Orders", "Customers", "Catalog", "Inventory", "Payments", "AuditLogs", "Identity", "Messaging", "Notifications" };
 
     private static System.Reflection.Assembly ApiAssembly => typeof(Program).Assembly;
 

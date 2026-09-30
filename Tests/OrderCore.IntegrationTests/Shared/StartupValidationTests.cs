@@ -83,8 +83,13 @@ public sealed class StartupValidationTests : IClassFixture<OrderCoreApiFactory>
     {
         using var factory = _factory.WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
 
-        var messages = Messages(Starting(factory).Should().Throw<Exception>().Which);
+        // Two validators fail (the production settings and the e-mail
+        // settings), so the host throws them together.
+        var exception = Record.Exception(Starting(factory));
+        exception.Should().NotBeNull();
+        var messages = Messages(exception!);
 
-        messages.Should().Contain("ConnectionStrings:OrderCoreDb").And.Contain("Cors:AllowedOrigins").And.Contain("AllowedHosts");
+        messages.Should().Contain("ConnectionStrings:OrderCoreDb").And.Contain("Cors:AllowedOrigins").And.Contain("AllowedHosts")
+            .And.Contain("Notifications:From").And.Contain("Notifications:Resend:ApiKey");
     }
 }

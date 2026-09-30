@@ -16,7 +16,7 @@ namespace OrderCore.ArchitectureTests;
 /// </summary>
 public sealed class IntegrationEventTests
 {
-    private static readonly string[] Modules = { "Orders", "Customers", "Catalog", "Inventory", "Payments", "AuditLogs", "Identity", "Messaging" };
+    private static readonly string[] Modules = { "Orders", "Customers", "Catalog", "Inventory", "Payments", "AuditLogs", "Identity", "Messaging", "Notifications" };
 
     private static readonly string[] Layers = { "Domain", "Application", "Infrastructure", "Presentation" };
 

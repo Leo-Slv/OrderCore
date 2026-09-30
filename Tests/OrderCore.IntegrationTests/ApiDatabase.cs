@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -16,6 +17,7 @@ using OrderCore.Api.Modules.Inventory.Domain.Entities;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence;
+using OrderCore.Api.Modules.Notifications.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
@@ -59,6 +61,8 @@ public sealed class ApiDatabase : IAsyncLifetime
         await MigrateAsync<IdentityDbContext>(options => new(options));
         await MigrateAsync<AuditLogsDbContext>(options => new(options));
         await MigrateAsync<MessagingDbContext>(options => new(options));
+        await MigrateAsync<NotificationsDbContext>(options => new(options));
+        await TestMailpit.StartAsync();
     }
 
     public async Task DisposeAsync() => await _postgres.DisposeAsync();
@@ -73,6 +77,10 @@ public sealed class ApiDatabase : IAsyncLifetime
             builder.UseSetting("ConnectionStrings:OrderCoreDb", ConnectionString);
             builder.UseSetting("IdentitySeed:AdminEmail", AdminEmail);
             builder.UseSetting("IdentitySeed:AdminPassword", AdminPassword);
+
+            // E-mail goes to the shared Mailpit, never to a developer's own.
+            builder.UseSetting("Notifications:Smtp:Host", TestMailpit.Host);
+            builder.UseSetting("Notifications:Smtp:Port", TestMailpit.Port.ToString(CultureInfo.InvariantCulture));
             builder.ConfigureTestServices(services =>
                 services.Configure<FakePaymentProviderOptions>(options => options.Mode = paymentMode));
         });

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Identity.Domain.Entities;
 using OrderCore.Api.Modules.Identity.Infrastructure.Security;
 using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
+using OrderCore.Api.Modules.Notifications.Infrastructure.Jobs;
 
 namespace OrderCore.IntegrationTests;
 
@@ -56,6 +57,17 @@ public class OrderCoreApiFactory : WebApplicationFactory<Program>
             options.RelayPollInterval = TimeSpan.FromMilliseconds(100);
             options.PublishTimeout = TimeSpan.FromSeconds(1);
             options.ConnectionRecoveryInterval = TimeSpan.FromSeconds(1);
+        }).Configure<EmailDispatcherOptions>(options =>
+        {
+            // Queued e-mail goes out at once, and a failing one gives up in well under a second.
+            options.Interval = TimeSpan.FromMilliseconds(100);
+            options.RetryDelays =
+            [
+                TimeSpan.FromMilliseconds(50),
+                TimeSpan.FromMilliseconds(50),
+                TimeSpan.FromMilliseconds(50),
+                TimeSpan.FromMilliseconds(50),
+            ];
         }));
     }
 }

@@ -36,6 +36,8 @@ public sealed class EdgeTests : IClassFixture<OrderCoreApiFactory>
             builder.UseSetting("ConnectionStrings:OrderCoreDb", "Host=db.internal;Database=ordercore;Username=ordercore;Password=unused");
             builder.UseSetting("Cors:AllowedOrigins:0", "https://shop.example");
             builder.UseSetting("AllowedHosts", "api.shop.example");
+            builder.UseSetting("Notifications:From", "OrderCore <no-reply@shop.example>");
+            builder.UseSetting("Notifications:Smtp:Host", "smtp.mail.example");
             builder.UseSetting("https_port", "443");
             builder.UseSetting("ForwardedHeaders:KnownProxies:0", TrustedProxy);
             builder.UseSetting("ForwardedHeaders:TrustAllProxies", trustAllProxies.ToString());

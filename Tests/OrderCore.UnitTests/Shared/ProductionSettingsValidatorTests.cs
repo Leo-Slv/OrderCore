@@ -19,6 +19,7 @@ public sealed class ProductionSettingsValidatorTests
         AllowedOrigins = ["https://shop.example"],
         AllowedHosts = "api.shop.example",
         BrokerHost = "rabbitmq.internal",
+        EmailApiConfigured = true,
     };
 
     [Fact]
@@ -32,11 +33,12 @@ public sealed class ProductionSettingsValidatorTests
     {
         var failures = FailuresOf(new ProductionSettings { AllowedOrigins = [""] }).ToList();
 
-        failures.Should().HaveCount(4);
+        failures.Should().HaveCount(5);
         failures.Should().Contain(f => f.StartsWith("ConnectionStrings:OrderCoreDb"))
             .And.Contain(f => f.StartsWith("Cors:AllowedOrigins"))
             .And.Contain(f => f.StartsWith("AllowedHosts"))
-            .And.Contain(f => f.StartsWith("RabbitMq:Host"));
+            .And.Contain(f => f.StartsWith("RabbitMq:Host"))
+            .And.Contain(f => f.StartsWith("Notifications:Resend:ApiKey"));
     }
 
     [Fact]
@@ -46,13 +48,26 @@ public sealed class ProductionSettingsValidatorTests
         local.ConnectionString = "Host=localhost;Port=5433;Database=ordercore;Username=ordercore;Password=ordercore";
         local.AllowedOrigins = ["https://shop.example", "http://localhost:3000"];
         local.AllowedHosts = "*";
+        local.EmailApiConfigured = false;
+        local.SmtpHost = "localhost";
 
         var failures = FailuresOf(local).ToList();
 
-        failures.Should().HaveCount(3);
+        failures.Should().HaveCount(4);
         failures.Should().Contain(f => f.Contains("localhost (the development database)"))
             .And.Contain(f => f.Contains("localhost origin"))
-            .And.Contain(f => f.Contains("not *"));
+            .And.Contain(f => f.Contains("not *"))
+            .And.Contain(f => f.Contains("real SMTP server"));
         failures.Should().NotContain(f => f.Contains("Password=ordercore"), "the connection string is never echoed");
+    }
+
+    [Fact]
+    public void A_real_smtp_server_can_stand_in_for_resend()
+    {
+        var smtp = Valid();
+        smtp.EmailApiConfigured = false;
+        smtp.SmtpHost = "smtp.mail.example";
+
+        FailuresOf(smtp).Should().BeEmpty();
     }
 }

@@ -6,6 +6,7 @@ using OrderCore.Api.Modules.Customers.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence;
+using OrderCore.Api.Modules.Notifications.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Infrastructure.Persistence;
 using Testcontainers.PostgreSql;
@@ -17,7 +18,7 @@ namespace OrderCore.IntegrationTests.Shared;
 /// <c>dotnet OrderCore.Api.dll migrate</c> — the deployment step that applies
 /// every module's migrations (Docs/operations/deployment.md) — run through
 /// the API's real entry point against an empty database: it migrates all
-/// eight contexts with nothing but a connection string (no JWT key, no
+/// nine contexts with nothing but a connection string (no JWT key, no
 /// broker), running it again changes nothing, and a database it can't reach
 /// is a non-zero exit.
 /// </summary>
@@ -50,6 +51,7 @@ public sealed class MigrateCommandTests : IAsyncLifetime
             new PaymentsDbContext(Options<PaymentsDbContext>()),
             new AuditLogsDbContext(Options<AuditLogsDbContext>()),
             new MessagingDbContext(Options<MessagingDbContext>()),
+            new NotificationsDbContext(Options<NotificationsDbContext>()),
         ];
 
         var pending = new List<string>();
