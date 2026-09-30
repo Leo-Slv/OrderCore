@@ -20,6 +20,14 @@ internal sealed class FakeInventoryReservationRepository : IInventoryReservation
         return Task.FromResult<(IReadOnlyList<InventoryReservation>, int)>((matching.Skip((page - 1) * pageSize).Take(pageSize).ToList(), matching.Count));
     }
 
+    public Task<IReadOnlyList<Guid>> ListExpiredActiveAsync(DateTimeOffset now, int limit, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Guid>>(_reservations.Values
+            .Where(r => r.Status == Api.Modules.Inventory.Domain.Enums.ReservationStatus.Reserved && r.ExpiresAt < now)
+            .OrderBy(r => r.ExpiresAt)
+            .Take(limit)
+            .Select(r => r.Id)
+            .ToList());
+
     public Task AddAsync(InventoryReservation reservation, CancellationToken cancellationToken)
     {
         _reservations[reservation.Id] = reservation;
