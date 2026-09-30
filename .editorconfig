@@ -1,0 +1,6 @@
+root = true
+
+# Line endings only: `dotnet format --verify-no-changes` runs locally and in
+# CI, and without this it compared against each machine's own newline.
+[*]
+end_of_line = lf

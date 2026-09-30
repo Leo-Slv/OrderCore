@@ -1,0 +1,15 @@
+# Text files are LF in the repository and in every working copy, on Windows
+# too, so `dotnet format` (and the CI runner, on Linux) see the same bytes
+# regardless of core.autocrlf.
+* text=auto eol=lf
+
+# Binaries, never converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.zip binary
