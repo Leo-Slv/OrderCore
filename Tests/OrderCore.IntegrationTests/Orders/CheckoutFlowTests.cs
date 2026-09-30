@@ -264,6 +264,7 @@ public sealed class CheckoutFlowTests : IAsyncLifetime
         services.AddSingleton(TimeProvider.System);
         services.AddLogging();
         services.AddSingleton<IInventoryService>(inventoryService);
+        services.AddSingleton<IPaymentGateway>(PaymentGateway(new PaymentsDbContext(PaymentsOptions())));
         services.AddSingleton<IAuditLogService>(NoOpAuditLog());
         services.AddSingleton(TestMetrics.Orders);
         services.AddSingleton<ConfirmOrderUseCase>();

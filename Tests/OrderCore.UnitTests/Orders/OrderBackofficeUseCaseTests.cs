@@ -232,7 +232,7 @@ public sealed class OrderBackofficeUseCaseTests
     {
         var order = await StoredOrderAsync(OrderStatus.PendingPayment);
         await Cancel().ExecuteAsync(new CancelOrderCommand(order.Id, "changed mind"), CancellationToken.None);
-        var confirm = new ConfirmOrderUseCase(_orders, _inventory, _auditLog, TestMetrics.Orders, TimeProvider.System, NullLogger<ConfirmOrderUseCase>.Instance);
+        var confirm = new ConfirmOrderUseCase(_orders, _inventory, _payments, _auditLog, TestMetrics.Orders, TimeProvider.System, NullLogger<ConfirmOrderUseCase>.Instance);
         var fail = new MarkOrderPaymentFailedUseCase(
             _orders, _inventory, _auditLog, TestMetrics.Orders, TimeProvider.System, NullLogger<MarkOrderPaymentFailedUseCase>.Instance);
 

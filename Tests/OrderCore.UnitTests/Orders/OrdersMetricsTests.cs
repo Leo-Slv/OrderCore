@@ -92,7 +92,7 @@ public sealed class OrdersMetricsTests : IDisposable
         var productId = ProductWithStock(5, price: 40m);
         var orderId = (await Checkout().ExecuteAsync(Command(productId, quantity: 2), CancellationToken.None)).OrderId;
         var confirm = new ConfirmOrderUseCase(
-            _orders, _inventory, _auditLog, _metrics, TimeProvider.System, NullLogger<ConfirmOrderUseCase>.Instance);
+            _orders, _inventory, _payments, _auditLog, _metrics, TimeProvider.System, NullLogger<ConfirmOrderUseCase>.Instance);
 
         await confirm.ExecuteAsync(orderId, CancellationToken.None);
         await confirm.ExecuteAsync(orderId, CancellationToken.None);

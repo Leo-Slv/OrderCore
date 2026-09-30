@@ -39,6 +39,14 @@ internal sealed class FakeOrderRepository : IOrderRepository
     public Task<Order?> FindByCheckoutIdempotencyKeyAsync(Guid customerId, string idempotencyKey, CancellationToken cancellationToken) =>
         Task.FromResult(_orders.Values.FirstOrDefault(o => o.CustomerId == customerId && o.CheckoutIdempotencyKey == idempotencyKey));
 
+    public Task<IReadOnlyList<Guid>> ListPendingPaymentRequestedBeforeAsync(DateTimeOffset cutoff, int limit, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Guid>>(_orders.Values
+            .Where(o => o.Status == OrderStatus.PendingPayment && o.PaymentRequestedAt < cutoff)
+            .OrderBy(o => o.PaymentRequestedAt)
+            .Take(limit)
+            .Select(o => o.Id)
+            .ToList());
+
     public Task AddAsync(Order order, CancellationToken cancellationToken)
     {
         _pending.Add(order);
