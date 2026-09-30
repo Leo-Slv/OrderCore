@@ -5,7 +5,7 @@ networks:
 services:
   # Ambiente local: OrderCore + PostgreSQL + RabbitMQ (mensageria
   # assíncrona entre módulos, Docs/specs/events/async-messaging.md) +
-  # Grafana LGTM (observabilidade).
+  # Grafana LGTM (observabilidade) + Mailpit (e-mail).
   # Redis entra no compose somente quando um módulo passar a depender
   # dele de fato, não antecipadamente.
   postgres:
@@ -80,6 +80,17 @@ services:
     networks:
       - ordercore-net
 
+  # Catches every e-mail the API sends locally (nothing reaches a real
+  # inbox): web inbox at http://localhost:8025, SMTP on 1025.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: ordercore-mailpit
+    ports:
+      - "8025:8025"   # web inbox
+      - "1025:1025"   # SMTP
+    networks:
+      - ordercore-net
+
   api:
     build:
       context: .
@@ -91,6 +102,8 @@ services:
       rabbitmq:
         condition: service_healthy
       otel-lgtm:
+        condition: service_started
+      mailpit:
         condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -108,6 +121,9 @@ services:
       Payments__Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
       Payments__Stripe__PublishableKey: ${STRIPE_PUBLISHABLE_KEY:-}
       Payments__Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      # E-mail goes to Mailpit (Docs/specs/identity/password-recovery.md).
+      Notifications__Smtp__Host: mailpit
+      Notifications__Smtp__Port: "1025"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       # Metrics every 10 s (the SDK default is 60 s), so local dashboards react quickly.
       OTEL_METRIC_EXPORT_INTERVAL: "10000"

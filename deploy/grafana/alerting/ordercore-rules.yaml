@@ -202,3 +202,30 @@ groups:
               conditions:
                 - evaluator: { type: gt, params: [10] }
               refId: C
+
+      - uid: ordercore-emails-failing
+        title: E-mails failing
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: "E-mails given up on in the last 30 minutes: password resets and confirmations aren't reaching people (Resend key, sender domain or SMTP)."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(ordercore_notifications_emails_total{ordercore_outcome="failed"}[30m]))
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+              refId: C
