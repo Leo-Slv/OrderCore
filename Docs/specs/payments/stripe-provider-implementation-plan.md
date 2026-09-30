@@ -192,3 +192,64 @@ payment already in sync is left untouched.
 6. `feat(payments): reconciliation with the provider`
 7. `chore: Stripe CLI in docker compose`
 8. `docs: ...`
+
+## Execution notes (what differed from this plan)
+
+- **Stage 1.** `IPaymentProvider.Info` (`PaymentProviderInfo`: name,
+  supported methods, publishable key) carries the capabilities; the
+  "needs the buyer" answer, `CancelAsync` and `GetStateAsync` came in the
+  stages that use them (3 and 6). Orders checks availability through
+  `PaymentMethodAvailability.Ensure`, in both `CheckoutUseCase` (after the
+  replay check, so a replayed checkout isn't refused) and
+  `RequestOrderPaymentUseCase`; `CreatePaymentUseCase` checks it too.
+- **Stage 2.** `Stripe.net` 52.4.2 over a named `HttpClient` (`stripe`,
+  from `IHttpClientFactory`), which also lets the tests record the SDK's
+  requests before forwarding them to `stripe-mock`. `stripe-mock` is
+  stateless and never declines, so the refusal/failure mapping is tested
+  with canned Stripe error responses. A card error or an invalid request
+  is a refusal; anything else is thrown.
+- **Stage 3.** There is no separate `CancelAsync`: for Stripe, releasing an
+  authorization and cancelling a payment still waiting for the buyer are
+  the same call, so `VoidAsync` does both and `Payment.Void` accepts a
+  payment waiting for the buyer. Cancelling an order in that state ends the
+  payment `Voided` (decided with the user): nothing was charged or held,
+  and `PaymentVoided` has no consumer that could race the cancellation.
+  `IPaymentGateway.RequestPaymentAsync` returns the next action (its old
+  payment id return was unused) and `CheckoutUseCase` returns a
+  `CheckoutResult`. A replay asks the provider for the client secret again
+  (`GetClientSecretAsync`), since it is never stored.
+- **Stage 4.** The provider-neutral `PaymentProviderUpdate` +
+  `ApplyPaymentProviderUpdateUseCase` pair (Application) is what a webhook
+  becomes; the Stripe specifics (signature, event types, the inbox) stay in
+  `StripeWebhookHandler` (Infrastructure), called by
+  `StripeWebhooksController` the way integration-event handlers call use
+  cases. Payments' inbox keys by Guid, so Stripe's event id is mapped to
+  one deterministically (SHA-256). Without a webhook secret the endpoint
+  answers `404 stripe_webhooks_disabled`. A `payment_intent.canceled` for
+  a payment still waiting for the buyer fails it (so Orders ends the
+  order), while one for an authorized payment voids it. A refund Stripe
+  reports failed after OrderCore recorded it completed is only logged.
+- **Stage 5.** The capture deadline comes from Stripe (decided with the
+  user): the webhook handler retrieves the intent with its latest charge
+  (`capture_before`); without Stripe keys, or if that call fails, the
+  payment falls back to seven days (`Payment.DefaultAuthorizationValidity`).
+  The payment window only covers payments waiting for the buyer (decided
+  with the user); ones stuck before the provider answered are left to
+  reconciliation. Orders cancels on `PaymentAuthorizationExpired` through
+  `CancelOrderUseCase` with a new `BySystem` flag (audited and measured as
+  `System`), skipping an order that moved on. `FakeTimeProvider`
+  (`Microsoft.Extensions.TimeProvider.Testing`) was added to the unit
+  tests.
+- **Stage 6.** Reconciliation reuses `ApplyPaymentProviderUpdateUseCase`
+  for everything the provider can say, and `AuthorizePaymentUseCase` (same
+  idempotency key) for a payment the provider never answered for. The job
+  selects `Processing` payments older than 5 minutes and authorizations
+  past their expiry. Refunds and disputes are not reconciled.
+- **Stage 7.** The `stripe-cli` service reads the key with `:-`, not `:?`:
+  compose interpolates every service, profile or not, so a required
+  variable there would break `docker compose up` for everyone without
+  Stripe keys. It forwards only the six event types OrderCore acts on.
+- **Verification.** Everything above is covered against `stripe-mock`,
+  signed test webhooks and test providers; the end-to-end check against
+  Stripe's test mode (real keys, the Stripe CLI, the test cards) is done
+  locally once the keys are in `.env`.
