@@ -12,15 +12,19 @@ public sealed class ProductionSettings
     public string? AllowedHosts { get; set; }
 
     public string? BrokerHost { get; set; }
+
+    public bool EmailApiConfigured { get; set; }
+
+    public string? SmtpHost { get; set; }
 }
 
 /// <summary>
 /// Outside Development, stops the API at startup when a setting a deployment
 /// must provide is missing or still has its development value
 /// (production-readiness spec, item 5): the database, the storefront origins
-/// allowed by CORS, the host names the API answers for and the broker. Each
-/// failure names the setting; nothing secret is echoed. Development keeps its
-/// local defaults and isn't checked.
+/// allowed by CORS, the host names the API answers for, the broker and a way
+/// to send e-mail. Each failure names the setting; nothing secret is echoed.
+/// Development keeps its local defaults and isn't checked.
 /// </summary>
 public static class ProductionSettingsCheck
 {
@@ -39,6 +43,8 @@ public static class ProductionSettingsCheck
                 settings.AllowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
                 settings.AllowedHosts = configuration["AllowedHosts"];
                 settings.BrokerHost = configuration["RabbitMq:Host"];
+                settings.EmailApiConfigured = !string.IsNullOrWhiteSpace(configuration["Notifications:Resend:ApiKey"]);
+                settings.SmtpHost = configuration["Notifications:Smtp:Host"];
             })
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<ProductionSettings>, ProductionSettingsValidator>();
@@ -79,6 +85,12 @@ public sealed class ProductionSettingsValidator : IValidateOptions<ProductionSet
         if (string.IsNullOrWhiteSpace(settings.BrokerHost))
         {
             failures.Add("RabbitMq:Host is required.");
+        }
+
+        // Mailpit (localhost) only catches e-mail; a deployment must really send it.
+        if (!settings.EmailApiConfigured && (string.IsNullOrWhiteSpace(settings.SmtpHost) || PointsToLocalhost(settings.SmtpHost)))
+        {
+            failures.Add("Notifications:Resend:ApiKey is required (or Notifications:Smtp:Host naming a real SMTP server, not localhost).");
         }
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);

@@ -1,0 +1,11 @@
+Subject: Confirme seu e-mail
+
+Olá, {{name}}.
+
+Falta pouco: confirme que este endereço de e-mail é seu para poder finalizar compras. Abra o link abaixo:
+
+{{link}}
+
+O link vale por {{validFor}}.
+
+Se você não criou uma conta, ignore este e-mail.

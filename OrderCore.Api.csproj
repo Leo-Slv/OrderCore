@@ -69,6 +69,17 @@
     <!-- Payments: Stripe's official SDK (Docs/specs/payments/stripe-provider.md).
          Used only when Payments:Stripe:SecretKey is configured. -->
     <PackageReference Include="Stripe.net" Version="52.4.2" />
+    <!-- Notifications: sends through SMTP (Mailpit locally) when Resend
+         isn't configured (Docs/specs/identity/password-recovery.md). -->
+    <PackageReference Include="MailKit" Version="4.18.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The e-mail templates (pt-BR) ship inside the assembly. -->
+    <EmbeddedResource Include="Modules\Notifications\Infrastructure\Templates\*.html" LogicalName="EmailTemplates/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Modules\Notifications\Infrastructure\Templates\*.txt" LogicalName="EmailTemplates/%(Filename)%(Extension)" />
+    <Content Remove="Modules\Notifications\Infrastructure\Templates\*" />
+    <None Remove="Modules\Notifications\Infrastructure\Templates\*" />
   </ItemGroup>
 
 </Project>

@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Customers;
 using OrderCore.Api.Modules.Identity;
 using OrderCore.Api.Modules.Inventory;
 using OrderCore.Api.Modules.Messaging;
+using OrderCore.Api.Modules.Notifications;
 using OrderCore.Api.Modules.Orders;
 using OrderCore.Api.Modules.Orders.Presentation.Realtime;
 using OrderCore.Api.Modules.Payments;
@@ -49,6 +50,7 @@ builder.Services.AddPaymentsModule(builder.Configuration);
 builder.Services.AddAuditLogsModule(builder.Configuration);
 builder.Services.AddIdentityModule(builder.Configuration);
 builder.Services.AddMessagingModule(builder.Configuration);
+builder.Services.AddNotificationsModule(builder.Configuration);
 
 // Every controller declares only its own segment (e.g. [Route("orders")])
 // — this convention prepends "api" once, instead of every module's
