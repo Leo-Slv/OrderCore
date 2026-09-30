@@ -75,6 +75,23 @@ a way that would misbehave.
 | `RateLimits__<Policy>__PermitLimit` / `__Window` | no | — | only to change the defaults (`SignIn`, `SignUp`, `Refresh`, `Checkout`, `StripeWebhook`) |
 | `Identity__Lockout__MaxFailedAttempts` / `__Duration` | no | — | only to change 5 / 15 minutes |
 
+## Observability in production
+
+- **Traces are sampled at the collector, not in the API.** The API exports
+  every span (`OTEL_EXPORTER_OTLP_ENDPOINT`); point it at an OpenTelemetry
+  Collector (contrib distribution) using the `tail_sampling` processor of
+  `deploy/otel/otelcol-config.yaml`: every trace with an error or slower
+  than 1 s is kept, plus `TRACE_SAMPLING_PERCENTAGE` (default 10) percent
+  of the rest. Metrics and logs are not sampled.
+- **Alert rules** live in `deploy/grafana/alerting/ordercore-rules.yaml`
+  (Grafana's provisioning format, Prometheus datasource `prometheus`):
+  API not reporting, events stuck in an outbox, failed messages, card
+  declines above normal, payment provider errors, many rate-limited
+  requests, many accounts locked. Where they are sent is a **contact point
+  configured in that Grafana** (e-mail, Slack, a webhook) — nothing about
+  it is committed; without one, alerts show in Grafana's alerting page.
+- Dashboards: `deploy/grafana/dashboards`, provisioned the same way.
+
 ## Database users
 
 `migrate` changes the schema, so it needs a user that can create and alter
