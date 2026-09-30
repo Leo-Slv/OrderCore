@@ -342,8 +342,8 @@ classDiagram
 
 | Módulo | Publica (outbox `{módulo}_outbox_messages`) | Consome (fila → handler) |
 |---|---|---|
-| Payments | `payments.payment-requested`, `-authorized`, `-failed`, `-captured`, `-voided`, `-refunded` | — |
-| Orders | `orders.order-created`, `-payment-requested`, `-confirmed`, `-processing-started`, `-shipped`, `-delivered`, `-payment-failed`, `-cancelled` (traduzidos dos domain events do `Order` por `EfOrderRepository`) | `orders.payment-outcomes` → `PaymentAuthorized`/`PaymentFailed` handlers; `orders.timeline` → `OrderTimelineProjector` |
+| Payments | `payments.payment-requested`, `-authorized`, `-failed`, `-captured`, `-voided`, `-refunded`, `-authorization-expired` | — (os webhooks do Stripe não passam pelo broker: são deduplicados no inbox do Payments, consumidor `stripe-webhooks`) |
+| Orders | `orders.order-created`, `-payment-requested`, `-confirmed`, `-processing-started`, `-shipped`, `-delivered`, `-payment-failed`, `-cancelled` (traduzidos dos domain events do `Order` por `EfOrderRepository`) | `orders.payment-outcomes` → `PaymentAuthorized`/`PaymentFailed`/`PaymentAuthorizationExpired` handlers; `orders.timeline` → `OrderTimelineProjector` |
 | Inventory | `inventory.stock-reserved`, `-released`, `-consumed`, `-returned`, `inventory.stock-alert` (traduzidos por `InventoryUnitOfWork`) | — |
 
 Os alertas de estoque e o `payments.payment-requested` ainda não têm consumidor; o broker descarta um evento sem fila ligada, que é o esperado. Detalhes de cada lado em [04-inventory.md](04-inventory.md), [05-orders.md](05-orders.md) e [06-payments.md](06-payments.md).

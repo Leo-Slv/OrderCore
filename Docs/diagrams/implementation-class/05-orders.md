@@ -56,6 +56,15 @@ Adicionado pelo rastreamento em tempo real (`Docs/specs/tracking/realtime-order-
 - **`OrderTrackingMetrics`** (meter `OrderCore.Tracking`): conexões abertas por público e atualizações enviadas por status.
 
 
+Adicionado pelo Stripe como provedor de pagamento (`Docs/specs/payments/stripe-provider.md`; o lado do Payments em [06-payments.md](06-payments.md)):
+
+- **Formas disponíveis.** `IPaymentGateway.GetAvailableMethods()` diz o que o provedor configurado aceita; `PaymentMethodAvailability.Ensure` (usado por `CheckoutUseCase` e `RequestOrderPaymentUseCase`, antes de qualquer efeito) recusa as outras com `400 payment_method_unavailable` — Pix com o Stripe.
+- **Etapa de confirmação no checkout.** `IPaymentGateway.RequestPaymentAsync` devolve a `OrderPaymentNextAction?` (antes, o id do pagamento, que ninguém usava) e ganhou `GetPaymentNextActionAsync`. `CheckoutUseCase` devolve um `CheckoutResult` (pedido + próxima ação); a resposta do checkout leva `payment.nextAction = { type: "confirm_card", clientSecret }` com o Stripe (nula com o fake). Repetir o checkout com a mesma chave devolve a etapa de novo, pedida ao provedor — o client secret nunca é gravado. O pedido fica `PendingPayment` até o webhook.
+- **Autorizações que expiram.** `OrderPaymentSummary`/`OrderPaymentDetails` ganharam `AuthorizationExpiresAt`; `AuthorizationExpiry.IsExpiringSoon` (autorizado e vencendo em até dois dias) marca `AuthorizationExpiringSoon` na lista e no detalhe do admin, e o painel conta `ExpiringAuthorizations` (`IPaymentGateway.CountAuthorizationsExpiringBeforeAsync`). `ListOrdersUseCase`, `GetAdminOrderDetailsUseCase` e `GetDashboardUseCase` passaram a receber `TimeProvider`/`IPaymentGateway` para isso.
+- **Autorização expirada cancela o pedido.** `PaymentAuthorizationExpiredIntegrationEventHandler` (fila `orders.payment-outcomes`) → `CancelOrderOnExpiredAuthorizationUseCase`: cancela pelo `CancelOrderUseCase` em nome do sistema (`CancelOrderCommand.BySystem`, motivo `authorization_expired`, auditoria e métrica com `System`), o que devolve o estoque; o acerto encontra o pagamento já anulado. Um pedido já enviado, entregue ou cancelado é ignorado com log. A timeline arquiva o evento.
+- **Pagamento abandonado.** Quando o comprador não confirma o cartão em 30 minutos, o Payments publica `PaymentFailed` (`payment_window_expired`) e o caminho que já existia leva o pedido a `PaymentFailed` e libera o estoque — nada novo no Orders.
+
+
 ```mermaid
 
 classDiagram
@@ -177,6 +186,10 @@ classDiagram
     }
 
     class PaymentCaptured {
+        <<external>>
+    }
+
+    class PaymentAuthorizationExpired {
         <<external>>
     }
 
@@ -374,7 +387,10 @@ classDiagram
 
     class IPaymentGateway {
         <<interface>>
-        +RequestPaymentAsync(Guid orderId, decimal amount, string currency, PaymentMethodChoice method, string idempotencyKey) Task~Guid~
+        +GetAvailableMethods() IReadOnlyCollection~PaymentMethodChoice~
+        +RequestPaymentAsync(Guid orderId, decimal amount, string currency, PaymentMethodChoice method, string idempotencyKey) Task~OrderPaymentNextAction?~
+        +GetPaymentNextActionAsync(Guid orderId) Task~OrderPaymentNextAction?~
+        +CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff) Task~int~
         +GetPaymentSummaryAsync(Guid orderId) Task~OrderPaymentSummary?~
         +GetPaymentSummariesAsync(IReadOnlyCollection~Guid~ orderIds) Task~IReadOnlyDictionary~Guid, OrderPaymentSummary~~
         +GetPaymentDetailsAsync(Guid orderId) Task~OrderPaymentDetails?~
@@ -417,6 +433,17 @@ classDiagram
         +DateTimeOffset? CapturedAt
         +DateTimeOffset? VoidedAt
         +IReadOnlyList~OrderRefundSummary~ Refunds
+        +DateTimeOffset? AuthorizationExpiresAt
+    }
+
+    class OrderPaymentNextAction {
+        +string Type
+        +string ClientSecret
+    }
+
+    class CheckoutResult {
+        +Guid OrderId
+        +OrderPaymentNextAction? PaymentNextAction
     }
 
     class OrderRefundSummary {
@@ -457,6 +484,7 @@ classDiagram
         +OrderSummaryOutput Order
         +OrderCustomerSnapshot? Customer
         +string? PaymentStatus
+        +bool AuthorizationExpiringSoon
     }
 
     class AdminOrderDetailsOutput {
@@ -464,6 +492,7 @@ classDiagram
         +OrderCustomerSnapshot? Customer
         +OrderPaymentDetails? Payment
         +IReadOnlyList~OrderReservationSummary~ Reservations
+        +bool AuthorizationExpiringSoon
     }
 
     class DashboardOutput {
@@ -474,6 +503,7 @@ classDiagram
         +int NewCustomers
         +StockAlertCounts Stock
         +IReadOnlyList~AdminOrderSummaryOutput~ RecentOrders
+        +int ExpiringAuthorizations
     }
 
     class IOrderStatusHistoryReader {
@@ -515,6 +545,7 @@ classDiagram
         +Guid OrderId
         +string Reason
         +Guid? RequestingCustomerId
+        +bool BySystem
     }
 
     class CatalogProductSnapshot {
@@ -539,6 +570,7 @@ classDiagram
         +string Status
         +PaymentMethodChoice Method
         +string? FailureReason
+        +DateTimeOffset? AuthorizationExpiresAt
     }
 
     class OrderDetailsOutput {
@@ -640,7 +672,25 @@ classDiagram
         -IAuditLogService auditLog
         -OrdersMetrics metrics
         -TimeProvider timeProvider
-        +ExecuteAsync(CheckoutCommand command) Task~Guid~
+        +ExecuteAsync(CheckoutCommand command) Task~CheckoutResult~
+    }
+
+    class PaymentMethodAvailability {
+        <<static>>
+        +Ensure(IPaymentGateway paymentGateway, PaymentMethodChoice method)$ void
+    }
+
+    class AuthorizationExpiry {
+        <<static>>
+        +TimeSpan WarningPeriod$
+        +IsExpiringSoon(string? paymentStatus, DateTimeOffset? expiresAt, DateTimeOffset now)$ bool
+    }
+
+    class CancelOrderOnExpiredAuthorizationUseCase {
+        -IOrderRepository orderRepository
+        -CancelOrderUseCase cancelOrder
+        +string Reason$
+        +ExecuteAsync(Guid orderId) Task
     }
 
     class QuoteCartUseCase {
@@ -725,6 +775,7 @@ classDiagram
         -IOrderRepository orderRepository
         -ICustomerDirectory customerDirectory
         -IPaymentGateway paymentGateway
+        -TimeProvider timeProvider
         +ExecuteAsync(ListOrdersFilter filter) Task~PagedResult~AdminOrderSummaryOutput~~
     }
 
@@ -733,6 +784,7 @@ classDiagram
         -ICustomerDirectory customerDirectory
         -IPaymentGateway paymentGateway
         -IInventoryService inventoryService
+        -TimeProvider timeProvider
         +ExecuteAsync(Guid orderId) Task~AdminOrderDetailsOutput~
     }
 
@@ -741,6 +793,7 @@ classDiagram
         -ICustomerDirectory customerDirectory
         -IInventoryService inventoryService
         -ListOrdersUseCase listOrders
+        -IPaymentGateway paymentGateway
         +ExecuteAsync(DateTimeOffset? from, DateTimeOffset? to) Task~DashboardOutput~
     }
 
@@ -874,7 +927,13 @@ classDiagram
         -GetPaymentsByOrderIdsUseCase getPaymentsByOrderIds
         -CapturePaymentUseCase capturePayment
         -SettlePaymentForCancellationUseCase settlePayment
-        +RequestPaymentAsync(Guid orderId, decimal amount, string currency, PaymentMethodChoice method, string idempotencyKey) Task~Guid~
+        -GetAvailablePaymentMethodsUseCase getAvailableMethods
+        -GetPaymentNextActionUseCase getNextAction
+        -CountExpiringAuthorizationsUseCase countExpiringAuthorizations
+        +GetAvailableMethods() IReadOnlyCollection~PaymentMethodChoice~
+        +RequestPaymentAsync(Guid orderId, decimal amount, string currency, PaymentMethodChoice method, string idempotencyKey) Task~OrderPaymentNextAction?~
+        +GetPaymentNextActionAsync(Guid orderId) Task~OrderPaymentNextAction?~
+        +CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff) Task~int~
         +GetPaymentSummaryAsync(Guid orderId) Task~OrderPaymentSummary?~
         +GetPaymentSummariesAsync(IReadOnlyCollection~Guid~ orderIds) Task~IReadOnlyDictionary~Guid, OrderPaymentSummary~~
         +GetPaymentDetailsAsync(Guid orderId) Task~OrderPaymentDetails?~
@@ -984,6 +1043,11 @@ classDiagram
         +HandleAsync(PaymentFailed integrationEvent) Task
     }
 
+    class PaymentAuthorizationExpiredIntegrationEventHandler {
+        -CancelOrderOnExpiredAuthorizationUseCase cancelOrder
+        +HandleAsync(PaymentAuthorizationExpired integrationEvent) Task
+    }
+
 
     %% OrderCore.Api.Modules.Orders.Presentation
     class OrdersController {
@@ -1048,6 +1112,7 @@ classDiagram
         +decimal TotalAmount
         +OrderCustomerResponse? Customer
         +string? PaymentStatus
+        +bool AuthorizationExpiringSoon
     }
 
     class AdminOrderDetailsResponse {
@@ -1065,6 +1130,7 @@ classDiagram
         +IReadOnlyDictionary~string, decimal~ RevenueByCurrency
         +int NewCustomers
         +DashboardStockResponse Stock
+        +int ExpiringAuthorizations
         +IReadOnlyList~AdminOrderSummaryResponse~ RecentOrders
     }
 
@@ -1151,6 +1217,30 @@ classDiagram
         +string Status
         +string Method
         +string? FailureReason
+        +OrderPaymentNextActionResponse? NextAction
+    }
+
+    class OrderPaymentNextActionResponse {
+        +string Type
+        +string ClientSecret
+    }
+
+    class OrderPaymentDetailsResponse {
+        +Guid PaymentId
+        +string Status
+        +string Method
+        +decimal Amount
+        +string Currency
+        +string Provider
+        +string? ProviderReference
+        +string? FailureReason
+        +DateTimeOffset CreatedAt
+        +DateTimeOffset? AuthorizedAt
+        +DateTimeOffset? CapturedAt
+        +DateTimeOffset? VoidedAt
+        +DateTimeOffset? AuthorizationExpiresAt
+        +bool AuthorizationExpiringSoon
+        +IReadOnlyList~OrderRefundResponse~ Refunds
     }
 
     class OrderResponse {
@@ -1214,7 +1304,7 @@ classDiagram
     class OrderPresenter {
         +ToCommand(CheckoutRequest request, Guid customerId, string idempotencyKey) CheckoutCommand
         +ToLines(QuoteCartRequest request) IReadOnlyList~QuoteCartLine~
-        +ToResponse(OrderDetailsOutput details) OrderResponse
+        +ToResponse(OrderDetailsOutput details, OrderPaymentNextAction? paymentNextAction) OrderResponse
         +ToResponse(Order order) OrderResponse
         +ToResponse(PagedResult~OrderSummaryOutput~ output) PagedResponse~OrderSummaryResponse~
         +ToResponse(IReadOnlyList~OrderStatusHistoryEntry~ history) IReadOnlyList~OrderStatusHistoryEntryResponse~
@@ -1350,6 +1440,18 @@ classDiagram
     OrderStatusHistoryProjector --> OrdersDbContext
     PaymentAuthorizedIntegrationEventHandler --> ConfirmOrderUseCase
     PaymentFailedIntegrationEventHandler --> MarkOrderPaymentFailedUseCase
+    PaymentAuthorizationExpiredIntegrationEventHandler --> CancelOrderOnExpiredAuthorizationUseCase
+    CancelOrderOnExpiredAuthorizationUseCase --> CancelOrderUseCase : as the system
+    CancelOrderOnExpiredAuthorizationUseCase --> IOrderRepository
+    CheckoutUseCase ..> CheckoutResult
+    CheckoutUseCase --> PaymentMethodAvailability
+    PaymentMethodAvailability --> IPaymentGateway : GetAvailableMethods
+    IPaymentGateway ..> OrderPaymentNextAction
+    ListOrdersUseCase --> AuthorizationExpiry
+    GetAdminOrderDetailsUseCase --> AuthorizationExpiry
+    GetDashboardUseCase --> IPaymentGateway : expiring authorizations
+    OrderPaymentResponse --> OrderPaymentNextActionResponse
+    OrderTimelineProjector ..> PaymentAuthorizationExpired
 
     OrdersDependencyInjection --> CreateOrderHandler : registers
     OrdersDependencyInjection --> IOrderRepository : registers

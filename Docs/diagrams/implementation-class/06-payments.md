@@ -11,14 +11,14 @@ Diferenças entre este diagrama e o código, todas documentadas nos comentários
 - `Payment.Fail(string reason)` não recebe `now` (ao contrário de `Authorize`/`Capture`) — não existe um campo de timestamp para "quando falhou" no diagrama nem no documento de modelagem. `Refund.Complete`/`Fail`, por sua vez, recebem `now` (o diagrama original não mostrava o parâmetro), já que `ProcessedAt` precisa de um valor.
 - `RequestRefundUseCase.ExecuteAsync` retorna `Task<Refund>`, não `Task` como no diagrama — `PaymentsController.RequestRefundAsync` não tem outro jeito de montar um `RefundResponse` depois, já que nenhum outro use case do módulo busca um refund pelo próprio id.
 - `RequestRefundUseCase` só chama `Payment.Refund()` quando a soma dos reembolsos `Completed` atinge o valor total do pagamento — não existe status `PartiallyRefunded` (decisão registrada no spec), então marcar o pagamento inteiro como `Refunded` num primeiro reembolso parcial bloquearia qualquer reembolso seguinte (`RequestRefund` exige `Status == Captured`).
-- `CreatePaymentUseCase` autoriza de forma síncrona, na mesma chamada que cria o pagamento (não fica com `Status = Pending` aguardando um passo separado) — decisão registrada no spec, já que o `FakePaymentProvider` não tem nenhuma etapa assíncrona real a esperar.
-- `PaymentWebhookHandler` não tem rota de controller — fica pronto para quando existir um provedor real de webhook (Stripe), sem uma rota HTTP hoje para receber nada.
+- `CreatePaymentUseCase` pede a autorização na mesma chamada que cria o pagamento (não fica com `Status = Pending` aguardando um passo separado). O fake responde na hora; o Stripe responde "aguardando o comprador" (ver a seção do Stripe abaixo).
+- O antigo `PaymentWebhookHandler` (sem rota, nunca usado) foi removido e substituído pelo `StripeWebhookHandler`.
 - **Forma de pagamento** (MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`, decisão 1): `PaymentMethod` (`Card`/`Pix`) é gravado no `Payment` por `Create` e é diferente de `Provider` (quem processa) — os dois métodos passam hoje pelo mesmo `FakePaymentProvider`. A migração `AddPaymentMethod` preenche `Card` nos pagamentos já existentes. `CreatePaymentRequest.Method` é obrigatório (sem ele, 400, em vez de assumir o primeiro valor do enum); `PaymentResponse` ganhou `Method`, `Currency`, `FailureReason`, `CreatedAt` e `AuthorizedAt`.
 - `RefundPersistenceModel.Id` é configurado com `ValueGeneratedNever()`: o id vem do domínio, e sem isso o EF Core tratava um reembolso novo num pagamento já salvo como linha existente (UPDATE que não afetava nada).
 - **Backoffice** (`Docs/specs/backoffice/backoffice-api.md`, decisões 1 e 2):
   - `Payment.Void(now)` e o status final `Voided` (coluna `VoidedAt`, migration `AddPaymentVoid`): libera uma autorização nunca capturada; `Fail` também recusa um pagamento `Voided`. `IPaymentProvider.VoidAsync` e o modo `CaptureDeclined` do `FakePaymentProvider` (autoriza, recusa capturar; void/refund funcionam).
   - `CapturePaymentUseCase` ficou idempotente (um pagamento já `Captured` volta como está, sem ir ao provider), nunca manda ao provider um pagamento que não está `Authorized`, e ganhou `ExecuteForOrderAsync` — o que o Orders chama ao enviar o pedido.
-  - `SettlePaymentForCancellationUseCase` (chamado pelo Orders ao cancelar): `Authorized` → void, `Captured` → estorno do saldo ainda retido via `RequestRefundUseCase`, `Pending`/`Processing` → `409 payment_in_progress`, o resto → nada. Idempotente. Não existe um `VoidPaymentUseCase` separado: o void só acontece aqui.
+  - `SettlePaymentForCancellationUseCase` (chamado pelo Orders ao cancelar): `Authorized` → void, `Captured` → estorno do saldo ainda retido via `RequestRefundUseCase`, `Processing` aguardando o comprador (Stripe) → cancelado no provedor e `Voided`, `Pending`/`Processing` sem referência do provedor → `409 payment_in_progress`, o resto → nada. Idempotente. Não existe um `VoidPaymentUseCase` separado: o void só acontece aqui.
   - Leitura para o backoffice: `ListPaymentsUseCase` (`GET payments`, filtros por status/forma/período), `GetPaymentByIdUseCase` (`GET payments/{id}`) e `GetPaymentsByOrderIdsUseCase` (a lista de pedidos do admin, via adapter do Orders). `PaymentResponse` ganhou provider, referência, datas de captura/void e os estornos; `RefundResponse`, motivo e datas — só campos a mais.
 
 Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
@@ -26,6 +26,16 @@ Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
 - **`PaymentsMetrics`** (meter `OrderCore.Payments`): autorizações aprovadas/recusadas com a forma de pagamento e o motivo da recusa (o código do provedor, nunca dado de cartão), capturas, anulações e estornos, registrados pelos use cases depois do save.
 - **`MeasuredPaymentProvider`** envolve o provedor configurado (hoje o `FakePaymentProvider`, registrado como tipo concreto) e mede cada chamada por operação e resultado (`succeeded`, `refused`, `error`) — o Stripe ganha isso sem código a mais.
 - Os use cases marcam o span com `payment.id`/`order.id`.
+
+Adicionado pelo Stripe como provedor (`Docs/specs/payments/stripe-provider.md` e o plano de implementação, com as notas de execução):
+
+- **Escolha do provedor e capacidades:** `PaymentsDependencyInjection` registra o `StripePaymentProvider` quando `Payments:Stripe:SecretKey` está configurada e o `FakePaymentProvider` caso contrário, sempre envolvido pelo `MeasuredPaymentProvider`. `IPaymentProvider.Info` (`PaymentProviderInfo`: nome, formas aceitas, chave publicável) substitui qualquer "if Stripe" nos use cases: `CreatePaymentUseCase` recusa uma forma que o provedor não aceita (`400 payment_method_unavailable`, Pix com o Stripe) e grava `Info.Name` como `Provider`. `GET payments/methods` (anônimo, `PaymentMethodsController` → `GetAvailablePaymentMethodsUseCase`) diz o que oferecer.
+- **`StripePaymentProvider`** (SDK `Stripe.net`, `HttpClient` nomeado `stripe`, timeout e retentativas de rede): autorizar cria um PaymentIntent com `capture_method=manual`, só cartão, valor na menor unidade da moeda (`ToMinorUnits`) e os ids do pedido/pagamento nos metadados; captura, void (cancelar o intent) e estorno agem sobre ele. Toda chamada que mexe em dinheiro manda uma chave de idempotência derivada do pagamento (`ordercore-{id}-{operação}`) ou do estorno. Recusa de cartão volta como resultado com o `decline_code`; falha do Stripe é lançada.
+- **Aguardando o comprador:** `PaymentAuthorizationResult` ganhou `ClientSecret`/`RequiresBuyer`/`WaitingForBuyer`. Nesse caso o pagamento fica `Processing` com a referência do provedor (`Payment.AwaitBuyer`, `IsAwaitingBuyer`), nada é publicado e `CreatePaymentResult.NextAction` leva o `PaymentNextAction` (`confirm_card` + client secret). O client secret nunca é gravado: `GetPaymentNextActionUseCase` o pede de novo ao provedor (`GetClientSecretAsync`) quando o checkout é repetido. `Payment.Void` também aceita um pagamento aguardando o comprador (cancelar o pedido cancela o intent).
+- **Webhooks:** `POST payments/webhooks/stripe` (`StripeWebhooksController`, anônimo mas assinado) → `StripeWebhookHandler` (Infrastructure): confere a assinatura com o segredo e a tolerância de horário (`400 invalid_webhook_signature`; `404 stripe_webhooks_disabled` sem segredo), deduplica pelo id do evento no inbox do Payments (`payments_processed_messages`, consumidor `stripe-webhooks`) e traduz o evento num `PaymentProviderUpdate` neutro. `ApplyPaymentProviderUpdateUseCase` é o único caminho de "o provedor disse X": autorizado, recusado (`RecordDecline`: o comprador pode tentar outro cartão), capturado, cancelado (void; com `PaymentAuthorizationExpired` quando a autorização expirou; falha quando ainda aguardava o comprador), estorno liquidado (`SettleRefund`) e disputa aberta (`MarkDisputed`). Uma atualização atrasada, repetida ou fora de ordem é ignorada. Migration `AddStripePaymentFields` (última recusa, disputa, índice por referência, inbox).
+- **Janela de pagamento e expiração:** `ExpirePaymentWindowUseCase`, rodado pelo `PaymentWindowBackgroundService` (`Payments:PaymentWindow`, 30 minutos), cancela no provedor e falha (`payment_window_expired` ou a última recusa) os pagamentos que ainda aguardam o comprador — só esses; os travados sem referência ficam para a reconciliação. `Payment.AuthorizationExpiresAt` guarda o `capture_before` do cartão (pedido ao Stripe no webhook de autorização) ou 7 dias (`DefaultAuthorizationValidity`); `CountExpiringAuthorizationsUseCase` alimenta o painel do Orders. Migration `AddPaymentAuthorizationExpiry`.
+- **Reconciliação:** `ReconcilePaymentUseCase` pergunta ao provedor (`GetStateAsync` → `PaymentProviderState`) e aplica a resposta pelo mesmo `ApplyPaymentProviderUpdateUseCase`; um pagamento sem referência é autorizado de novo com a mesma chave (`AuthorizePaymentUseCase`). `POST payments/{id}/reconcile` (admin) e o `ReconciliationBackgroundService` (`Payments:Reconciliation`, a cada 15 minutos: `Processing` há mais de 5 minutos e autorizações vencidas). Só o status do pagamento é reconciliado, não estornos nem disputas.
+- **Métricas:** `ProviderUpdate` (`ordercore.payments.provider_updates`, por tipo e resultado) e `Reconciled` (`ordercore.payments.reconciliations`, em dia ou corrigido).
 
 
 ```mermaid
@@ -70,10 +80,21 @@ classDiagram
         +DateTimeOffset? AuthorizedAt
         +DateTimeOffset? CapturedAt
         +DateTimeOffset? VoidedAt
+        +DateTimeOffset? AuthorizationExpiresAt
+        +string? LastDeclineReason
+        +DateTimeOffset? LastDeclinedAt
+        +DateTimeOffset? DisputedAt
+        +bool IsAwaitingBuyer
+        +bool IsDisputed
         +IReadOnlyCollection~Refund~ Refunds
+        +TimeSpan DefaultAuthorizationValidity$
         +Create(Guid orderId, decimal amount, string currency, PaymentMethod method, string idempotencyKey, string provider, Guid? customerPaymentMethodId, DateTimeOffset now)$ Payment
         +MarkProcessing() void
-        +Authorize(string providerReference, DateTimeOffset now) void
+        +AwaitBuyer(string providerReference, DateTimeOffset now) void
+        +Authorize(string providerReference, DateTimeOffset now, DateTimeOffset? expiresAt) void
+        +RecordDecline(string reason, DateTimeOffset at) void
+        +MarkDisputed(DateTimeOffset at) bool
+        +SettleRefund(Guid refundId, bool succeeded, string? failureReason, DateTimeOffset now) bool
         +Capture(DateTimeOffset now) void
         +Void(DateTimeOffset now) void
         +Fail(string reason) void
@@ -121,10 +142,34 @@ classDiagram
     %% OrderCore.Api.Modules.Payments.Domain.Repositories
     class IPaymentProvider {
         <<interface>>
+        +PaymentProviderInfo Info
         +AuthorizeAsync(Payment payment) Task~PaymentAuthorizationResult~
         +CaptureAsync(Payment payment) Task~PaymentCaptureResult~
         +RefundAsync(Payment payment) Task~PaymentRefundResult~
         +VoidAsync(Payment payment) Task~PaymentVoidResult~
+        +GetClientSecretAsync(Payment payment) Task~string?~
+        +GetStateAsync(Payment payment) Task~PaymentProviderState~
+    }
+
+    class PaymentProviderInfo {
+        +string Name
+        +IReadOnlyCollection~PaymentMethod~ SupportedMethods
+        +string? PublishableKey
+    }
+
+    class PaymentProviderState {
+        +PaymentProviderStatus Status
+        +string? DeclineReason
+        +DateTimeOffset? AuthorizationExpiresAt
+        +bool AuthorizationExpired
+    }
+
+    class PaymentProviderStatus {
+        <<enumeration>>
+        WaitingForBuyer
+        Authorized
+        Captured
+        Canceled
     }
 
     class PaymentVoidResult {
@@ -136,6 +181,9 @@ classDiagram
         +bool Succeeded
         +string? ProviderReference
         +string? FailureReason
+        +string? ClientSecret
+        +bool RequiresBuyer
+        +WaitingForBuyer(string providerReference, string clientSecret)$ PaymentAuthorizationResult
     }
 
     class PaymentCaptureResult {
@@ -154,6 +202,10 @@ classDiagram
         <<interface>>
         +GetByIdAsync(Guid paymentId) Task~Payment?~
         +GetByOrderIdAsync(Guid orderId) Task~Payment?~
+        +GetByProviderReferenceAsync(string providerReference) Task~Payment?~
+        +ListAwaitingBuyerCreatedBeforeAsync(DateTimeOffset cutoff, int limit) Task~IReadOnlyList~Guid~~
+        +ListToReconcileAsync(DateTimeOffset processingSince, DateTimeOffset now, int limit) Task~IReadOnlyList~Guid~~
+        +CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff) Task~int~
         +ListByOrderIdsAsync(IReadOnlyCollection~Guid~ orderIds) Task~IReadOnlyList~Payment~~
         +ListAsync(ListPaymentsFilter filter) Task~(IReadOnlyList~Payment~, int)~
         +AddAsync(Payment payment) Task
@@ -189,6 +241,55 @@ classDiagram
     class CreatePaymentResult {
         +Guid PaymentId
         +string Status
+        +PaymentNextAction? NextAction
+    }
+
+    class PaymentNextAction {
+        +string Type
+        +string ClientSecret
+        +ConfirmCardWith(string clientSecret)$ PaymentNextAction
+    }
+
+    class AvailablePaymentMethods {
+        +string Provider
+        +IReadOnlyCollection~PaymentMethod~ Methods
+        +string? PublishableKey
+    }
+
+    class PaymentProviderUpdate {
+        +PaymentProviderUpdateKind Kind
+        +string ProviderReference
+        +DateTimeOffset OccurredAt
+        +string? Reason
+        +Guid? RefundId
+        +bool AuthorizationExpired
+        +DateTimeOffset? AuthorizationExpiresAt
+    }
+
+    class PaymentProviderUpdateKind {
+        <<enumeration>>
+        Authorized
+        Declined
+        Captured
+        Canceled
+        RefundSucceeded
+        RefundFailed
+        DisputeOpened
+    }
+
+    class PaymentProviderUpdateOutcome {
+        <<enumeration>>
+        Applied
+        Ignored
+        UnknownPayment
+    }
+
+    class PaymentReconciliation {
+        +Guid PaymentId
+        +string StatusBefore
+        +string StatusAfter
+        +string? ProviderStatus
+        +bool Changed
     }
 
     class RequestRefundCommand {
@@ -267,6 +368,48 @@ classDiagram
         +ExecuteAsync(Guid orderId) Task~Payment?~
     }
 
+    class GetAvailablePaymentMethodsUseCase {
+        -IPaymentProvider provider
+        +Execute() AvailablePaymentMethods
+    }
+
+    class GetPaymentNextActionUseCase {
+        -IPaymentRepository payments
+        -IPaymentProvider provider
+        +ExecuteAsync(Guid orderId) Task~PaymentNextAction?~
+    }
+
+    class ApplyPaymentProviderUpdateUseCase {
+        -IPaymentRepository payments
+        -IPaymentsOutbox outbox
+        -PaymentsMetrics metrics
+        +ExecuteAsync(PaymentProviderUpdate update) Task~PaymentProviderUpdateOutcome~
+        +KindTag(PaymentProviderUpdateKind kind)$ string
+    }
+
+    class ExpirePaymentWindowUseCase {
+        -IPaymentRepository payments
+        -IPaymentProvider provider
+        -IPaymentsOutbox outbox
+        -PaymentsMetrics metrics
+        +FindExpiredAsync(TimeSpan window, int limit) Task~IReadOnlyList~Guid~~
+        +ExpireAsync(Guid paymentId, TimeSpan window) Task~bool~
+    }
+
+    class CountExpiringAuthorizationsUseCase {
+        -IPaymentRepository payments
+        +ExecuteAsync(DateTimeOffset cutoff) Task~int~
+    }
+
+    class ReconcilePaymentUseCase {
+        -IPaymentRepository payments
+        -IPaymentProvider provider
+        -ApplyPaymentProviderUpdateUseCase applyUpdate
+        -AuthorizePaymentUseCase authorize
+        -PaymentsMetrics metrics
+        +ExecuteAsync(Guid paymentId) Task~PaymentReconciliation~
+    }
+
 
     %% OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents
     class PaymentRequested {
@@ -307,6 +450,11 @@ classDiagram
         +Guid PaymentId
     }
 
+    class PaymentAuthorizationExpired {
+        +Guid OrderId
+        +Guid PaymentId
+    }
+
     %% OrderCore.Api.Modules.Payments.Application.Contracts
     class IPaymentsOutbox {
         <<interface>>
@@ -332,6 +480,10 @@ classDiagram
         +string IdempotencyKey
         +string? ProviderReference
         +DateTimeOffset? VoidedAt
+        +DateTimeOffset? AuthorizationExpiresAt
+        +string? LastDeclineReason
+        +DateTimeOffset? LastDeclinedAt
+        +DateTimeOffset? DisputedAt
         +int Version
         +ICollection~RefundPersistenceModel~ Refunds
     }
@@ -355,6 +507,8 @@ classDiagram
         +DbSet~RefundPersistenceModel~ Refunds
         +SaveChangesAsync() Task~int~
     }
+
+    note for PaymentsDbContext "payments_outbox_messages + payments_processed_messages (Stripe webhooks)"
 
     class EfPaymentRepository {
         -PaymentsDbContext dbContext
@@ -390,15 +544,79 @@ classDiagram
         +CaptureAsync(Payment payment) Task~PaymentCaptureResult~
         +RefundAsync(Payment payment) Task~PaymentRefundResult~
         +VoidAsync(Payment payment) Task~PaymentVoidResult~
+        +GetClientSecretAsync(Payment payment) Task~string?~
+        +GetStateAsync(Payment payment) Task~PaymentProviderState~
+    }
+
+
+    %% OrderCore.Api.Modules.Payments.Infrastructure.Providers.Stripe
+    class StripeOptions {
+        +string? SecretKey
+        +string? PublishableKey
+        +string? WebhookSecret
+        +string? ApiBase
+        +TimeSpan RequestTimeout
+        +int MaxNetworkRetries
+        +bool IsEnabled
+    }
+
+    class StripePaymentProvider {
+        -PaymentIntentService paymentIntents
+        -RefundService refunds
+        +string HttpClientName$
+        +AuthorizeAsync(Payment payment) Task~PaymentAuthorizationResult~
+        +CaptureAsync(Payment payment) Task~PaymentCaptureResult~
+        +RefundAsync(Payment payment) Task~PaymentRefundResult~
+        +VoidAsync(Payment payment) Task~PaymentVoidResult~
+        +GetClientSecretAsync(Payment payment) Task~string?~
+        +GetStateAsync(Payment payment) Task~PaymentProviderState~
+        +GetCaptureDeadlineAsync(string paymentIntentId) Task~DateTimeOffset?~
+        +ToMinorUnits(decimal amount, string currency)$ long
+        +Idempotency(Payment payment, string operation)$ RequestOptions
     }
 
 
     %% OrderCore.Api.Modules.Payments.Infrastructure.Webhooks
-    class PaymentWebhookHandler {
-        -IPaymentRepository payments
-        -CapturePaymentUseCase capturePayment
-        -FailPaymentUseCase failPayment
-        +HandleAsync(string providerEventType, string payloadJson) Task
+    class StripeWebhookHandler {
+        -StripeOptions options
+        -PaymentsDbContext dbContext
+        -ApplyPaymentProviderUpdateUseCase applyUpdate
+        -StripePaymentProvider stripe
+        +string Consumer$
+        +HandleAsync(string payload, string? signature) Task~StripeWebhookOutcome~
+        +MessageIdOf(string stripeEventId)$ Guid
+    }
+
+    class StripeWebhookOutcome {
+        <<enumeration>>
+        Handled
+        Duplicate
+        NotHandled
+    }
+
+
+    %% OrderCore.Api.Modules.Payments.Infrastructure.Jobs
+    class PaymentWindowOptions {
+        +TimeSpan Window
+        +TimeSpan CheckInterval
+        +int BatchSize
+    }
+
+    class PaymentWindowBackgroundService {
+        -IServiceScopeFactory scopeFactory
+        -PaymentWindowOptions options
+        +CheckAsync() Task
+    }
+
+    class ReconciliationOptions {
+        +TimeSpan Interval
+        +TimeSpan ProcessingAge
+        +int BatchSize
+    }
+
+    class ReconciliationBackgroundService {
+        -IServiceScopeFactory scopeFactory
+        -ReconciliationOptions options
     }
 
 
@@ -409,11 +627,39 @@ classDiagram
         -RequestRefundUseCase requestRefundUseCase
         -ListPaymentsUseCase listPaymentsUseCase
         -GetPaymentByIdUseCase getPaymentByIdUseCase
+        -ReconcilePaymentUseCase reconcilePaymentUseCase
         +ListAsync(ListPaymentsFilter filter) Task~ActionResult~PagedResponse~PaymentSummaryResponse~~~
         +GetByIdAsync(Guid id) Task~ActionResult~PaymentResponse~~
         +CreateAsync(CreatePaymentRequest request) Task~ActionResult~PaymentResponse~~
         +GetByOrderIdAsync(Guid orderId) Task~ActionResult~PaymentResponse~~
         +RequestRefundAsync(Guid id, RequestRefundRequest request) Task~ActionResult~RefundResponse~~
+        +ReconcileAsync(Guid id) Task~ActionResult~PaymentReconciliationResponse~~
+    }
+
+    class PaymentMethodsController {
+        <<AllowAnonymous>>
+        -GetAvailablePaymentMethodsUseCase getAvailableMethods
+        +Get() ActionResult~PaymentMethodsResponse~
+    }
+
+    class StripeWebhooksController {
+        <<AllowAnonymous>>
+        -StripeWebhookHandler handler
+        +ReceiveAsync(string? signature) Task~IActionResult~
+    }
+
+    class PaymentMethodsResponse {
+        +string Provider
+        +IReadOnlyList~string~ Methods
+        +string? PublishableKey
+    }
+
+    class PaymentReconciliationResponse {
+        +Guid PaymentId
+        +string StatusBefore
+        +string StatusAfter
+        +string? ProviderStatus
+        +bool Changed
     }
 
     class CreatePaymentRequest {
@@ -443,6 +689,10 @@ classDiagram
         +DateTimeOffset? AuthorizedAt
         +DateTimeOffset? CapturedAt
         +DateTimeOffset? VoidedAt
+        +DateTimeOffset? AuthorizationExpiresAt
+        +string? LastDeclineReason
+        +DateTimeOffset? LastDeclinedAt
+        +DateTimeOffset? DisputedAt
         +IReadOnlyList~RefundResponse~ Refunds
     }
 
@@ -485,6 +735,7 @@ classDiagram
     IntegrationEvent <|-- PaymentRefunded
     IntegrationEvent <|-- PaymentCaptured
     IntegrationEvent <|-- PaymentVoided
+    IntegrationEvent <|-- PaymentAuthorizationExpired
     IOutbox <|-- IPaymentsOutbox
 
     CreatePaymentUseCase --> IPaymentRepository
@@ -512,6 +763,26 @@ classDiagram
     GetPaymentByIdUseCase --> IPaymentRepository
     GetPaymentsByOrderIdsUseCase --> IPaymentRepository
     IPaymentProvider ..> PaymentVoidResult
+    IPaymentProvider ..> PaymentProviderInfo
+    IPaymentProvider ..> PaymentProviderState
+    PaymentProviderState --> PaymentProviderStatus
+    CreatePaymentUseCase ..> PaymentNextAction : waiting for the buyer
+    GetAvailablePaymentMethodsUseCase --> IPaymentProvider
+    GetPaymentNextActionUseCase --> IPaymentRepository
+    GetPaymentNextActionUseCase --> IPaymentProvider : asks the client secret again
+    ApplyPaymentProviderUpdateUseCase --> IPaymentRepository
+    ApplyPaymentProviderUpdateUseCase --> IPaymentsOutbox : authorized / captured / voided / expired / failed / refunded
+    ApplyPaymentProviderUpdateUseCase ..> PaymentProviderUpdate
+    PaymentProviderUpdate --> PaymentProviderUpdateKind
+    ApplyPaymentProviderUpdateUseCase ..> PaymentProviderUpdateOutcome
+    ExpirePaymentWindowUseCase --> IPaymentRepository
+    ExpirePaymentWindowUseCase --> IPaymentProvider : cancels the intent
+    ExpirePaymentWindowUseCase --> IPaymentsOutbox : PaymentFailed
+    CountExpiringAuthorizationsUseCase --> IPaymentRepository
+    ReconcilePaymentUseCase --> IPaymentProvider : GetStateAsync
+    ReconcilePaymentUseCase --> ApplyPaymentProviderUpdateUseCase : same path as webhooks
+    ReconcilePaymentUseCase --> AuthorizePaymentUseCase : no provider reference yet
+    ReconcilePaymentUseCase ..> PaymentReconciliation
 
     IPaymentRepository <|.. EfPaymentRepository
     EfPaymentRepository --> PaymentsDbContext
@@ -529,12 +800,22 @@ classDiagram
     IPaymentsOutbox <|.. PaymentsOutbox
     PaymentsOutbox --> OutboxWriter~TDbContext~
 
-    PaymentWebhookHandler --> IPaymentRepository
-    PaymentWebhookHandler --> CapturePaymentUseCase
-    PaymentWebhookHandler --> FailPaymentUseCase
+    IPaymentProvider <|.. StripePaymentProvider
+    StripePaymentProvider --> StripeOptions
+    StripeWebhookHandler --> StripeOptions : webhook secret
+    StripeWebhookHandler --> PaymentsDbContext : inbox stripe-webhooks
+    StripeWebhookHandler --> ApplyPaymentProviderUpdateUseCase
+    StripeWebhookHandler --> StripePaymentProvider : capture deadline
+    StripeWebhookHandler ..> StripeWebhookOutcome
+    PaymentWindowBackgroundService --> ExpirePaymentWindowUseCase
+    PaymentWindowBackgroundService --> PaymentWindowOptions
+    ReconciliationBackgroundService --> ReconcilePaymentUseCase
+    ReconciliationBackgroundService --> ReconciliationOptions
+    ReconciliationBackgroundService --> IPaymentRepository : ListToReconcileAsync
 
     PaymentsDependencyInjection --> IPaymentProvider : registers
-    PaymentsDependencyInjection ..> FakePaymentProvider : implementation
+    PaymentsDependencyInjection ..> FakePaymentProvider : without a Stripe secret key
+    PaymentsDependencyInjection ..> StripePaymentProvider : with Payments:Stripe:SecretKey
     PaymentsDependencyInjection --> IPaymentRepository : registers
     PaymentsDependencyInjection --> CreatePaymentUseCase : registers
 
@@ -543,6 +824,11 @@ classDiagram
     PaymentsController --> RequestRefundUseCase
     PaymentsController --> ListPaymentsUseCase
     PaymentsController --> GetPaymentByIdUseCase
+    PaymentsController --> ReconcilePaymentUseCase
+    PaymentsController ..> PaymentReconciliationResponse
+    PaymentMethodsController --> GetAvailablePaymentMethodsUseCase
+    PaymentMethodsController ..> PaymentMethodsResponse
+    StripeWebhooksController --> StripeWebhookHandler
     PaymentPresenter --> PaymentSummaryResponse
     PaymentsController --> PaymentPresenter
     PaymentPresenter --> PaymentResponse
@@ -556,17 +842,21 @@ classDiagram
         +Voided() void
         +Refunded(string outcome) void
         +ProviderCalled(string provider, string operation, string outcome, TimeSpan duration) void
+        +ProviderUpdate(string kind, string outcome) void
+        +Reconciled(string outcome) void
     }
 
     %% OrderCore.Api.Modules.Payments.Infrastructure.Providers
     class MeasuredPaymentProvider {
         -IPaymentProvider inner
         -PaymentsMetrics metrics
-        -string providerName
     }
 
     IPaymentProvider <|.. MeasuredPaymentProvider
-    MeasuredPaymentProvider --> FakePaymentProvider : wraps (registered as IPaymentProvider)
+    MeasuredPaymentProvider --> IPaymentProvider : wraps the fake or Stripe (registered as IPaymentProvider)
+    ApplyPaymentProviderUpdateUseCase --> PaymentsMetrics : provider updates
+    ReconcilePaymentUseCase --> PaymentsMetrics : in sync / corrected
+    ExpirePaymentWindowUseCase --> PaymentsMetrics : declines
     MeasuredPaymentProvider --> PaymentsMetrics : provider call duration
     CreatePaymentUseCase --> PaymentsMetrics : approved / declined
     AuthorizePaymentUseCase --> PaymentsMetrics : approved / declined
@@ -586,4 +876,4 @@ O documento de modelagem de banco já especificava `customer_payment_method_id`,
 
 ## Consumido por outros módulos
 
-- **Orders** chama `CreatePaymentUseCase` (com a forma de pagamento escolhida no checkout, mapeada de `PaymentMethodChoice` do Orders) e `GetPaymentByOrderIdUseCase` (para o resumo do pagamento na tela do pedido) de dentro de um `PaymentGatewayAdapter` (implementa o `IPaymentGateway` do próprio Orders) e reage a `PaymentAuthorized`/`PaymentFailed`, que chegam pelo RabbitMQ na fila `orders.payment-outcomes` — ver [05-orders.md](05-orders.md). A timeline do pedido do admin (`orders.timeline`) arquiva todos os eventos de Payments sobre o pedido. `Payment.OrderId` guarda apenas o id, nunca uma referência a `Order`.
+- **Orders** chama `CreatePaymentUseCase` (com a forma de pagamento escolhida no checkout, mapeada de `PaymentMethodChoice` do Orders) e `GetPaymentByOrderIdUseCase` (para o resumo do pagamento na tela do pedido) de dentro de um `PaymentGatewayAdapter` (implementa o `IPaymentGateway` do próprio Orders) e reage a `PaymentAuthorized`/`PaymentFailed`/`PaymentAuthorizationExpired`, que chegam pelo RabbitMQ na fila `orders.payment-outcomes` — ver [05-orders.md](05-orders.md). Pelo mesmo adapter, o Orders também usa `GetAvailablePaymentMethodsUseCase` (checkout recusa uma forma indisponível), `GetPaymentNextActionUseCase` (a etapa de confirmação no checkout repetido) e `CountExpiringAuthorizationsUseCase` (o painel). A timeline do pedido do admin (`orders.timeline`) arquiva todos os eventos de Payments sobre o pedido. `Payment.OrderId` guarda apenas o id, nunca uma referência a `Order`.

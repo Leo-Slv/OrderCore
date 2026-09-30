@@ -20,10 +20,10 @@ observabilidade: OpenTelemetry, ids nos spans, health checks)"]
 
     Orders -->|IProductCatalog| Catalog
     Orders -->|"IInventoryService (reservar, liberar, devolver, alertas)"| Inventory
-    Orders -->|"IPaymentGateway (pagar, capturar no envio, acertar no cancelamento)"| Payments
+    Orders -->|"IPaymentGateway (formas aceitas, pagar e etapa do comprador, capturar no envio, acertar no cancelamento, autorizações vencendo)"| Payments
     Orders -->|"ICustomerDirectory (endereços, clientes do admin, novos clientes)"| Customers
     Catalog -->|"IStockAvailabilityProvider (vitrine) + IStockLevels (registro e números do admin)"| Inventory
-    Payments -.->|"eventos: payment-authorized/failed (orders.payment-outcomes)"| Orders
+    Payments -.->|"eventos: payment-authorized/failed/authorization-expired (orders.payment-outcomes)"| Orders
     Payments -.->|"eventos → timeline (orders.timeline)"| Orders
     Inventory -.->|"eventos: reservas → timeline (orders.timeline)"| Orders
     Payments -.->|outbox| Messaging
@@ -56,7 +56,7 @@ observabilidade: OpenTelemetry, ids nos spans, health checks)"]
 3. [Catalog](03-catalog.md) — categorias, produtos, imagens, variações, listagem da vitrine e produto por slug.
 4. [Inventory](04-inventory.md) — saldo de estoque, reservas e consulta de disponibilidade.
 5. [Orders](05-orders.md) — pedido, itens, ciclo de vida completo (preparo, envio com captura, entrega, cancelamento com acerto do pagamento), checkout em um passo, cotação do carrinho, lista/detalhe do admin e dashboard, adapters para os outros módulos.
-6. [Payments](06-payments.md) — pagamento (com forma de pagamento), captura, void, estornos, acerto no cancelamento, outbox de eventos de integração.
+6. [Payments](06-payments.md) — pagamento (com forma de pagamento), provedor fake ou Stripe (PaymentIntent com captura manual, confirmação no navegador, webhooks assinados e deduplicados, janela de pagamento, expiração da autorização, reconciliação), captura, void, estornos, acerto no cancelamento, outbox de eventos de integração.
 7. [AuditLogs](07-auditlogs.md) — registro de ações via `IAuditLogService`, persistido no PostgreSQL, listagem paginada filtrável por entidade, autor e ação.
 8. [Identity](08-identity.md) — contas (cliente/admin), senhas, sessões de refresh e emissão/validação dos JWT.
 9. [Messaging](09-messaging.md) — eventos de integração pelo RabbitMQ: outbox por módulo, relay, consumidores com inbox e retentativas, trace nas mensagens e as mensagens que falharam no backoffice.
