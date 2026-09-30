@@ -1,5 +1,7 @@
 # OrderCore
 
+[![CI](https://github.com/Leo-Slv/OrderCore/actions/workflows/ci.yml/badge.svg)](https://github.com/Leo-Slv/OrderCore/actions/workflows/ci.yml)
+
 Sistema de processamento e gerenciamento de pedidos em **C# / .NET**, construído
 não como um CRUD, mas como um exercício deliberado de arquitetura de
 software: modelagem de domínio, modularidade, consistência, concorrência,
@@ -145,6 +147,11 @@ pagamentos, auditoria, gestão do catálogo) exigem um token de admin.
 Sem token → `401 unauthenticated`; token sem permissão → `403 forbidden`.
 Um cliente desativado pela loja recebe `401 account_inactive` no login
 (só com a senha certa; senha errada continua `invalid_credentials`).
+Cinco senhas erradas seguidas bloqueiam a conta por 15 minutos; enquanto
+isso, o login responde `invalid_credentials` como para uma senha errada
+(mesmo com a certa). Login, cadastro, refresh, checkout e o webhook do
+Stripe têm limite de requisições: acima dele, `429 too_many_requests` com
+o cabeçalho `Retry-After` (segundos para tentar de novo).
 Os detalhes estão em
 [`Docs/specs/identity/authentication-and-account.md`](Docs/specs/identity/authentication-and-account.md).
 
@@ -453,7 +460,14 @@ de login, então o mais simples é recriar o banco local
 acrescentou migrations em todos os contextos (inclusive o novo
 `AuditLogsDbContext`); produtos publicados antes dele podem não ter
 registro de estoque, o que também se resolve recriando o banco. Para
-aplicar as migrations de um contexto:
+aplicar as migrations de todos os bancos de uma vez (o mesmo comando que o
+deploy usa, ver [`Docs/operations/deployment.md`](Docs/operations/deployment.md)):
+
+```bash
+dotnet run --project OrderCore.Api.csproj -- migrate
+```
+
+Ou as de um contexto só:
 
 ```bash
 dotnet ef database update --context AuditLogsDbContext
@@ -464,7 +478,36 @@ dotnet ef database update --context AuditLogsDbContext
 `IdentityDbContext` e `MessagingDbContext`). A mensageria acrescentou
 migrations em Payments, Orders, Inventory e o `MessagingDbContext` novo;
 o Stripe, duas no Payments (`AddStripePaymentFields` e
-`AddPaymentAuthorizationExpiry`).
+`AddPaymentAuthorizationExpiry`); a V4, o bloqueio de conta no Identity
+(`AddAccountLockout`) e índices de retenção em Orders, Payments,
+Inventory e Messaging (`AddRetentionIndexes`).
+
+## Produção
+
+A hospedagem ainda não foi escolhida; tudo é neutro de plataforma
+([`Docs/specs/operations/production-readiness.md`](Docs/specs/operations/production-readiness.md)):
+
+- **CI** (GitHub Actions): build, `dotnet format` e os três projetos de
+  teste em todo push; o `master` verde publica a imagem da API em
+  `ghcr.io/leo-slv/ordercore-api` (`sha-<commit>` e `latest`).
+- **Deploy** ([`Docs/operations/deployment.md`](Docs/operations/deployment.md)):
+  backup, `docker run <imagem> migrate`, e uma instância da API (o envio
+  de eventos, os jobs e o SignalR assumem uma só). A imagem roda sem root
+  na porta 8080, atrás de um proxy que termina o HTTPS.
+- **Configuração:** o runbook lista tudo o que um deploy informa. Fora de
+  Development a API **não sobe** sem banco, origens do CORS, `AllowedHosts`
+  e RabbitMQ de produção, nem com uma configuração do Stripe que
+  funcionaria mal (chave live sem `AllowLiveKeys`, modos misturados, sem
+  segredo do webhook) — e a mensagem diz o que corrigir.
+- **Borda:** cabeçalhos encaminhados só de proxies confiáveis
+  (`ForwardedHeaders`), HSTS e redirecionamento para HTTPS (menos
+  `/health`), cabeçalhos de segurança em toda resposta e `no-store` nas
+  autenticadas.
+- **Operação:** retenção diária dos registros técnicos (outbox, inbox,
+  mensagens com falha resolvidas); alertas como código em
+  `deploy/grafana/alerting`; amostragem de traces no coletor
+  (`deploy/otel/otelcol-config.yaml`: todo erro, todo lento e 10% do resto;
+  100% no compose local).
 
 ## Observabilidade
 
