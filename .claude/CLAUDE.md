@@ -351,6 +351,43 @@ Screens get order changes pushed over SignalR
   reconnect instead of expecting a replay.
 - One instance is assumed; running several needs a SignalR backplane.
 
+## Payment providers (fake and Stripe)
+
+Payments talks to a provider only through `IPaymentProvider`
+(`Docs/specs/payments/stripe-provider.md`); the configuration picks
+Stripe (`Payments:Stripe:SecretKey` set) or the fake:
+
+- **Capabilities, not provider checks.** A use case never asks "is this
+  Stripe?": it reads `IPaymentProvider.Info` (name, accepted methods,
+  publishable key) and the results the provider returns (e.g.
+  `PaymentAuthorizationResult.RequiresBuyer`). Something only one
+  provider does becomes a capability or a result every provider answers
+  (the fake answers at once, never waits for the buyer).
+- **Never store card data or client secrets.** The card is confirmed in
+  the browser; the client secret goes to the buyer in the checkout
+  response and is asked of the provider again when needed
+  (`GetClientSecretAsync`), never persisted or logged.
+- **Every call that moves money carries an idempotency key** derived from
+  the payment or refund (`StripePaymentProvider.Idempotency`), so a retry
+  can't charge twice.
+- **Webhooks are anonymous but signed and deduplicated.** The Stripe
+  webhook is the one anonymous write endpoint: `StripeWebhookHandler`
+  verifies the signature (and its timestamp) before anything else and
+  dedupes by event id in Payments' inbox, committed with the payment's
+  change. Another provider's webhook follows the same shape.
+- **One path for "the provider says X".** Webhooks and reconciliation
+  both translate into a provider-neutral `PaymentProviderUpdate` applied
+  by `ApplyPaymentProviderUpdateUseCase`, which ignores an update the
+  payment has already applied or moved past. Don't add a second place
+  that changes a payment from provider input.
+- **Background jobs** (`PaymentWindowBackgroundService`,
+  `ReconciliationBackgroundService`) list ids in one scope and handle each
+  payment in its own scope, logging a failure and retrying next run.
+- Tests: `stripe-mock` (Testcontainers) for the Stripe SDK's requests and
+  error mapping, never the real Stripe; `WaitingForBuyerProvider`
+  (integration) and `StubPaymentProvider` (unit) stand in for a provider
+  that waits for the buyer; webhook tests sign payloads with a test secret.
+
 ## Observability
 
 Traces, metrics and logs go through OpenTelemetry
