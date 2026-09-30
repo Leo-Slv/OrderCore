@@ -1,5 +1,6 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
+using OrderCore.Api.Modules.Identity.Application.Telemetry;
 using OrderCore.Api.Modules.Inventory.Application.Telemetry;
 using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Modules.Payments.Application.Telemetry;
@@ -17,4 +18,6 @@ public static class TestMetrics
     public static PaymentsMetrics Payments { get; } = new(Factory);
 
     public static InventoryMetrics Inventory { get; } = new(Factory);
+
+    public static IdentityMetrics Identity { get; } = new(Factory);
 }

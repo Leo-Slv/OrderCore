@@ -3,6 +3,7 @@ using OrderCore.Api.Modules.Identity.Application.DTOs;
 using OrderCore.Api.Modules.Identity.Application.UseCases;
 using OrderCore.Api.Modules.Identity.Domain.Entities;
 using OrderCore.Api.Modules.Identity.Domain.Enums;
+using OrderCore.Api.Modules.Identity.Domain.Policies;
 using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Domain.Exceptions;
 using Xunit;
@@ -24,7 +25,10 @@ public sealed class AuthenticationUseCaseTests
 
     private SignUpCustomerUseCase SignUp() => new(_accounts, _customers, _hasher, _refreshTokens, _accessTokens, _auditLog, _clock);
 
-    private SignInUseCase SignIn() => new(_accounts, _hasher, _refreshTokens, _accessTokens, _customers, _clock);
+    private static readonly LockoutPolicy Lockout = new(MaxFailedAttempts: 3, Duration: TimeSpan.FromMinutes(15));
+
+    private SignInUseCase SignIn() =>
+        new(_accounts, _hasher, _refreshTokens, _accessTokens, _customers, _clock, Lockout, _auditLog, TestMetrics.Identity);
 
     private RefreshSessionUseCase Refresh() => new(_accounts, _refreshTokens, _accessTokens, _auditLog, _customers, _clock);
 
@@ -104,6 +108,58 @@ public sealed class AuthenticationUseCaseTests
         var act = () => SignIn().ExecuteAsync(new SignInCommand(email, password), CancellationToken.None);
 
         await act.Should().ThrowAsync<UnauthorizedException>().Where(e => e.Code == "invalid_credentials");
+    }
+
+    private async Task WrongPasswordAsync(int times)
+    {
+        for (var i = 0; i < times; i++)
+        {
+            var act = () => SignIn().ExecuteAsync(new SignInCommand("jane@example.com", "wrong-pass1"), CancellationToken.None);
+            await act.Should().ThrowAsync<UnauthorizedException>().Where(e => e.Code == "invalid_credentials");
+        }
+    }
+
+    [Fact]
+    public async Task SignIn_locks_the_account_after_too_many_wrong_passwords_answering_like_a_wrong_password()
+    {
+        await SignUpJaneAsync();
+
+        await WrongPasswordAsync(times: 3);
+
+        var account = _accounts.Accounts.Single();
+        account.LockedOutUntil.Should().Be(_clock.GetUtcNow().AddMinutes(15));
+        _auditLog.Actions.Should().Contain("AccountLockedOut");
+        var rightPassword = () => SignIn().ExecuteAsync(new SignInCommand("jane@example.com", Password), CancellationToken.None);
+        await rightPassword.Should().ThrowAsync<UnauthorizedException>()
+            .Where(e => e.Code == "invalid_credentials", "a lock answers exactly like a wrong password");
+    }
+
+    [Fact]
+    public async Task SignIn_works_again_once_the_lock_runs_out_and_the_count_starts_over()
+    {
+        await SignUpJaneAsync();
+        await WrongPasswordAsync(times: 3);
+
+        _clock.Advance(TimeSpan.FromMinutes(15));
+        await SignIn().ExecuteAsync(new SignInCommand("jane@example.com", Password), CancellationToken.None);
+
+        var account = _accounts.Accounts.Single();
+        account.LockedOutUntil.Should().BeNull();
+        account.FailedSignInCount.Should().Be(0);
+        await WrongPasswordAsync(times: 2);
+        account.IsLockedOut(_clock.GetUtcNow()).Should().BeFalse("two wrong passwords after a success don't reach the limit");
+    }
+
+    [Fact]
+    public async Task SignIn_success_resets_the_count_of_wrong_passwords()
+    {
+        await SignUpJaneAsync();
+        await WrongPasswordAsync(times: 2);
+
+        await SignIn().ExecuteAsync(new SignInCommand("jane@example.com", Password), CancellationToken.None);
+        await WrongPasswordAsync(times: 2);
+
+        _accounts.Accounts.Single().IsLockedOut(_clock.GetUtcNow()).Should().BeFalse();
     }
 
     [Fact]
