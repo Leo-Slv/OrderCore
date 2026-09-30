@@ -119,7 +119,8 @@ em Development).
 | Carrinho | `POST /api/orders/cart/quote` → preço atual e problemas por linha (`PriceChanged`, `InsufficientStock`, `Unavailable`, `NotFound`), sem reservar nada |
 | Cadastro / login | `POST /api/auth/sign-up`, `POST /api/auth/sign-in` → access token (JWT, 15 min) + refresh token (14 dias); `POST /api/auth/refresh` troca o refresh token por um par novo; `POST /api/auth/sign-out` encerra a sessão |
 | Minha conta | `GET`/`PUT /api/customers/me`, `GET`/`POST /api/customers/me/addresses`, `PUT`/`DELETE /api/customers/me/addresses/{addressId}`, `POST …/{addressId}/default-shipping` e `…/default-billing` |
-| Checkout | `GET /api/customers/me/addresses`, depois `POST /api/orders/checkout` com header `Idempotency-Key` → 202 com o pedido já em `PendingPayment` (o cliente vem do token) |
+| Formas de pagamento | `GET /api/payments/methods` (anônimo) → o provedor, as formas que o checkout aceita agora (`Card`/`Pix` com o fake, só `Card` com o Stripe) e a chave publicável do Stripe |
+| Checkout | `GET /api/customers/me/addresses`, depois `POST /api/orders/checkout` com header `Idempotency-Key` → 202 com o pedido já em `PendingPayment` (o cliente vem do token); com o Stripe, `payment.nextAction` traz a confirmação do cartão (ver [Pagando com cartão](#pagando-com-cartão-stripe)) |
 | Acompanhamento | `GET /api/orders/{id}` (polling até `Confirmed`/`PaymentFailed`) e `GET /api/orders/{id}/status-history` (timeline) — pedido de outro cliente responde 404 |
 | Meus pedidos | `GET /api/orders/me?page=1&pageSize=20`; `POST /api/orders/me/{id}/cancel` (motivo opcional) cancela o próprio pedido enquanto a loja não começou a prepará-lo — pagamento liberado ou estornado, estoque devolvido; depois disso, `400 order_in_fulfilment` |
 
@@ -136,8 +137,9 @@ A API só aceita chamadas de navegador das origens em `Cors:AllowedOrigins`
 
 **Acesso.** A API bloqueia por padrão: toda rota exige
 `Authorization: Bearer <access token>`, exceto a vitrine (listagem e
-produto por slug), a cotação do carrinho, `auth/sign-up|sign-in|refresh`,
-`/health` e a documentação. Checkout, `customers/me` e `orders/me` exigem
+produto por slug), a cotação do carrinho, as formas de pagamento,
+`auth/sign-up|sign-in|refresh`, `/health` e a documentação — e o webhook
+do Stripe, que não usa token mas só aceita o que o Stripe assinou. Checkout, `customers/me` e `orders/me` exigem
 um token de cliente; os endpoints administrativos (clientes, estoque,
 pagamentos, auditoria, gestão do catálogo) exigem um token de admin.
 Sem token → `401 unauthenticated`; token sem permissão → `403 forbidden`.
@@ -155,11 +157,11 @@ de um formato mais completo que o do cliente fica sob `admin/`.
 
 | Tela | Endpoints |
 |---|---|
-| Dashboard | `GET /api/admin/dashboard?from=&to=` → pedidos por status, receita por moeda, clientes novos, estoque baixo/esgotado e pedidos recentes (padrão: últimos 30 dias) |
-| Pedidos | `GET /api/admin/orders?status=&customerId=&createdFrom=&createdTo=` (com cliente e status do pagamento); `GET /api/admin/orders/{id}` (notas internas, cliente, pagamento completo, reservas); `GET /api/admin/orders/{id}/timeline` (a vida do pedido em todos os módulos: pedido, pagamento, estoque); `GET /api/orders/{id}/status-history`; `GET /api/audit-logs?entityName=Order&entityId={id}` (quem fez o quê) |
+| Dashboard | `GET /api/admin/dashboard?from=&to=` → pedidos por status, receita por moeda, clientes novos, estoque baixo/esgotado, autorizações de pagamento que vencem em até dois dias (envie esses pedidos primeiro) e pedidos recentes (padrão: últimos 30 dias) |
+| Pedidos | `GET /api/admin/orders?status=&customerId=&createdFrom=&createdTo=` (com cliente, status do pagamento e `authorizationExpiringSoon`); `GET /api/admin/orders/{id}` (notas internas, cliente, pagamento completo com o prazo da autorização, reservas); `GET /api/admin/orders/{id}/timeline` (a vida do pedido em todos os módulos: pedido, pagamento, estoque); `GET /api/orders/{id}/status-history`; `GET /api/audit-logs?entityName=Order&entityId={id}` (quem fez o quê) |
 | Atendimento | `POST /api/orders/{id}/start-processing`, `/ship` (captura o pagamento; `409 payment_capture_failed` se o provedor recusar), `/deliver`, `/cancel` (acerta o pagamento e devolve o estoque; responde o que aconteceu com o pagamento); `PUT /api/orders/{id}/internal-notes` |
 | Produtos e estoque | `GET /api/admin/catalog/products?status=&searchTerm=&stock=LowStock` (com os números de estoque); `PUT /api/catalog/products/{id}/price`, `/compare-at-price`; `POST …/discontinue`; `POST`/`DELETE …/images`, `PUT …/images/order`; `POST`/`DELETE …/variants`; `POST /api/inventory/stock-items/{productId}/receive`, `/adjust`; `PUT …/reorder-level`; `GET …/movements`, `…/reservations` |
-| Pagamentos | `GET /api/payments?status=&method=&createdFrom=&createdTo=`; `GET /api/payments/{id}` (com estornos); `POST /api/payments/{id}/refunds` |
+| Pagamentos | `GET /api/payments?status=&method=&createdFrom=&createdTo=`; `GET /api/payments/{id}` (com estornos); `POST /api/payments/{id}/refunds`; `POST /api/payments/{id}/reconcile` (confere com o provedor e corrige se um webhook se perdeu; responde o que mudou) |
 | Clientes | `GET /api/customers?searchTerm=`; `GET /api/customers/{id}` + `GET /api/orders/customers/{id}` (pedidos do cliente); `POST /api/customers/{id}/deactivate`, `/reactivate` (o cliente desativado não faz login nem checkout) |
 | Mensagens que falharam | `GET /api/messaging/failed-messages?status=Pending`; `GET /api/messaging/failed-messages/{id}` (com a mensagem como foi recebida); `POST …/{id}/replay` (volta para o consumidor que falhou), `POST …/{id}/discard` |
 
@@ -237,17 +239,70 @@ Authorized` durante uma transição:
 
 ```text
 Pending → Processing → Authorized → Captured (no envio do pedido)
-                    ↘ Failed
-Authorized → Voided   (pedido cancelado antes do envio)
+             │      ↘ Failed        (recusado; com o Stripe, a janela de 30 min acabou)
+             └ aguardando o comprador (Stripe): recusas ficam registradas, ele pode tentar outro cartão
+Processing/Authorized → Voided   (pedido cancelado antes do envio, ou autorização expirada)
 Captured → Refunded
 ```
 
 O domínio depende de uma abstração, `IPaymentProvider`, nunca de um SDK de
-provider diretamente. Hoje existe um `FakePaymentProvider`
-(`Modules/Payments/Infrastructure/Providers/Fake`) capaz de simular
-sucesso, recusa (inclusive só da captura, `CaptureDeclined`), timeout e indisponibilidade, o que permite desenvolver e
-testar os caminhos de falha antes de qualquer integração real (ex.:
-Stripe).
+provider diretamente
+([`Docs/specs/payments/stripe-provider.md`](Docs/specs/payments/stripe-provider.md)).
+A configuração escolhe o provedor:
+
+- **Fake** (padrão, sem chave do Stripe): cartão e Pix, responde na hora e
+  simula sucesso, recusa (inclusive só da captura, `CaptureDeclined`),
+  timeout e indisponibilidade — os caminhos de falha são testados sem
+  nenhuma integração real.
+- **Stripe** (com `Payments:Stripe:SecretKey`, modo de teste): só cartão,
+  PaymentIntent com captura manual (captura no envio, anula no
+  cancelamento), confirmação do cartão no navegador, resultado por webhook
+  assinado e deduplicado, e uma chave de idempotência em toda chamada que
+  mexe em dinheiro. Nenhum dado de cartão passa pelo OrderCore.
+
+Com o Stripe, três coisas cuidam do que pode dar errado entre a API, o
+navegador e o Stripe:
+
+- **Janela de pagamento:** o comprador tem 30 minutos para confirmar o
+  cartão; depois o pagamento é cancelado no Stripe e falha, e o pedido
+  termina `PaymentFailed` com o estoque liberado.
+- **Expiração da autorização:** o cartão fica autorizado até o prazo de
+  captura dele (cerca de 7 dias). O admin vê os pedidos cuja autorização
+  vence em até dois dias; se vencer, o pedido é cancelado pelo sistema e o
+  estoque volta.
+- **Reconciliação:** a cada 15 minutos (e em `POST
+  /api/payments/{id}/reconcile`) os pagamentos que podem ter perdido um
+  webhook são conferidos com o Stripe e corrigidos pelo mesmo caminho dos
+  webhooks.
+
+### Pagando com cartão (Stripe)
+
+O que o front faz, com o [Payment Element](https://docs.stripe.com/payments/payment-element)
+(`@stripe/stripe-js`):
+
+1. `GET /api/payments/methods` → se `provider` for `Stripe`, só `Card` é
+   oferecido e `publishableKey` inicializa o Stripe.js
+   (`loadStripe(publishableKey)`).
+2. `POST /api/orders/checkout` com `paymentMethod: "Card"` → 202 com o
+   pedido em `PendingPayment` e `payment.nextAction`:
+
+   ```json
+   { "type": "confirm_card", "clientSecret": "pi_..._secret_..." }
+   ```
+
+   Com o fake, `nextAction` é `null` e o pedido se resolve sozinho.
+3. Monte o Payment Element com o `clientSecret` e chame
+   `stripe.confirmPayment(...)`. O 3-D Secure acontece ali mesmo. Um
+   cartão recusado pode ser trocado na mesma tela.
+4. O resultado chega por webhook: acompanhe pelo hub
+   (`orderUpdated` com `Confirmed` ou `PaymentFailed`) ou por
+   `GET /api/orders/{id}`.
+5. Se a tela recarregar antes de confirmar, repita o checkout com a mesma
+   `Idempotency-Key`: volta o mesmo pedido e o mesmo `nextAction`, sem um
+   segundo pagamento.
+
+O `clientSecret` é só para o navegador do comprador: não o guarde nem o
+registre em log.
 
 ## Decisões arquiteturais (ADRs)
 
@@ -340,9 +395,38 @@ dotnet user-secrets set "RabbitMq:Password" "<a mesma RABBITMQ_PASSWORD do .env>
 docker compose up -d postgres rabbitmq
 dotnet run --project OrderCore.Api.csproj
 
-# Rodar todos os testes
+# Rodar todos os testes (os do Stripe usam o stripe-mock em container; não precisam de conta)
 dotnet test
 ```
+
+**Stripe em modo de teste (opcional).** Sem chaves, a API usa o provedor
+fake. Para usar o Stripe:
+
+1. Crie uma conta em stripe.com (o modo de teste é grátis e não exige
+   ativar a conta), ligue **Test mode** e copie de **Developers → API
+   keys** a `pk_test_...` e a `sk_test_...` para `STRIPE_PUBLISHABLE_KEY`
+   e `STRIPE_SECRET_KEY` no `.env`. Nunca use chaves `live`.
+2. Pegue o segredo dos webhooks (fixo por conta) e cole em
+   `STRIPE_WEBHOOK_SECRET`:
+
+   ```bash
+   docker compose --profile stripe run --rm --no-deps stripe-cli listen --print-secret
+   ```
+
+3. Suba com o perfil `stripe`: o Stripe CLI encaminha os webhooks do modo
+   de teste para a API.
+
+   ```bash
+   docker compose --profile stripe up --build
+   ```
+
+Cartões de teste: `4242 4242 4242 4242` (aprovado),
+`4000 0000 0000 0002` (recusado), `4000 0000 0000 9995` (sem saldo) e
+`4000 0025 0000 3155` (pede 3-D Secure) — qualquer validade futura e
+qualquer CVC. Rodando a API fora do container, os mesmos valores vão em
+user-secrets (`Payments:Stripe:SecretKey`, `PublishableKey`,
+`WebhookSecret`), e o Stripe CLI local encaminha para
+`localhost:<porta>/api/payments/webhooks/stripe`.
 
 A API expõe `GET /` como smoke test e três health checks:
 `GET /health/live` (o processo responde; `/health` é um apelido),
@@ -378,7 +462,9 @@ dotnet ef database update --context AuditLogsDbContext
 (repetir para `CustomersDbContext`, `CatalogDbContext`,
 `InventoryDbContext`, `OrdersDbContext`, `PaymentsDbContext`,
 `IdentityDbContext` e `MessagingDbContext`). A mensageria acrescentou
-migrations em Payments, Orders, Inventory e o `MessagingDbContext` novo.
+migrations em Payments, Orders, Inventory e o `MessagingDbContext` novo;
+o Stripe, duas no Payments (`AddStripePaymentFields` e
+`AddPaymentAuthorizationExpiry`).
 
 ## Observabilidade
 
