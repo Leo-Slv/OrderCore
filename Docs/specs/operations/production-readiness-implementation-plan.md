@@ -226,3 +226,54 @@ authenticated one; HSTS only outside Development.
 7. `feat(messaging): retention of technical records`
 8. `feat(observability): alert rules and tail sampling`
 9. `docs: ...`
+
+## Execution notes (what differed from this plan)
+
+- **Workflow.** Every stage went through a `v4/<topic>` branch whose CI
+  run had to be green before a fast-forward merge into `master`, whose
+  own run then published the image.
+- **Stage 1.** No `.editorconfig`/`.gitattributes` existed and
+  `core.autocrlf` was on, which explained the mixed line endings seen in
+  V3; the repository content was already LF, so renormalizing changed
+  nothing, and the 67 CRLF files of the working copy were rewritten from
+  the index. `global.json` pins the SDK band. One consequence found later:
+  `dotnet ef migrations add` on Windows writes CRLF, so generated
+  migrations are converted to LF before committing (CLAUDE.md). The first
+  push of a changed workflow file needed the `workflow` scope on the
+  developer's GitHub token.
+- **Stage 2.** One `migrate` command in the API image instead of eight
+  migration bundles; each module registers its `DbContext` with
+  `AddDatabaseMigrations<T>(order)`. It is tested through the API's real
+  entry point and was checked in the built image as the non-root `app`
+  user. The CI actions moved to their Node 24 majors and the runner was
+  pinned to Ubuntu 24.04 after GitHub's deprecation notices.
+- **Stage 3.** ASP.NET never sends HSTS to `localhost`, so the edge tests
+  use a real host name; a test-only startup filter
+  (`RemoteAddressFromTestHeader`) stands in for the client address.
+- **Stage 4.** The `429` is declared in OpenAPI by an operation
+  transformer (like 401/403), not by `[ProducesResponseType]` on each
+  action. Integration tests run with very high limits by default, since
+  TestServer gives every request the same (absent) address.
+- **Stage 5.** Identity got its first metrics class (`IdentityMetrics`).
+  Two wrong passwords racing on one account could answer `409` and reveal
+  the account, so the account repository now translates EF's conflict
+  into `AccountConcurrencyConflictException` (Inventory's pattern), which
+  sign-in swallows.
+- **Stage 6.** `appsettings.Production.json` blanks the development
+  database, origins, hosts and broker so a deployment has to provide them,
+  and turns EF's SQL logging down (noticed in `migrate`'s output). Blank
+  CORS entries are ignored. `migrate` doesn't run the startup checks (it
+  never starts the host), so it needs only the database.
+- **Stage 7.** The registry learned the inbox contexts (`InboxSources`);
+  Payments' Stripe webhook inbox declares itself with `AddInboxSource`.
+  `ExecuteDeleteAsync` with `Take` works on Npgsql, so batches are plain
+  EF.
+- **Stage 8.** The contact point is **not** provisioned from the
+  environment: Grafana refuses a webhook contact point with an empty URL,
+  which would break the local Grafana for anyone without one. Rules are
+  provisioned; where they go is configured where Grafana runs. The
+  collector configuration is the LGTM image's plus `tail_sampling`
+  (validated with the image's own `otelcol-contrib`), 100% in the local
+  compose and 10% by default elsewhere. In the local stack all seven
+  rules evaluated without errors and "API not reporting" fired with the
+  API stopped.
