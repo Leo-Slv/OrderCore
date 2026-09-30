@@ -25,6 +25,30 @@ public sealed record PaymentRefundResult(bool Succeeded, string? FailureReason);
 
 public sealed record PaymentVoidResult(bool Succeeded, string? FailureReason);
 
+/// <summary>Where the provider says a payment stands (reconciliation).</summary>
+public enum PaymentProviderStatus
+{
+    /// <summary>Created, waiting for the buyer to confirm (a decline included: they may retry).</summary>
+    WaitingForBuyer,
+
+    Authorized,
+    Captured,
+    Canceled,
+}
+
+/// <summary>
+/// The provider's own view of a payment, asked for when OrderCore may have
+/// missed a webhook. <see cref="DeclineReason"/> is the buyer's last declined
+/// attempt; <see cref="AuthorizationExpiresAt"/> the capture deadline of an
+/// authorization; <see cref="AuthorizationExpired"/> whether a cancellation
+/// was the provider releasing an expired authorization.
+/// </summary>
+public sealed record PaymentProviderState(
+    PaymentProviderStatus Status,
+    string? DeclineReason = null,
+    DateTimeOffset? AuthorizationExpiresAt = null,
+    bool AuthorizationExpired = false);
+
 /// <summary>
 /// What a provider offers the storefront: its name, the payment methods it
 /// takes, and — for providers whose card form runs in the browser (Stripe) —
@@ -64,4 +88,10 @@ public interface IPaymentProvider
     /// waits for the buyer, or for a provider that never waits.
     /// </summary>
     Task<string?> GetClientSecretAsync(Payment payment, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Where the provider says the payment stands — for a payment it already
+    /// knows (one with a <see cref="Payment.ProviderReference"/>).
+    /// </summary>
+    Task<PaymentProviderState> GetStateAsync(Payment payment, CancellationToken cancellationToken);
 }

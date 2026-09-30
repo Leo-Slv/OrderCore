@@ -86,6 +86,11 @@ public static class PaymentsDependencyInjection
         services.AddScoped<ExpirePaymentWindowUseCase>();
         services.AddHostedService<PaymentWindowBackgroundService>();
 
+        // Reconciliation: what the provider says, for payments that may have missed a webhook.
+        services.AddOptions<ReconciliationOptions>().Bind(configuration.GetSection(ReconciliationOptions.SectionName));
+        services.AddScoped<ReconcilePaymentUseCase>();
+        services.AddHostedService<ReconciliationBackgroundService>();
+
         return services;
     }
 }

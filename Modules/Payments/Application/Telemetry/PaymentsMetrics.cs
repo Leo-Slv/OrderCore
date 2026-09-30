@@ -20,6 +20,7 @@ public sealed class PaymentsMetrics
     private readonly Counter<long> _refunds;
     private readonly Histogram<double> _providerDuration;
     private readonly Counter<long> _providerUpdates;
+    private readonly Counter<long> _reconciliations;
 
     public PaymentsMetrics(IMeterFactory meterFactory)
     {
@@ -39,12 +40,20 @@ public sealed class PaymentsMetrics
             "ordercore.payments.provider_updates",
             "{update}",
             "What the provider told us (webhooks), by kind and whether it changed the payment.");
+        _reconciliations = meter.CreateCounter<long>(
+            "ordercore.payments.reconciliations",
+            "{payment}",
+            "Payments checked against the provider: in sync, or corrected (a divergence found).");
     }
 
     /// <param name="kind">What the provider said, e.g. <c>authorized</c>, <c>declined</c>, <c>canceled</c>.</param>
     /// <param name="outcome"><c>applied</c>, <c>ignored</c> (already so, or moved on), <c>unknown_payment</c> or <c>duplicate</c>.</param>
     public void ProviderUpdate(string kind, string outcome) =>
         _providerUpdates.Add(1, new("ordercore.update_kind", kind), new("ordercore.outcome", outcome));
+
+    /// <param name="outcome"><c>in_sync</c> or <c>corrected</c>.</param>
+    public void Reconciled(string outcome) =>
+        _reconciliations.Add(1, new KeyValuePair<string, object?>("ordercore.outcome", outcome));
 
     public void Authorized(string method) =>
         _authorizations.Add(1, new("ordercore.outcome", "approved"), new("ordercore.payment_method", method));

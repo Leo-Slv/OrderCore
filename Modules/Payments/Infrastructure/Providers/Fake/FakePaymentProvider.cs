@@ -100,6 +100,19 @@ public sealed class FakePaymentProvider : IPaymentProvider
     public Task<string?> GetClientSecretAsync(Payment payment, CancellationToken cancellationToken) =>
         Task.FromResult<string?>(null);
 
+    /// <summary>
+    /// The fake keeps no state of its own: whatever OrderCore recorded is what
+    /// it "says", so reconciling a fake payment never finds a divergence.
+    /// </summary>
+    public Task<PaymentProviderState> GetStateAsync(Payment payment, CancellationToken cancellationToken) =>
+        Task.FromResult(payment.Status switch
+        {
+            PaymentStatus.Authorized => new PaymentProviderState(PaymentProviderStatus.Authorized, AuthorizationExpiresAt: payment.AuthorizationExpiresAt),
+            PaymentStatus.Captured or PaymentStatus.Refunded => new PaymentProviderState(PaymentProviderStatus.Captured),
+            PaymentStatus.Voided or PaymentStatus.Failed => new PaymentProviderState(PaymentProviderStatus.Canceled),
+            _ => new PaymentProviderState(PaymentProviderStatus.WaitingForBuyer, payment.LastDeclineReason),
+        });
+
     private bool AcceptsReversals => _options.Mode is FakePaymentProviderMode.Success or FakePaymentProviderMode.CaptureDeclined;
 
     private Task SimulateLatencyAsync(CancellationToken cancellationToken) =>

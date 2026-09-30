@@ -25,14 +25,17 @@ public sealed class PaymentsController : ControllerBase
     private readonly RequestRefundUseCase _requestRefundUseCase;
     private readonly ListPaymentsUseCase _listPaymentsUseCase;
     private readonly GetPaymentByIdUseCase _getPaymentByIdUseCase;
+    private readonly ReconcilePaymentUseCase _reconcilePaymentUseCase;
 
     public PaymentsController(
         CreatePaymentUseCase createPaymentUseCase,
         GetPaymentByOrderIdUseCase getPaymentByOrderIdUseCase,
         RequestRefundUseCase requestRefundUseCase,
         ListPaymentsUseCase listPaymentsUseCase,
-        GetPaymentByIdUseCase getPaymentByIdUseCase)
+        GetPaymentByIdUseCase getPaymentByIdUseCase,
+        ReconcilePaymentUseCase reconcilePaymentUseCase)
     {
+        _reconcilePaymentUseCase = reconcilePaymentUseCase;
         _createPaymentUseCase = createPaymentUseCase;
         _getPaymentByOrderIdUseCase = getPaymentByOrderIdUseCase;
         _requestRefundUseCase = requestRefundUseCase;
@@ -100,5 +103,20 @@ public sealed class PaymentsController : ControllerBase
         var refund = await _requestRefundUseCase.ExecuteAsync(new RequestRefundCommand(id, request.Amount, request.Reason), cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, PaymentPresenter.ToResponse(refund));
+    }
+
+    /// <summary>
+    /// Checks the payment against the provider and corrects it if a webhook
+    /// was missed, through the same transitions a webhook takes. Safe to
+    /// repeat: a payment in sync is left untouched.
+    /// </summary>
+    [HttpPost("{id:guid}/reconcile")]
+    [ProducesResponseType(typeof(PaymentReconciliationResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PaymentReconciliationResponse>> ReconcileAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _reconcilePaymentUseCase.ExecuteAsync(id, cancellationToken);
+
+        return Ok(new PaymentReconciliationResponse(result.PaymentId, result.StatusBefore, result.StatusAfter, result.ProviderStatus, result.Changed));
     }
 }

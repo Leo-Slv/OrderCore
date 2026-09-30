@@ -55,6 +55,21 @@ public sealed class EfPaymentRepository : IPaymentRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<Guid>> ListToReconcileAsync(
+        DateTimeOffset processingSince, DateTimeOffset now, int limit, CancellationToken cancellationToken)
+    {
+        var processing = nameof(PaymentStatus.Processing);
+        var authorized = nameof(PaymentStatus.Authorized);
+        return await _dbContext.Payments
+            .AsNoTracking()
+            .Where(p => (p.Status == processing && p.CreatedAt < processingSince)
+                || (p.Status == authorized && p.AuthorizationExpiresAt != null && p.AuthorizationExpiresAt < now))
+            .OrderBy(p => p.CreatedAt)
+            .Select(p => p.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
     public Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken)
     {
         var authorized = nameof(PaymentStatus.Authorized);

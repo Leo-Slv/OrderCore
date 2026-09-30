@@ -122,6 +122,22 @@ public sealed class StripePaymentProvider : IPaymentProvider
             : null;
     }
 
+    /// <summary>The intent as Stripe has it, in OrderCore's terms.</summary>
+    public async Task<PaymentProviderState> GetStateAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        var intent = await _paymentIntents.GetAsync(
+            IntentOf(payment), new PaymentIntentGetOptions { Expand = ["latest_charge"] }, requestOptions: null, cancellationToken);
+
+        return intent.Status switch
+        {
+            "requires_capture" => new PaymentProviderState(PaymentProviderStatus.Authorized, AuthorizationExpiresAt: CaptureDeadlineOf(intent)),
+            "succeeded" => new PaymentProviderState(PaymentProviderStatus.Captured),
+            "canceled" => new PaymentProviderState(PaymentProviderStatus.Canceled, AuthorizationExpired: intent.CancellationReason == "automatic"),
+            _ => new PaymentProviderState(
+                PaymentProviderStatus.WaitingForBuyer, intent.LastPaymentError?.DeclineCode ?? intent.LastPaymentError?.Code),
+        };
+    }
+
     /// <summary>
     /// Until when an authorized intent can be captured: its card charge's
     /// <c>capture_before</c> (it varies by card network and country); null
@@ -131,10 +147,13 @@ public sealed class StripePaymentProvider : IPaymentProvider
     {
         var intent = await _paymentIntents.GetAsync(
             paymentIntentId, new PaymentIntentGetOptions { Expand = ["latest_charge"] }, requestOptions: null, cancellationToken);
-        return intent.LatestCharge?.PaymentMethodDetails?.Card?.CaptureBefore is { } captureBefore
+        return CaptureDeadlineOf(intent);
+    }
+
+    private static DateTimeOffset? CaptureDeadlineOf(PaymentIntent intent) =>
+        intent.LatestCharge?.PaymentMethodDetails?.Card?.CaptureBefore is { } captureBefore
             ? new DateTimeOffset(DateTime.SpecifyKind(captureBefore, DateTimeKind.Utc))
             : null;
-    }
 
     /// <summary>Refunds the payment's pending refund — the one the use case just requested.</summary>
     public async Task<PaymentRefundResult> RefundAsync(Payment payment, CancellationToken cancellationToken)

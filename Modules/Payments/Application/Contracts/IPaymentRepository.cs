@@ -22,6 +22,14 @@ public interface IPaymentRepository
     /// <summary>Payments still waiting for the buyer that were created before <paramref name="cutoff"/>, oldest first.</summary>
     Task<IReadOnlyList<Guid>> ListAwaitingBuyerCreatedBeforeAsync(DateTimeOffset cutoff, int limit, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Payments whose provider state may have moved without a webhook reaching
+    /// OrderCore: still <c>Processing</c> since before <paramref name="processingSince"/>,
+    /// or <c>Authorized</c> past their authorization's expiry at <paramref name="now"/>. Oldest first.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ListToReconcileAsync(
+        DateTimeOffset processingSince, DateTimeOffset now, int limit, CancellationToken cancellationToken);
+
     /// <summary>Authorized payments whose authorization expires before <paramref name="cutoff"/>.</summary>
     Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken);
 

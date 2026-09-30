@@ -30,6 +30,7 @@ public static class AuditLogActionNames
     public const string PaymentAuthorizationExpired = "PaymentAuthorizationExpired";
     public const string PaymentDisputed = "PaymentDisputed";
     public const string PaymentRefundSettled = "PaymentRefundSettled";
+    public const string PaymentReconciled = "PaymentReconciled";
 
     public const string InventoryReserved = "InventoryReserved";
     public const string InventoryReleased = "InventoryReleased";
