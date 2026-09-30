@@ -414,6 +414,58 @@ When writing new code:
   `HealthEndpoints.Ready`; anything else worth watching goes to
   `/health/details` only. Dashboards live as code in `deploy/grafana`.
 
+## Production readiness (deploy, edge, limits)
+
+The API ships as a container image built and published by CI; the
+deploy runbook is `Docs/operations/deployment.md`
+(`Docs/specs/operations/production-readiness.md`):
+
+- **CI must be green.** `.github/workflows/ci.yml` builds, checks
+  formatting and runs the three test projects on every push; a green
+  `master` publishes the image. Work lands on a branch first
+  (`v<n>/<topic>`), and reaches `master` by fast-forward once its run
+  is green.
+- **Line endings are LF** (`.gitattributes`, `.editorconfig`), so
+  `dotnet format` agrees locally and on the Linux runner. `dotnet ef
+  migrations add` on Windows writes CRLF: convert the generated files
+  (and the model snapshot) to LF before committing, or the format check
+  fails.
+- **Migrations run only through `migrate`** (`docker run <image>
+  migrate`, `DatabaseMigrator`): a new module's `DbContext` registers
+  itself with `services.AddDatabaseMigrations<TDbContext>(order)` next
+  to its `AddDbContext`. Never migrate from startup.
+- **One API instance** is assumed by the outbox relay, the consumers,
+  the payment and retention jobs and SignalR. Don't add work that would
+  break with a second instance without planning for it (row claiming,
+  a leader, a backplane).
+- **Rate limits:** an endpoint that is anonymous or expensive gets a
+  fixed-window policy registered by its module (`<Module>RateLimits`,
+  `AddFixedWindowPolicy`, values under `RateLimits:<Policy>`) and
+  `[EnableRateLimiting]`; the `429 too_many_requests` ProblemDetails
+  and its OpenAPI response come for free. Integration tests run with
+  very high limits (`OrderCoreApiFactory`); a rate-limit test sets its
+  own and fakes the client address with `RemoteAddressFromTestHeader`.
+- **Fail fast on misconfiguration:** a setting that would let the API
+  start but misbehave gets an `IValidateOptions<T>` with
+  `ValidateOnStart` that names the setting and never echoes a secret
+  (`StripeOptionsValidator`). A setting every deployment must provide
+  goes into `ProductionSettingsValidator` (checked outside Development),
+  is blanked in `appsettings.Production.json` when it has a development
+  default, and is listed in the runbook's settings table.
+- **The edge is shared:** forwarded headers only from trusted proxies
+  (`ForwardedHeaders` section), HSTS/HTTPS outside Development (except
+  `/health`), security headers and `no-store` on authenticated responses
+  are applied to every endpoint by `Program.cs`; endpoints don't set
+  them.
+- **Technical tables have retention** (`RetentionCleaner`, Messaging):
+  outboxes and consumer inboxes are covered by their registration; an
+  inbox kept outside the consumer host declares itself with
+  `AddInboxSource<TDbContext>()`. Business history (timeline, audit) is
+  never deleted.
+- **Alerts are code** (`deploy/grafana/alerting`): a new failure that
+  should wake someone gets a rule next to the existing ones, on a metric
+  the code already records.
+
 ## Cross-Cutting Concerns
 
 Cross-cutting concerns shared across multiple business modules belong under
@@ -431,7 +483,12 @@ Cross-cutting concerns shared across multiple business modules belong under
   `Cors/CorsExtensions`; `Conventions/ApiRoutePrefixConvention`;
   `Authentication/` (`AuthorizationPolicies`, `HttpContextCurrentUser`,
   `OrderCoreClaimTypes`); `OpenApi/BearerSecurityTransformer`;
-  `Observability/` (`TraceResponseExtensions`, `HealthEndpoints`).
+  `Observability/` (`TraceResponseExtensions`, `HealthEndpoints`);
+  `Hosting/` (`ForwardedHeadersExtensions`, `ProductionSettingsCheck`);
+  `Security/` (`SecurityHeadersExtensions`); `RateLimiting/`
+  (`RateLimitingExtensions`); `OpenApi/RateLimitResponseTransformer`.
+- `Shared/Infrastructure/Persistence` — `ChildCollectionReconciler` and
+  `DatabaseMigrator` (the `migrate` command, see Production readiness).
 - `Shared/Application/Observability` (`Observed`, `DurationBuckets`) and
   `Shared/Infrastructure/Observability` (`ObservabilityExtensions`,
   `SpanIdsLogProcessor`, `PostgresHealthCheck`) — see Observability above.
