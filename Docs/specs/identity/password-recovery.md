@@ -80,3 +80,16 @@ accounts, prove their address and follow their orders.
    `403 email_not_confirmed` (the storefront offers to resend the link);
    everything else works. Existing accounts are treated as confirmed.
 5. **Portuguese (pt-BR) only.**
+6. **A new technical module, Notifications**, owns sending e-mail (the
+   queue, the providers, the retries) and the order e-mails, which it
+   drives from Orders' integration events; Identity asks it for account
+   e-mails through its own contract.
+7. **A queued e-mail's body is erased once it is sent or given up on.**
+   Identity keeps only a hash of each token (like refresh tokens); the
+   link lives in the queued e-mail only until it goes out, then the
+   record keeps just the masked recipient, the kind and the outcome.
+8. **The confirmation link lasts 24 hours** (the reset link, 30
+   minutes); a new one can be asked for at any time.
+9. **Checkout learns of the confirmation from the access token**: it
+   carries an `email_confirmed` claim, and the storefront refreshes the
+   session after confirming, so Orders keeps no dependency on Identity.
