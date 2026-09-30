@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Inventory.Application.Contracts;
 using OrderCore.Api.Modules.Inventory.Domain.Entities;
+using OrderCore.Api.Modules.Inventory.Domain.Enums;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Mappers;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Models;
 using OrderCore.Api.Shared.Domain;
@@ -46,6 +47,18 @@ public sealed class EfInventoryReservationRepository : IInventoryReservationRepo
             .ToListAsync(cancellationToken);
 
         return (models.Select(InventoryReservationMapper.ToDomain).ToList(), totalCount);
+    }
+
+    public async Task<IReadOnlyList<Guid>> ListExpiredActiveAsync(DateTimeOffset now, int limit, CancellationToken cancellationToken)
+    {
+        var reserved = nameof(ReservationStatus.Reserved);
+        return await _dbContext.Reservations
+            .AsNoTracking()
+            .Where(r => r.Status == reserved && r.ExpiresAt != null && r.ExpiresAt < now)
+            .OrderBy(r => r.ExpiresAt)
+            .Select(r => r.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
     }
 
     public async Task AddAsync(InventoryReservation reservation, CancellationToken cancellationToken)

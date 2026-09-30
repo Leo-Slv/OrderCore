@@ -15,5 +15,8 @@ public interface IInventoryReservationRepository
     Task<(IReadOnlyList<InventoryReservation> Items, int TotalCount)> ListByProductIdAsync(
         Guid productId, int page, int pageSize, CancellationToken cancellationToken);
 
+    /// <summary>Reservations still holding stock past their <c>ExpiresAt</c>, oldest first (ids only).</summary>
+    Task<IReadOnlyList<Guid>> ListExpiredActiveAsync(DateTimeOffset now, int limit, CancellationToken cancellationToken);
+
     Task AddAsync(InventoryReservation reservation, CancellationToken cancellationToken);
 }

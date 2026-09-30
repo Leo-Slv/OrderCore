@@ -27,10 +27,10 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
     public DateTimeOffset ReservedAt { get; private set; }
 
     /// <summary>
-    /// Always null for now: nothing in 04-inventory.md sets it (no
-    /// expiration policy/duration is specified anywhere) or reads it (no
-    /// scheduled job auto-expiring reservations exists yet) — same
-    /// treatment as <c>StockItem.ReorderLevel</c>.
+    /// When the reservation stops holding stock if nothing else ended it:
+    /// <see cref="Lifetime"/> after it was made. Expired by
+    /// <c>ReservationExpiryBackgroundService</c> (a safety net; the order and
+    /// payment deadlines release reservations long before).
     /// </summary>
     public DateTimeOffset? ExpiresAt { get; private set; }
 
@@ -64,6 +64,13 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
     /// which must guard against the race condition described in section 11
     /// ("Stock = 1, Request A and Request B reserve concurrently").
     /// </summary>
+    /// <summary>
+    /// The longest a reservation holds stock (unpaid-order spec, decision 2): well
+    /// above the 30-minute order and payment deadlines, so expiring at it is only a
+    /// safety net for what slipped past them.
+    /// </summary>
+    public static readonly TimeSpan Lifetime = TimeSpan.FromHours(2);
+
     public static InventoryReservation Create(Guid productId, Guid orderId, Guid orderItemId, int quantity, DateTimeOffset now)
     {
         if (quantity <= 0)
@@ -72,6 +79,7 @@ public sealed class InventoryReservation : AggregateRoot<Guid>
         }
 
         var reservation = new InventoryReservation(Guid.NewGuid(), productId, orderId, orderItemId, quantity, now);
+        reservation.ExpiresAt = now + Lifetime;
         reservation.IncrementVersion();
         reservation.Raise(new InventoryStockMovementRecorded(
             Guid.NewGuid(), now, productId, StockMovementType.ReservationCreated, quantity, nameof(InventoryReservation), reservation.Id, OrderId: orderId));

@@ -17,6 +17,9 @@ public sealed class InventoryReservationConfiguration : IEntityTypeConfiguration
         builder.HasIndex(r => r.OrderId);
         builder.HasIndex(r => r.ProductId);
 
+        // The expiry safety net looks for reservations still held past their time.
+        builder.HasIndex(r => new { r.Status, r.ExpiresAt });
+
         builder.Property(r => r.Version).IsConcurrencyToken();
     }
 }
