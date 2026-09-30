@@ -63,6 +63,7 @@ public static class PaymentsDependencyInjection
         services.AddScoped<OutboxWriter<PaymentsDbContext>>();
         services.AddScoped<IPaymentsOutbox, PaymentsOutbox>();
         services.AddOutboxSource<PaymentsDbContext>();
+        services.AddInboxSource<PaymentsDbContext>();
         services.AddIntegrationEvent<PaymentRequested>(PaymentRequested.Name, 1);
         services.AddIntegrationEvent<PaymentAuthorized>(PaymentAuthorized.Name, 1);
         services.AddIntegrationEvent<PaymentFailed>(PaymentFailed.Name, 1);

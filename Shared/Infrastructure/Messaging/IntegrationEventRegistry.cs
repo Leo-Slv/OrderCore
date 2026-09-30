@@ -17,9 +17,13 @@ public sealed class IntegrationEventRegistry
     private readonly Dictionary<string, Type> _typesByKey = new(StringComparer.Ordinal);
     private readonly Dictionary<Type, EventContract> _contractsByType = new();
     private readonly List<Type> _outboxSources = new();
+    private readonly List<Type> _inboxSources = new();
     private readonly List<ConsumerRegistration> _consumers = new();
 
     public IReadOnlyCollection<Type> OutboxSources => _outboxSources;
+
+    /// <summary>The contexts that hold an inbox (<c>{module}_processed_messages</c>), for retention.</summary>
+    public IReadOnlyCollection<Type> InboxSources => _inboxSources;
 
     public IReadOnlyCollection<ConsumerRegistration> Consumers => _consumers;
 
@@ -53,6 +57,14 @@ public sealed class IntegrationEventRegistry
         if (!_outboxSources.Contains(dbContextType))
         {
             _outboxSources.Add(dbContextType);
+        }
+    }
+
+    internal void AddInboxSource(Type dbContextType)
+    {
+        if (!_inboxSources.Contains(dbContextType))
+        {
+            _inboxSources.Add(dbContextType);
         }
     }
 

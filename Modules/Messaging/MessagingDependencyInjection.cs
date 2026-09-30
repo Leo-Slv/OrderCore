@@ -6,6 +6,7 @@ using OrderCore.Api.Modules.Messaging.Infrastructure.Health;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
+using OrderCore.Api.Modules.Messaging.Infrastructure.Retention;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Relay;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
@@ -51,6 +52,12 @@ public static class MessagingDependencyInjection
         services.AddScoped<GetFailedMessageUseCase>();
         services.AddScoped<ReplayFailedMessageUseCase>();
         services.AddScoped<DiscardFailedMessageUseCase>();
+
+        // Retention: sent outbox rows, handled inbox rows and resolved failed messages
+        // past their time are removed daily (Messaging:Retention).
+        services.AddOptions<RetentionOptions>().Bind(configuration.GetSection(RetentionOptions.SectionName));
+        services.AddSingleton<RetentionCleaner>();
+        services.AddHostedService<RetentionBackgroundService>();
 
         services.AddHealthChecks()
             .AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: [HealthEndpoints.Ready], timeout: TimeSpan.FromSeconds(5))

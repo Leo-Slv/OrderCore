@@ -35,6 +35,7 @@ public sealed class MessagingTelemetry : IDisposable
     private readonly Counter<long> _retries;
     private readonly Counter<long> _failed;
     private readonly Histogram<double> _handlingDuration;
+    private readonly Counter<long> _retentionDeleted;
     private readonly ConcurrentDictionary<string, (long Pending, double OldestAgeSeconds)> _backlog = new();
 
     public MessagingTelemetry(IMeterFactory meterFactory)
@@ -52,6 +53,8 @@ public sealed class MessagingTelemetry : IDisposable
             "ordercore.messaging.failed", "{message}", "Messages set aside in failed_messages.");
         _handlingDuration = _meter.CreateHistogram(
             "ordercore.messaging.handling.duration", "s", "How long a consumer took to handle a delivery.", tags: null, advice: DurationBuckets.Seconds);
+        _retentionDeleted = _meter.CreateCounter<long>(
+            "ordercore.messaging.retention.deleted", "{row}", "Technical rows removed by retention (sent outbox, handled inbox, resolved failed messages), per table.");
         _meter.CreateObservableGauge(
             "ordercore.messaging.outbox.pending",
             () => _backlog.Select(b => new Measurement<long>(b.Value.Pending, new KeyValuePair<string, object?>("ordercore.module", b.Key))),
@@ -150,6 +153,10 @@ public sealed class MessagingTelemetry : IDisposable
     /// <summary>Called by the relay on every poll, per outbox.</summary>
     public void ReportBacklog(string module, long pending, TimeSpan oldestAge) =>
         _backlog[module] = (pending, oldestAge.TotalSeconds);
+
+    /// <summary>Rows retention removed from <paramref name="table"/> in one run.</summary>
+    public void RetentionDeleted(string table, long rows) =>
+        _retentionDeleted.Add(rows, new KeyValuePair<string, object?>("ordercore.messaging.table", table));
 
     public void Dispose() => _meter.Dispose();
 }

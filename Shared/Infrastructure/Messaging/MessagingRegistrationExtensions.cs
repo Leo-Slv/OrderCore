@@ -45,6 +45,7 @@ public static class MessagingRegistrationExtensions
         where TInboxDbContext : DbContext
     {
         services.TryAddScoped<THandler>();
+        services.IntegrationEventRegistry().AddInboxSource(typeof(TInboxDbContext));
         services.IntegrationEventRegistry().AddConsumer(new ConsumerRegistration(
             queue,
             typeof(TEvent),
@@ -52,6 +53,17 @@ public static class MessagingRegistrationExtensions
             (provider, integrationEvent, cancellationToken) =>
                 provider.GetRequiredService<THandler>().HandleAsync((TEvent)integrationEvent, cancellationToken),
             provider => provider.GetRequiredService<TInboxDbContext>()));
+        return services;
+    }
+
+    /// <summary>
+    /// Declares an inbox kept outside the consumer host (Payments' Stripe
+    /// webhooks), so retention cleans it like the consumers' inboxes.
+    /// </summary>
+    public static IServiceCollection AddInboxSource<TDbContext>(this IServiceCollection services)
+        where TDbContext : DbContext
+    {
+        services.IntegrationEventRegistry().AddInboxSource(typeof(TDbContext));
         return services;
     }
 

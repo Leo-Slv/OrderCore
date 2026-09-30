@@ -28,6 +28,9 @@ public static class MessagingModelBuilderExtensions
 
             // The relay only ever reads what is still waiting, oldest first.
             builder.HasIndex(m => m.OccurredAt).HasFilter("\"SentAt\" IS NULL");
+
+            // Retention removes what was sent long ago.
+            builder.HasIndex(m => m.SentAt).HasFilter("\"SentAt\" IS NOT NULL");
         });
 
         return modelBuilder;
@@ -41,6 +44,9 @@ public static class MessagingModelBuilderExtensions
             builder.ToTable($"{module}_processed_messages");
             builder.HasKey(m => new { m.MessageId, m.Consumer });
             builder.Property(m => m.Consumer).HasMaxLength(200);
+
+            // Retention removes what was handled long ago.
+            builder.HasIndex(m => m.ProcessedAt);
         });
 
         return modelBuilder;

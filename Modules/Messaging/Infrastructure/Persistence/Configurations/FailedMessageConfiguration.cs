@@ -26,5 +26,8 @@ public sealed class FailedMessageConfiguration : IEntityTypeConfiguration<Failed
         // The backoffice lists the pending ones, most recent failure first.
         builder.HasIndex(m => new { m.Status, m.LastFailedAt });
         builder.HasIndex(m => m.MessageId);
+
+        // Retention removes messages resolved (replayed or discarded) long ago.
+        builder.HasIndex(m => m.ResolvedAt).HasFilter("\"ResolvedAt\" IS NOT NULL");
     }
 }
