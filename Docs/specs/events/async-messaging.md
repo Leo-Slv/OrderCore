@@ -28,7 +28,7 @@ visible as one timeline.
    tying together everything one request caused (the checkout that led to the authorization that led to
    the confirmation). A consumer depends on the message contract, not on
    the publishing module's types — which is what lets Payments leave the
-   process later (V4, PayCore) without its consumers changing.
+   process later (PayCore, in the future) without its consumers changing.
 5. **More modules publish.** Besides Payments, Orders and Inventory
    publish the changes others need to react to or show (decision 3).
 6. **Order timeline.** The admin order detail shows one timeline of what
@@ -67,7 +67,7 @@ visible as one timeline.
 
 ## Out of scope
 
-- Extracting Payments into PayCore (V4).
+- Extracting Payments into PayCore (future).
 - Pushing updates to the browser (V3 "Tracking", its own feature).
 - OpenTelemetry tracing, metrics and dashboards (V3 "Observabilidade"),
   beyond carrying a correlation id in every message.
@@ -87,7 +87,7 @@ visible as one timeline.
    *announce* travels through RabbitMQ; what Orders *asks* of Payments
    (request payment, capture on shipping, settle on cancellation) stays
    a synchronous call answering with the outcome. Turning those requests
-   into messages belongs to V4, when Payments becomes PayCore.
+   into messages belongs to the future PayCore extraction.
 3. **Events published:**
    - Payments: the existing requested/authorized/failed/refunded, plus
      **captured** and **voided**; (the Stripe feature later adds
@@ -113,4 +113,4 @@ visible as one timeline.
 7. **Message contracts live in the publishing module**, in a public
    `Contracts/IntegrationEvents` area that is the only part of a module
    other modules may reference (enforced by an architecture test). For
-   PayCore (V4) that area becomes Payments' contract package.
+   PayCore (future) that area becomes Payments' contract package.

@@ -15,7 +15,7 @@ own commit(s).
 - **The `Contracts` rule is about messages.** A message handler may only
   depend on the publishing module's `Contracts/IntegrationEvents` (an
   architecture test enforces it). Synchronous adapters keep calling the
-  owning module's Application layer, as today, until V4.
+  owning module's Application layer, as today, until the PayCore extraction.
 - **Retries:** 5 attempts — immediately, then after 10 s, 1 min, 5 min and
   30 min — before a message goes to the failed-message list. The schedule
   is fixed in code; only the test host shortens it (see Stage 1).

@@ -47,7 +47,7 @@ from scattered console lines (`ORDERCORE_CONTEXT.md` section 30).
   RabbitMQ with retries and dead-lettering, "why is this order still
   PendingPayment?" can only be answered by following the message.
   Today there is nothing to follow.
-- **PayCore (V4) makes it mandatory.** Section 30's goal is one trace
+- **PayCore (future) makes it mandatory.** Section 30's goal is one trace
   from `POST /orders` through RabbitMQ, PayCore and Stripe and back; that
   has to work inside one process first.
 - **Readiness is a real gap.** `/health` answers 200 even with the
@@ -67,7 +67,7 @@ from scattered console lines (`ORDERCORE_CONTEXT.md` section 30).
 
 1. **OpenTelemetry.** Traces, metrics and logs are emitted with
    OpenTelemetry and exported over OTLP — vendor neutral, what .NET emits
-   natively, and what a trace crossing into PayCore (V4) needs.
+   natively, and what a trace crossing into PayCore (future) needs.
 2. **Grafana LGTM, persisted.** Locally, `docker compose` runs the
    Grafana stack (Tempo for traces, Loki for logs, Prometheus/Mimir for
    metrics, Grafana to explore them and hold dashboards) with its data

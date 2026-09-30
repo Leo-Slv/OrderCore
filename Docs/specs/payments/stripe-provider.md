@@ -53,14 +53,14 @@ asynchronous answers arriving through verified webhooks (section 28).
 - **Real providers are asynchronous.** 3-D Secure, delayed bank
   answers, disputes and refunds settled later only exist with a real
   provider; the webhook path, the idempotency and (later) reconciliation
-  are what make PayCore (V4) credible.
+  are what make PayCore (future) credible.
 - **The capture-on-ship and void-on-cancel decisions** of the backoffice
   map directly to Stripe's manual capture, which is how a real shop
   holds money until it ships.
 
 ## Out of scope
 
-- Moving Payments into PayCore (V4) — the webhook endpoint lives in
+- Moving Payments into PayCore (future) — the webhook endpoint lives in
   OrderCore's Payments module for now.
 - Saved cards / Stripe customers for returning buyers
   (`CustomerPaymentMethod` stays unused).
