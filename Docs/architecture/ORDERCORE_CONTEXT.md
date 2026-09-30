@@ -1539,6 +1539,15 @@ Idealmente tudo deve ser associado ao mesmo distributed trace.
   `/health/details` para o admin (cada check, o backlog dos outboxes e as
   mensagens que falharam esperando alguém). O container da API usa
   `ready` como healthcheck.
+- **Alertas como código** (V4) em `deploy/grafana/alerting`: API sem
+  reportar, eventos parados num outbox, mensagens com falha, recusas de
+  cartão acima do normal, erros do provedor de pagamento, muitas
+  requisições barradas pelos limites e muitas contas bloqueadas. O canal
+  de notificação é configurado onde o Grafana roda.
+- **Amostragem no coletor** (V4): a API exporta todos os spans e o
+  coletor (`deploy/otel/otelcol-config.yaml`) guarda todo trace com erro
+  ou lento e uma porcentagem do resto — decidir "guardar os erros" só é
+  possível depois que o trace termina.
 
 **Audit log.** O `AuditLogs` guarda cada ação relevante (pedido criado,
 enviado, cancelado; pagamento autorizado, capturado, anulado; produto
@@ -1603,8 +1612,27 @@ O que já está implementado (módulo `Identity`, ver
   chave;
 * a auditoria registra quem fez cada ação.
 
-Ainda não implementado: rate limiting de login, verificação de e-mail,
-recuperação de senha e permissões finas de admin.
+Acrescentado pela prontidão para produção (V4,
+`Docs/specs/operations/production-readiness.md`):
+
+* **rate limiting** com o limitador nativo do ASP.NET Core, uma política
+  por endpoint declarada pelo módulo dono: login, cadastro e refresh por
+  endereço do cliente, checkout por cliente, webhook do Stripe por
+  endereço; acima do limite, `429 too_many_requests` com `Retry-After`;
+* **bloqueio de conta**: senhas erradas em sequência bloqueiam a conta por
+  um tempo, e uma conta bloqueada responde exatamente como senha errada
+  (o bloqueio não revela quais contas existem);
+* **borda**: cabeçalhos encaminhados aceitos só de proxies confiáveis,
+  HTTPS com HSTS fora do desenvolvimento, `AllowedHosts` obrigatório,
+  cabeçalhos de segurança em toda resposta e `no-store` nas autenticadas;
+* **falhar cedo**: configuração do Stripe que funcionaria mal (chave live
+  sem permissão explícita, modos misturados, sem segredo do webhook) e
+  configurações de produção ausentes impedem a API de subir;
+* a imagem roda sem root.
+
+Ainda não implementado: verificação de e-mail e recuperação de senha
+(V5, `Docs/specs/identity/password-recovery.md`) e permissões finas de
+admin.
 
 Quando utilizar Stripe, os dados sensíveis devem ser tratados conforme o modelo de integração escolhido pelo provider.
 
@@ -2072,6 +2100,21 @@ Redis
 ```
 
 A infraestrutura deverá ser inicializável de forma simples.
+
+**Implantação (V4).** A hospedagem ainda não foi escolhida, então tudo é
+neutro de plataforma (`Docs/operations/deployment.md`):
+
+* o CI (GitHub Actions) compila, verifica a formatação e roda os três
+  projetos de teste em todo push; no `master` verde, publica a imagem da
+  API no GitHub Container Registry (`sha-<commit>` e `latest`);
+* as migrations são um passo explícito do deploy — `docker run <imagem>
+  migrate` aplica as dos oito bancos em ordem fixa e para na primeira
+  falha —, nunca a subida da API;
+* **uma instância só**: o relay do outbox, os consumidores, os jobs de
+  pagamento e o SignalR assumem uma instância; várias exigiriam trava de
+  linhas ou eleição de líder e um backplane para o SignalR;
+* registros técnicos (outbox enviado, inbox, mensagens com falha
+  resolvidas) têm retenção; a timeline do pedido e a auditoria, não.
 
 ---
 
