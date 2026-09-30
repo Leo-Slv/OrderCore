@@ -71,6 +71,12 @@ services:
       # OrderCore's dashboards, provisioned from the repository (read-only).
       - ./deploy/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ordercore.yaml:ro
       - ./deploy/grafana/dashboards:/otel-lgtm/ordercore-dashboards:ro
+      # Alert rules as code, and the collector with tail sampling of traces.
+      - ./deploy/grafana/alerting/ordercore-rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/ordercore-rules.yaml:ro
+      - ./deploy/otel/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro
+    environment:
+      # Keep every trace locally (debugging); the collector's default is 10%.
+      TRACE_SAMPLING_PERCENTAGE: ${TRACE_SAMPLING_PERCENTAGE:-100}
     networks:
       - ordercore-net
 

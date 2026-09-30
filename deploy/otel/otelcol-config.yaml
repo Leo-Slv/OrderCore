@@ -1,0 +1,95 @@
+# The OpenTelemetry Collector configuration of the grafana/otel-lgtm container
+# (mounted over /otel-lgtm/otelcol-config.yaml, see docker-compose.yml): the
+# image's own configuration plus tail sampling of traces
+# (Docs/specs/operations/production-readiness.md, item 10).
+#
+# The API exports every span; keeping only some can only be decided once a
+# trace has finished, so it happens here: every trace with an error, every
+# trace slower than 1 s, and TRACE_SAMPLING_PERCENTAGE (default 10) percent
+# of the rest. Metrics and logs are not sampled. A production collector can
+# reuse the tail_sampling processor as is.
+#
+# Based on the configuration shipped in grafana/otel-lgtm; when the image
+# changes its own, compare and carry the tail_sampling part over.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - http://*
+  prometheus/collector:
+    config:
+      scrape_configs:
+        - job_name: "opentelemetry-collector"
+          scrape_interval: 1s
+          static_configs:
+            - targets: ["127.0.0.1:8888"]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/ready"
+
+processors:
+  batch:
+
+  tail_sampling:
+    # How long to wait for a trace's spans before deciding (the relay and the
+    # consumers add spans to a checkout's trace a little later).
+    decision_wait: 10s
+    num_traces: 50000
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 1000
+      - name: the-rest
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: ${env:TRACE_SAMPLING_PERCENTAGE:-10}
+
+exporters:
+  otlp_http/metrics:
+    endpoint: http://127.0.0.1:9090/api/v1/otlp
+    tls:
+      insecure: true
+  otlp_http/traces:
+    endpoint: http://127.0.0.1:4418
+    tls:
+      insecure: true
+  otlp_http/logs:
+    endpoint: http://127.0.0.1:3100/otlp
+    tls:
+      insecure: true
+  otlp_grpc/profiles:
+    endpoint: http://127.0.0.1:4040
+    tls:
+      insecure: true
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [tail_sampling, batch]
+      exporters: [otlp_http/traces]
+    metrics:
+      receivers: [otlp, prometheus/collector]
+      processors: [batch]
+      exporters: [otlp_http/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/logs]
+    profiles:
+      receivers: [otlp]
+      exporters: [otlp_grpc/profiles]

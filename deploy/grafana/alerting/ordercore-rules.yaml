@@ -1,0 +1,204 @@
+# OrderCore's alert rules, versioned with the dashboards and provisioned into
+# the Grafana of the grafana/otel-lgtm container (see docker-compose.yml) —
+# Docs/specs/operations/production-readiness.md, item 8. Where alerts are sent
+# (e-mail, Slack, a webhook) is a contact point configured where Grafana runs;
+# without one they show in Grafana's alerting page.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: OrderCore
+    folder: OrderCore
+    interval: 1m
+    rules:
+      - uid: ordercore-api-not-reporting
+        title: API not reporting
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: The API has sent no metrics for 5 minutes — it is down or can't reach the collector.
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: absent_over_time(ordercore_messaging_outbox_pending[5m])
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+              refId: C
+
+      - uid: ordercore-outbox-stuck
+        title: Events stuck in an outbox
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: "An outbox's oldest unsent event is over 5 minutes old: the relay can't publish (RabbitMQ down?)."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: max(ordercore_messaging_outbox_oldest_age_seconds)
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [300] }
+              refId: C
+
+      - uid: ordercore-failed-messages
+        title: Messages set aside as failed
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: A consumer gave up on a message after its retries; replay or discard it in the backoffice (messaging/failed-messages).
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(ordercore_messaging_failed_total[15m]))
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+              refId: C
+
+      - uid: ordercore-card-declines
+        title: Card declines above normal
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: Over half of the authorizations in the last 15 minutes were declined (with at least 10 attempts).
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: >-
+                (sum(rate(ordercore_payments_authorizations_total{ordercore_outcome="declined"}[15m]))
+                / sum(rate(ordercore_payments_authorizations_total[15m])))
+                and on() sum(increase(ordercore_payments_authorizations_total[15m])) > 10
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.5] }
+              refId: C
+
+      - uid: ordercore-payment-provider-errors
+        title: Payment provider errors
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: Calls to the payment provider are failing (Stripe unreachable or misconfigured), not just being refused.
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(ordercore_payments_provider_duration_seconds_count{ordercore_outcome="error"}[10m]))
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [5] }
+              refId: C
+
+      - uid: ordercore-rate-limited
+        title: Many requests rate limited
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: Over 100 requests turned away by rate limits in 10 minutes — someone may be guessing passwords or scraping.
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(ordercore_http_rate_limited_total[10m]))
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [100] }
+              refId: C
+
+      - uid: ordercore-account-lockouts
+        title: Many accounts locked
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: Over 10 accounts locked after wrong passwords in 10 minutes — likely a password-guessing attack.
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(ordercore_identity_lockouts_total[10m]))
+              instant: true
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [10] }
+              refId: C
