@@ -273,6 +273,11 @@ navegador e o Stripe:
 - **Janela de pagamento:** o comprador tem 30 minutos para confirmar o
   cartão; depois o pagamento é cancelado no Stripe e falha, e o pedido
   termina `PaymentFailed` com o estoque liberado.
+- **Pedido sem pagamento** (qualquer provedor): se o início do pagamento
+  falhar no checkout e o cliente não repetir a requisição, o pedido também
+  termina `PaymentFailed` depois de 30 minutos, com o motivo
+  `payment_not_started`, e o estoque volta. Toda reserva de estoque vale
+  no máximo 2 horas, como rede de segurança.
 - **Expiração da autorização:** o cartão fica autorizado até o prazo de
   captura dele (cerca de 7 dias). O admin vê os pedidos cuja autorização
   vence em até dois dias; se vencer, o pedido é cancelado pelo sistema e o
