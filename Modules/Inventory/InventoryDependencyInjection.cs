@@ -10,6 +10,7 @@ using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Inventory;
 
@@ -22,6 +23,7 @@ public static class InventoryDependencyInjection
 {
     public static IServiceCollection AddInventoryModule(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddDatabaseMigrations<InventoryDbContext>(order: 40);
         services.AddDbContext<InventoryDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 

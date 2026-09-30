@@ -15,6 +15,7 @@ using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using IntegrationEvents = OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Orders;
 
@@ -35,6 +36,7 @@ public static class OrdersDependencyInjection
 
     public static IServiceCollection AddOrdersModule(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddDatabaseMigrations<OrdersDbContext>(order: 50);
         services.AddDbContext<OrdersDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 

@@ -6,6 +6,7 @@ using OrderCore.Api.Modules.Identity.Infrastructure.Hosting;
 using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Identity.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Identity.Infrastructure.Security;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Identity;
 
@@ -19,6 +20,7 @@ public static class IdentityDependencyInjection
 {
     public static IServiceCollection AddIdentityModule(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddDatabaseMigrations<IdentityDbContext>(order: 10);
         services.AddDbContext<IdentityDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 

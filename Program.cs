@@ -13,12 +13,18 @@ using OrderCore.Api.Shared.Presentation.Authentication;
 using OrderCore.Api.Shared.Presentation.Conventions;
 using OrderCore.Api.Shared.Presentation.Cors;
 using OrderCore.Api.Shared.Infrastructure.Observability;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 using OrderCore.Api.Shared.Presentation.ExceptionHandling;
 using OrderCore.Api.Shared.Presentation.Observability;
 using OrderCore.Api.Shared.Presentation.OpenApi;
 using Scalar.AspNetCore;
 
-var builder = WebApplication.CreateBuilder(args);
+// `dotnet OrderCore.Api.dll migrate` applies every module's migrations and
+// exits (Docs/operations/deployment.md) — the only way they run outside
+// development; starting the API normally never migrates.
+var migrate = args.Length > 0 && args[0] == "migrate";
+
+var builder = WebApplication.CreateBuilder(migrate ? args[1..] : args);
 
 // Traces, metrics and logs (OpenTelemetry, exported over OTLP when an
 // endpoint is configured) — Docs/specs/observability/observability.md.
@@ -82,6 +88,12 @@ builder.Services.AddOpenApi(options =>
 
 var app = builder.Build();
 
+// Built but never started: no web server, no jobs, no broker connection.
+if (migrate)
+{
+    return await app.Services.GetRequiredService<DatabaseMigrator>().RunAsync(CancellationToken.None);
+}
+
 // Every response names its trace (W3C traceparent header).
 app.UseTraceResponseHeader();
 app.UseExceptionHandler();
@@ -110,7 +122,8 @@ app.MapGet("/", () => Results.Ok(new { service = "OrderCore.Api", status = "ok" 
 app.MapControllers();
 app.MapOrderUpdatesHub();
 
-app.Run();
+await app.RunAsync();
+return 0;
 
 // Exposed for WebApplicationFactory-based integration tests.
 public partial class Program;

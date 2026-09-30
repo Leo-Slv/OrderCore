@@ -4,6 +4,7 @@ using OrderCore.Api.Modules.AuditLogs.Application.UseCases;
 using OrderCore.Api.Modules.AuditLogs.Domain.Repositories;
 using OrderCore.Api.Modules.AuditLogs.Infrastructure.Persistence;
 using OrderCore.Api.Modules.AuditLogs.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.AuditLogs;
 
@@ -17,6 +18,7 @@ public static class AuditLogsDependencyInjection
 {
     public static IServiceCollection AddAuditLogsModule(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddDatabaseMigrations<AuditLogsDbContext>(order: 70);
         services.AddDbContext<AuditLogsDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 

@@ -3,6 +3,7 @@ using OrderCore.Api.Modules.Customers.Application.Contracts;
 using OrderCore.Api.Modules.Customers.Application.UseCases;
 using OrderCore.Api.Modules.Customers.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Customers.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Customers;
 
@@ -16,6 +17,7 @@ public static class CustomersDependencyInjection
 {
     public static IServiceCollection AddCustomersModule(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddDatabaseMigrations<CustomersDbContext>(order: 20);
         services.AddDbContext<CustomersDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 

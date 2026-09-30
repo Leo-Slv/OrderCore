@@ -4,6 +4,7 @@ using OrderCore.Api.Modules.Catalog.Application.UseCases;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Adapters;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Repositories;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Catalog;
 
@@ -16,6 +17,7 @@ public static class CatalogDependencyInjection
 {
     public static IServiceCollection AddCatalogModule(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddDatabaseMigrations<CatalogDbContext>(order: 30);
         services.AddDbContext<CatalogDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 

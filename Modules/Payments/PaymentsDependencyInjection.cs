@@ -14,6 +14,7 @@ using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Stripe;
 using OrderCore.Api.Modules.Payments.Infrastructure.Webhooks;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Payments;
 
@@ -46,6 +47,8 @@ public static class PaymentsDependencyInjection
                 .LogInformation("Payment provider: {Provider}.", selected.Info.Name);
             return new MeasuredPaymentProvider(selected, provider.GetRequiredService<PaymentsMetrics>());
         });
+
+        services.AddDatabaseMigrations<PaymentsDbContext>(order: 60);
 
         services.AddDbContext<PaymentsDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));

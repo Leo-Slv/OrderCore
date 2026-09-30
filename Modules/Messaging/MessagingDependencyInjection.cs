@@ -10,6 +10,7 @@ using OrderCore.Api.Modules.Messaging.Infrastructure.Relay;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Shared.Presentation.Observability;
+using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Messaging;
 
@@ -24,6 +25,7 @@ public static class MessagingDependencyInjection
 {
     public static IServiceCollection AddMessagingModule(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddDatabaseMigrations<MessagingDbContext>(order: 80);
         services.AddDbContext<MessagingDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 

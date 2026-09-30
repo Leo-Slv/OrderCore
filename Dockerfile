@@ -15,4 +15,10 @@ COPY --from=build /app .
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 
+# The non-root user the .NET images ship with; nothing here needs root
+# (8080 is above 1024).
+USER $APP_UID
+
+# `docker run <image>` starts the API; `docker run <image> migrate` applies
+# the migrations and exits (Docs/operations/deployment.md).
 ENTRYPOINT ["dotnet", "OrderCore.Api.dll"]
