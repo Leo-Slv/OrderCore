@@ -69,3 +69,23 @@ expired and its units are available; a consumed one isn't touched).
 1. `feat(orders): unpaid orders expire and release their stock`
 2. `feat(inventory): reservations expire as a safety net`
 3. `docs: ...`
+
+## Execution notes (what differed from this plan)
+
+- **Stage 1.** `ExpireUnpaidOrderUseCase` decides and delegates the ending
+  to the existing `MarkOrderPaymentFailedUseCase` (release, save, audit,
+  `OrderPaymentFailed`), so an unpaid order ends exactly like a refused
+  payment. `ConfirmOrderUseCase` gained `IPaymentGateway` to void a late
+  authorization; the checkout flow test that builds its services by hand
+  had to register the gateway too. The integration test makes the payment
+  request fail with the fake provider's `Timeout` mode and shortens the
+  window to 2 seconds through configuration.
+- **Stage 2.** The reservation lifetime is a fixed domain rule
+  (`InventoryReservation.Lifetime`, 2 hours, the decided value), not a
+  setting: making it configurable would have changed the reservation use
+  case's dependencies and many tests for no real gain. The job's interval
+  and batch size are settings. `ExpireReservationUseCase` now returns what
+  it expired (null for a reservation that moved on) so the job can log the
+  order and product; no existing caller depended on it throwing.
+- Both stages were merged into `master` through their `v5/<topic>` branch
+  after a green CI run, as in V4; `dotnet ef` output converted to LF.
