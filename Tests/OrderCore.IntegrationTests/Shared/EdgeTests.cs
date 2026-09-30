@@ -1,6 +1,5 @@
 using System.Net;
 using FluentAssertions;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -136,29 +135,5 @@ public sealed class EdgeTests : IClassFixture<OrderCoreApiFactory>
         var response = await customer.GetAsync("/api/no-such-route");
 
         response.Headers.CacheControl!.NoStore.Should().BeTrue();
-    }
-
-    /// <summary>
-    /// TestServer has no network peer; this sets the connection's remote
-    /// address from a test-only header, before the app's own middleware (the
-    /// forwarded headers one included) runs — standing in for "who connected".
-    /// </summary>
-    private sealed class RemoteAddressFromTestHeader : IStartupFilter
-    {
-        public const string Header = "X-Test-Remote-Address";
-
-        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-        {
-            app.Use(async (context, nextMiddleware) =>
-            {
-                if (context.Request.Headers.TryGetValue(Header, out var address))
-                {
-                    context.Connection.RemoteIpAddress = IPAddress.Parse(address.ToString());
-                }
-
-                await nextMiddleware();
-            });
-            next(app);
-        };
     }
 }

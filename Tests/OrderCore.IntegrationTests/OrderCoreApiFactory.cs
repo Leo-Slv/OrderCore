@@ -28,6 +28,13 @@ public class OrderCoreApiFactory : WebApplicationFactory<Program>
     {
         builder.UseSetting("Jwt:SigningKey", SigningKey);
 
+        // Many tests sign up and sign in several accounts on one host, all from the
+        // same (absent) address; the rate-limit tests set their own low limits.
+        foreach (var policy in new[] { "SignIn", "SignUp", "Refresh", "Checkout", "StripeWebhook" })
+        {
+            builder.UseSetting($"RateLimits:{policy}:PermitLimit", "100000");
+        }
+
         // Blocking is fine while the host is being built; Task.Run keeps it
         // off the test framework's synchronization context.
         var virtualHost = Task.Run(TestBroker.CreateVirtualHostAsync).GetAwaiter().GetResult();
