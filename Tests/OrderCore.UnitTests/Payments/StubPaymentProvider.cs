@@ -34,16 +34,32 @@ internal sealed class StubPaymentProvider : IPaymentProvider
     /// <summary>Answers authorizations the way Stripe does: "waiting for the buyer", with a client secret.</summary>
     public bool NeedsBuyer { get; init; }
 
-    public Task<PaymentAuthorizationResult> AuthorizeAsync(Payment payment, CancellationToken cancellationToken) =>
-        Task.FromResult(
+    public Task<PaymentAuthorizationResult> AuthorizeAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        AuthorizeCalls++;
+        return Task.FromResult(
             NeedsBuyer ? PaymentAuthorizationResult.WaitingForBuyer($"stub_ref_{payment.Id:N}", SecretOf(payment))
             : _succeeds ? new PaymentAuthorizationResult(true, $"stub_ref_{payment.Id:N}", null)
             : new PaymentAuthorizationResult(false, null, "stub_declined"));
+    }
 
     public Task<string?> GetClientSecretAsync(Payment payment, CancellationToken cancellationToken) =>
         Task.FromResult(NeedsBuyer && payment.IsAwaitingBuyer ? SecretOf(payment) : null);
 
     public static string SecretOf(Payment payment) => $"stub_secret_{payment.Id:N}";
+
+    /// <summary>Where the provider says every payment stands (reconciliation); waiting for the buyer by default.</summary>
+    public PaymentProviderState State { get; set; } = new(PaymentProviderStatus.WaitingForBuyer);
+
+    public int StateCalls { get; private set; }
+
+    public int AuthorizeCalls { get; private set; }
+
+    public Task<PaymentProviderState> GetStateAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        StateCalls++;
+        return Task.FromResult(State);
+    }
 
     public Task<PaymentCaptureResult> CaptureAsync(Payment payment, CancellationToken cancellationToken)
     {

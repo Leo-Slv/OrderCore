@@ -81,6 +81,7 @@ public sealed class EndpointAccessTests : IClassFixture<ApiDatabase>, IAsyncLife
     [InlineData(Caller.Anonymous, "GET", "/api/payments/methods", HttpStatusCode.OK)]
     // Anonymous but signed by Stripe; off (404) without a webhook secret, as here.
     [InlineData(Caller.Anonymous, "POST", "/api/payments/webhooks/stripe", HttpStatusCode.NotFound)]
+    [InlineData(Caller.Customer, "POST", "/api/payments/00000000-0000-0000-0000-000000000001/reconcile", HttpStatusCode.Forbidden)]
     [InlineData(Caller.Anonymous, "GET", "/api/admin/orders", HttpStatusCode.Unauthorized)]
     [InlineData(Caller.Customer, "GET", "/api/admin/orders", HttpStatusCode.Forbidden)]
     [InlineData(Caller.Admin, "GET", "/api/admin/orders", HttpStatusCode.OK)]

@@ -25,6 +25,16 @@ internal sealed class FakePaymentRepository : IPaymentRepository
             .Select(p => p.Id)
             .ToList());
 
+    public Task<IReadOnlyList<Guid>> ListToReconcileAsync(
+        DateTimeOffset processingSince, DateTimeOffset now, int limit, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Guid>>(_payments.Values
+            .Where(p => (p.Status == Api.Modules.Payments.Domain.Enums.PaymentStatus.Processing && p.CreatedAt < processingSince)
+                || (p.Status == Api.Modules.Payments.Domain.Enums.PaymentStatus.Authorized && p.AuthorizationExpiresAt < now))
+            .OrderBy(p => p.CreatedAt)
+            .Take(limit)
+            .Select(p => p.Id)
+            .ToList());
+
     public Task<int> CountAuthorizationsExpiringBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) =>
         Task.FromResult(_payments.Values.Count(p =>
             p.Status == Api.Modules.Payments.Domain.Enums.PaymentStatus.Authorized && p.AuthorizationExpiresAt < cutoff));

@@ -39,6 +39,12 @@ internal sealed class WaitingForBuyerProvider : IPaymentProvider
         return Task.FromResult(new PaymentVoidResult(true, null));
     }
 
+    /// <summary>What the provider "says" when asked, by PaymentIntent; waiting for the buyer unless set.</summary>
+    public Dictionary<string, PaymentProviderState> States { get; } = [];
+
+    public Task<PaymentProviderState> GetStateAsync(Payment payment, CancellationToken cancellationToken) =>
+        Task.FromResult(States.GetValueOrDefault(payment.ProviderReference!, new PaymentProviderState(PaymentProviderStatus.WaitingForBuyer)));
+
     public Task<PaymentCaptureResult> CaptureAsync(Payment payment, CancellationToken cancellationToken) =>
         Task.FromResult(new PaymentCaptureResult(true, null));
 

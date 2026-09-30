@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Payments.Domain.Entities;
 using OrderCore.Api.Modules.Payments.Domain.Enums;
+using OrderCore.Api.Modules.Payments.Domain.Repositories;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Stripe;
 using Stripe;
 using Xunit;
@@ -141,6 +142,16 @@ public sealed class StripePaymentProviderTests : IAsyncLifetime
 
         _recorder.Requests.Should().ContainSingle(r => r.Method == "GET" && r.Path == "/v1/payment_intents/pi_123");
         _recorder.RawQueries.Should().ContainSingle().Which.Should().Contain("expand[0]=latest_charge");
+    }
+
+    [Fact]
+    public async Task The_state_of_a_payment_is_the_intent_as_stripe_has_it()
+    {
+        var state = await Provider().GetStateAsync(Authorized(), CancellationToken.None);
+
+        // stripe-mock's fixture intent still needs a payment method.
+        state.Status.Should().Be(PaymentProviderStatus.WaitingForBuyer);
+        _recorder.Requests.Should().ContainSingle(r => r.Method == "GET" && r.Path == "/v1/payment_intents/pi_123");
     }
 
     [Fact]
