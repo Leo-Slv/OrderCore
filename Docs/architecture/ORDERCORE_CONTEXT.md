@@ -1425,6 +1425,15 @@ da autorização** (o prazo de captura do cartão; o backoffice vê as que
 vencem em até dois dias, e uma que vence cancela o pedido em nome do
 sistema, devolvendo o estoque).
 
+Dois prazos a mais garantem que nada segura estoque para sempre (V5,
+`Docs/specs/orders/unpaid-order-expiry.md`): um pedido esperando pagamento
+**sem nenhum pagamento iniciado** (o início do pagamento falhou e ninguém
+repetiu o checkout) também termina `PaymentFailed` depois de 30 minutos,
+com o motivo `payment_not_started`; e toda **reserva de estoque vale no
+máximo 2 horas** — uma rede de segurança que, se agir, gera um aviso,
+porque os prazos anteriores deveriam ter chegado antes. Uma autorização
+que chegue para um pedido que já terminou é anulada.
+
 ---
 
 # 29. Reconciliation
