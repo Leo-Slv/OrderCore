@@ -384,7 +384,7 @@ Contratos entre módulos existentes hoje:
 |---|---|---|
 | Orders → Catalog | `IProductCatalog` | `ProductCatalogAdapter` → `IProductRepository` |
 | Orders → Inventory | `IInventoryService` | `InventoryServiceAdapter` → `Reserve`/`Release`/`ConsumeReservationUseCase`, `GetStockAvailabilityUseCase`, `ReturnOrderStockUseCase`, `ListReservationsUseCase`, `GetStockSummaryUseCase` |
-| Orders → Payments | `IPaymentGateway` | `PaymentGatewayAdapter` → `CreatePaymentUseCase`, `GetPaymentByOrderIdUseCase`, `GetPaymentsByOrderIdsUseCase`, `CapturePaymentUseCase` (por pedido), `SettlePaymentForCancellationUseCase` |
+| Orders → Payments | `IPaymentGateway` | `PaymentGatewayAdapter` → `CreatePaymentUseCase`, `GetPaymentByOrderIdUseCase`, `GetPaymentsByOrderIdsUseCase`, `CapturePaymentUseCase` (por pedido), `SettlePaymentForCancellationUseCase`, `GetAvailablePaymentMethodsUseCase`, `GetPaymentNextActionUseCase`, `CountExpiringAuthorizationsUseCase` |
 | Orders → Customers | `ICustomerDirectory` | `CustomerDirectoryAdapter` → `GetCustomerAddressUseCase`, `GetCustomersByIdsUseCase`, `CountNewCustomersUseCase` |
 | Catalog → Inventory | `IStockAvailabilityProvider` (vitrine) e `IStockLevels` (backoffice) | `InventoryStockAvailabilityAdapter` → `GetStockAvailabilityUseCase`, `EnsureStockItemUseCase`, `GetStockLevelsUseCase`, `ListProductIdsInStockStateUseCase` |
 | Identity → Customers | `ICustomerRegistry` | `CustomerRegistryAdapter` → `RegisterCustomerUseCase`, `GetCustomerByIdUseCase` (cliente ativo?) |
@@ -736,6 +736,30 @@ capaz de simular:
 
 Posteriormente pode ser implementado um provider real, como Stripe.
 
+**O que existe hoje** (`Docs/specs/payments/stripe-provider.md` e o plano de
+implementação, com as notas de execução):
+
+* os dois provedores convivem e a configuração escolhe: com
+  `Payments:Stripe:SecretKey` o `StripePaymentProvider` (SDK oficial
+  `Stripe.net`, modo de teste), sem ela o `FakePaymentProvider`; a escolha
+  é registrada no log da subida. Nenhum use case pergunta "é Stripe?": o
+  provedor declara o que aceita (`IPaymentProvider.Info` — só cartão no
+  Stripe, cartão e Pix no fake) e `GET payments/methods` (anônimo) diz à
+  vitrine o que oferecer, com a chave publicável do Stripe;
+* cartão com **captura manual**: autorizar cria um PaymentIntent
+  (`capture_method=manual`), a captura acontece no envio e o cancelamento
+  antes disso anula (void) — o mesmo ciclo que o fake já tinha;
+* o cartão é confirmado **no navegador** (Payment Element do Stripe, com
+  3-D Secure): o checkout devolve `payment.nextAction = { type:
+  "confirm_card", clientSecret }` e o resultado chega por webhook. Nenhum
+  dado de cartão passa pelo OrderCore, e o client secret não é gravado;
+* toda chamada que mexe em dinheiro leva uma chave de idempotência
+  derivada do pagamento (ou do estorno), então repetir nunca cobra duas
+  vezes;
+* localmente, o serviço `stripe-cli` do docker compose (perfil `stripe`)
+  encaminha os webhooks do modo de teste para a API; nos testes
+  automáticos, o `stripe-mock` (container) substitui a API do Stripe.
+
 ---
 
 # 15. Abstração de Payment Provider
@@ -758,6 +782,16 @@ public interface IPaymentProvider
         CancellationToken cancellationToken);
 }
 ```
+
+A abstração implementada cresceu com o Stripe, sem nada específico dele:
+`Info` (nome, formas aceitas, chave publicável), `VoidAsync` (libera uma
+autorização ou cancela um pagamento que espera o comprador),
+`GetClientSecretAsync` (a etapa do comprador, pedida de novo) e
+`GetStateAsync` (onde o provedor diz que o pagamento está, para a
+reconciliação). `AuthorizeAsync` pode responder, além de aprovado ou
+recusado, **"aguardando o comprador"** (referência do provedor + client
+secret). Um `MeasuredPaymentProvider` envolve o provedor escolhido e mede
+cada chamada.
 
 A implementação concreta pertence à Infrastructure.
 
@@ -819,6 +853,14 @@ cobrado. A captura acontece quando o pedido é enviado; um pedido
 cancelado antes disso tem o pagamento anulado, e um já capturado (não
 acontece no fluxo normal, já que pedido enviado não é cancelado) é
 estornado pelo saldo que ainda estiver retido.
+
+Com o Stripe, `Processing` também é o estado de um pagamento **aguardando
+o comprador** confirmar o cartão (já com a referência do provedor). Uma
+recusa fica registrada sem sair de `Processing` — o comprador pode tentar
+outro cartão —, e de lá o pagamento segue para `Authorized` (webhook),
+`Voided` (o pedido foi cancelado) ou `Failed` (a janela de pagamento
+acabou, ou o Stripe cancelou). Uma autorização que expira antes do envio
+vai para `Voided` sozinha.
 
 O estado de Payment não deve ser confundido com o estado de Order.
 
@@ -1361,6 +1403,28 @@ Publish Payment Event
 
 Webhooks também devem ser tratados como mensagens potencialmente duplicadas.
 
+**O que existe hoje** (ainda dentro do módulo Payments do OrderCore, não
+num PayCore separado): `POST /api/payments/webhooks/stripe` é o único
+endpoint de escrita anônimo — o Stripe não tem token do OrderCore, então a
+autenticação é a assinatura (`Stripe-Signature`, conferida com o segredo
+do webhook e a tolerância de horário; `400 invalid_webhook_signature`
+caso contrário). Cada evento é deduplicado pelo id do Stripe no inbox do
+Payments (consumidor `stripe-webhooks`), gravado junto com a mudança do
+pagamento, e traduzido numa atualização neutra (`PaymentProviderUpdate`)
+que um único caso de uso aplica — autorizado, recusado (o comprador pode
+tentar outro cartão), capturado, cancelado (com
+`payments.payment-authorization-expired` quando a autorização expirou),
+estorno liquidado e disputa aberta. Uma atualização atrasada ou fora de
+ordem que o pagamento já ultrapassou é ignorada, nunca um erro. O que muda
+é publicado pelo outbox, como qualquer outro evento do Payments.
+
+Dois prazos completam o ciclo: a **janela de pagamento** (30 minutos para
+o comprador confirmar; depois o pagamento é cancelado no provedor e falha,
+e o pedido termina `PaymentFailed` com o estoque liberado) e a **expiração
+da autorização** (o prazo de captura do cartão; o backoffice vê as que
+vencem em até dois dias, e uma que vence cancela o pedido em nome do
+sistema, devolvendo o estoque).
+
 ---
 
 # 29. Reconciliation
@@ -1384,6 +1448,16 @@ Payment = Succeeded
 O processo de reconciliation deverá identificar a divergência e permitir corrigir o estado local.
 
 Isso deve ser tratado como uma preocupação de consistência e operação, não simplesmente como um CRUD administrativo.
+
+**O que existe hoje:** `ReconcilePaymentUseCase` pergunta ao provedor onde
+o pagamento está e aplica a resposta pelo **mesmo caminho dos webhooks**
+(uma atualização que já foi aplicada não muda nada); um pagamento para o
+qual o provedor nunca respondeu é autorizado de novo com a mesma chave de
+idempotência. Roda sob demanda (`POST payments/{id}/reconcile`, admin,
+respondendo o que mudou) e num job a cada 15 minutos para pagamentos em
+`Processing` há mais de 5 minutos e autorizações vencidas. Cada correção é
+auditada (`PaymentReconciled`) e medida (em dia ou corrigido). Só o status
+do pagamento é reconciliado — estornos e disputas dependem dos webhooks.
 
 ---
 
