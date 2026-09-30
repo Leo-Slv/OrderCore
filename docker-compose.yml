@@ -97,6 +97,11 @@ services:
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env (see .env.example)}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env (see .env.example)}
+      # Stripe in test mode (Docs/specs/payments/stripe-provider.md): with
+      # STRIPE_SECRET_KEY empty the API uses the fake provider.
+      Payments__Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Payments__Stripe__PublishableKey: ${STRIPE_PUBLISHABLE_KEY:-}
+      Payments__Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       # Metrics every 10 s (the SDK default is 60 s), so local dashboards react quickly.
       OTEL_METRIC_EXPORT_INTERVAL: "10000"
@@ -110,6 +115,29 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    networks:
+      - ordercore-net
+
+  # Forwards Stripe's test-mode webhooks to the API — Stripe can't reach
+  # localhost. Only with the keys in .env: docker compose --profile stripe up.
+  # Its signing secret (STRIPE_WEBHOOK_SECRET) is stable per account:
+  #   docker compose --profile stripe run --rm --no-deps stripe-cli listen --print-secret
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    container_name: ordercore-stripe-cli
+    profiles: ["stripe"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY:-}
+    command:
+      - listen
+      - --forward-to
+      - http://api:8080/api/payments/webhooks/stripe
+      # Only the events OrderCore acts on (StripeWebhookHandler).
+      - --events
+      - payment_intent.amount_capturable_updated,payment_intent.payment_failed,payment_intent.succeeded,payment_intent.canceled,charge.refund.updated,charge.dispute.created
     networks:
       - ordercore-net
 
