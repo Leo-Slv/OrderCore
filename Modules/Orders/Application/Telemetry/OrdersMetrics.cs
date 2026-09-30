@@ -19,6 +19,7 @@ public sealed class OrdersMetrics
     private readonly Counter<long> _confirmed;
     private readonly Counter<double> _confirmedValue;
     private readonly Counter<long> _paymentFailed;
+    private readonly Counter<long> _unpaidExpired;
     private readonly Counter<long> _shipped;
     private readonly Counter<long> _delivered;
     private readonly Counter<long> _cancelled;
@@ -33,6 +34,8 @@ public sealed class OrdersMetrics
         _confirmedValue = meter.CreateCounter<double>(
             "ordercore.orders.confirmed_value", "{currency_unit}", "Total value of confirmed orders, per currency.");
         _paymentFailed = meter.CreateCounter<long>("ordercore.orders.payment_failed", "{order}", "Orders whose payment was refused.");
+        _unpaidExpired = meter.CreateCounter<long>(
+            "ordercore.orders.unpaid_expired", "{order}", "Orders ended because no payment was started in time (their stock released).");
         _shipped = meter.CreateCounter<long>("ordercore.orders.shipped", "{order}", "Orders shipped.");
         _delivered = meter.CreateCounter<long>("ordercore.orders.delivered", "{order}", "Orders delivered.");
         _cancelled = meter.CreateCounter<long>("ordercore.orders.cancelled", "{order}", "Orders cancelled, by who cancelled them.");
@@ -52,6 +55,8 @@ public sealed class OrdersMetrics
     }
 
     public void OrderPaymentFailed() => _paymentFailed.Add(1);
+
+    public void UnpaidOrderExpired() => _unpaidExpired.Add(1);
 
     public void OrderShipped() => _shipped.Add(1);
 

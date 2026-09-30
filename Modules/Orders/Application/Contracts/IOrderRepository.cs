@@ -45,6 +45,9 @@ public interface IOrderRepository
     Task<IReadOnlyDictionary<string, decimal>> SumConfirmedTotalsAsync(
         DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<OrderStatus> statuses, CancellationToken cancellationToken);
 
+    /// <summary>Orders still waiting for payment since before <paramref name="cutoff"/>, oldest first (ids only).</summary>
+    Task<IReadOnlyList<Guid>> ListPendingPaymentRequestedBeforeAsync(DateTimeOffset cutoff, int limit, CancellationToken cancellationToken);
+
     Task AddAsync(Order order, CancellationToken cancellationToken);
 
     Task SaveChangesAsync(CancellationToken cancellationToken);

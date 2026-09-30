@@ -43,7 +43,8 @@ public static class OrderMapper
             model.DeliveredAt,
             model.Version,
             items,
-            ShipmentDetails.Rehydrate(model.ShipmentCarrier, model.ShipmentTrackingCode, model.ShipmentTrackingUrl));
+            ShipmentDetails.Rehydrate(model.ShipmentCarrier, model.ShipmentTrackingCode, model.ShipmentTrackingUrl),
+            model.PaymentRequestedAt);
     }
 
     public static OrderPersistenceModel ToPersistence(Order domain)
@@ -63,6 +64,7 @@ public static class OrderMapper
             CheckoutIdempotencyKey = domain.CheckoutIdempotencyKey,
             CreatedAt = domain.CreatedAt,
             UpdatedAt = domain.UpdatedAt,
+            PaymentRequestedAt = domain.PaymentRequestedAt,
             ConfirmedAt = domain.ConfirmedAt,
             CancelledAt = domain.CancelledAt,
             ShippedAt = domain.ShippedAt,
@@ -93,6 +95,7 @@ public static class OrderMapper
         model.CustomerNotes = domain.CustomerNotes;
         model.InternalNotes = domain.InternalNotes;
         model.UpdatedAt = domain.UpdatedAt;
+        model.PaymentRequestedAt = domain.PaymentRequestedAt;
         model.ConfirmedAt = domain.ConfirmedAt;
         model.CancelledAt = domain.CancelledAt;
         model.ShippedAt = domain.ShippedAt;

@@ -109,6 +109,18 @@ public sealed class EfOrderRepository : IOrderRepository
         return (models.Select(OrderMapper.ToDomain).ToList(), totalCount);
     }
 
+    public async Task<IReadOnlyList<Guid>> ListPendingPaymentRequestedBeforeAsync(DateTimeOffset cutoff, int limit, CancellationToken cancellationToken)
+    {
+        var pendingPayment = nameof(OrderStatus.PendingPayment);
+        return await _dbContext.Orders
+            .AsNoTracking()
+            .Where(o => o.Status == pendingPayment && o.PaymentRequestedAt != null && o.PaymentRequestedAt < cutoff)
+            .OrderBy(o => o.PaymentRequestedAt)
+            .Select(o => o.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyDictionary<OrderStatus, int>> CountByStatusAsync(
         DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
     {

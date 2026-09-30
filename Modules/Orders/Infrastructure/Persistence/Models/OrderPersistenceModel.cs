@@ -68,6 +68,8 @@ public sealed class OrderPersistenceModel
 
     public DateTimeOffset UpdatedAt { get; set; }
 
+    public DateTimeOffset? PaymentRequestedAt { get; set; }
+
     public DateTimeOffset? ConfirmedAt { get; set; }
 
     public DateTimeOffset? CancelledAt { get; set; }

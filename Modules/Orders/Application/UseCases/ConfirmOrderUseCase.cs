@@ -21,11 +21,19 @@ namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 /// and the payment was voided then) is logged and skipped: throwing would
 /// only retry, then park, a message that can never succeed.
 /// </para>
+/// <para>
+/// An authorization that arrives for an order that already ended
+/// (<see cref="OrderStatus.PaymentFailed"/> or <see cref="OrderStatus.Cancelled"/>)
+/// — a checkout replay that started the payment as the unpaid order expired —
+/// is voided, so the buyer's money isn't held for an order that will never
+/// ship. The settlement is idempotent; if it fails, the message is retried.
+/// </para>
 /// </summary>
 public sealed class ConfirmOrderUseCase
 {
     private readonly IOrderRepository _orderRepository;
     private readonly IInventoryService _inventoryService;
+    private readonly IPaymentGateway _paymentGateway;
     private readonly IAuditLogService _auditLog;
     private readonly OrdersMetrics _metrics;
     private readonly TimeProvider _timeProvider;
@@ -34,6 +42,7 @@ public sealed class ConfirmOrderUseCase
     public ConfirmOrderUseCase(
         IOrderRepository orderRepository,
         IInventoryService inventoryService,
+        IPaymentGateway paymentGateway,
         IAuditLogService auditLog,
         OrdersMetrics metrics,
         TimeProvider timeProvider,
@@ -41,6 +50,7 @@ public sealed class ConfirmOrderUseCase
     {
         _orderRepository = orderRepository;
         _inventoryService = inventoryService;
+        _paymentGateway = paymentGateway;
         _auditLog = auditLog;
         _metrics = metrics;
         _timeProvider = timeProvider;
@@ -52,6 +62,15 @@ public sealed class ConfirmOrderUseCase
         Observed.Order(orderId);
         var order = await _orderRepository.GetByIdAsync(orderId, cancellationToken)
             ?? throw new NotFoundException("order_not_found", $"Order '{orderId}' was not found.");
+
+        if (order.Status is OrderStatus.PaymentFailed or OrderStatus.Cancelled)
+        {
+            var settlement = await _paymentGateway.SettleForCancellationAsync(orderId, "order_no_longer_waiting", cancellationToken);
+            _logger.LogWarning(
+                "Payment authorized for order {OrderId}, which is {Status}; the payment was settled ({Settlement}).",
+                orderId, order.Status, settlement);
+            return;
+        }
 
         if (order.Status != OrderStatus.PendingPayment)
         {

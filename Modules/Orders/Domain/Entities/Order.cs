@@ -59,6 +59,9 @@ public sealed class Order : AggregateRoot<Guid>
 
     public DateTimeOffset UpdatedAt { get; private set; }
 
+    /// <summary>When the order started waiting for payment; the unpaid-order deadline counts from here.</summary>
+    public DateTimeOffset? PaymentRequestedAt { get; private set; }
+
     public DateTimeOffset? ConfirmedAt { get; private set; }
 
     public DateTimeOffset? CancelledAt { get; private set; }
@@ -272,6 +275,7 @@ public sealed class Order : AggregateRoot<Guid>
         }
 
         Status = OrderStatus.PendingPayment;
+        PaymentRequestedAt = now;
         IncrementVersion();
         Raise(new OrderPaymentRequested(Guid.NewGuid(), now, Id));
     }
@@ -413,7 +417,8 @@ public sealed class Order : AggregateRoot<Guid>
         DateTimeOffset? deliveredAt,
         int version,
         IEnumerable<OrderItem> items,
-        ShipmentDetails? shipment = null)
+        ShipmentDetails? shipment = null,
+        DateTimeOffset? paymentRequestedAt = null)
     {
         var order = new Order(id, customerId, currency, orderNumber, createdAt)
         {
@@ -427,6 +432,7 @@ public sealed class Order : AggregateRoot<Guid>
             CheckoutIdempotencyKey = checkoutIdempotencyKey,
             UpdatedAt = updatedAt,
             Status = status,
+            PaymentRequestedAt = paymentRequestedAt,
             ConfirmedAt = confirmedAt,
             CancelledAt = cancelledAt,
             ShippedAt = shippedAt,

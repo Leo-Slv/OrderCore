@@ -7,6 +7,7 @@ using OrderCore.Api.Modules.Orders.Domain.Events;
 using OrderCore.Api.Modules.Orders.Infrastructure.Adapters;
 using OrderCore.Api.Modules.Orders.Infrastructure.EventHandlers;
 using OrderCore.Api.Modules.Orders.Infrastructure.IntegrationEventHandlers;
+using OrderCore.Api.Modules.Orders.Infrastructure.Jobs;
 using OrderCore.Api.Modules.Orders.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
@@ -124,6 +125,12 @@ public static class OrdersDependencyInjection
         services.AddScoped<RequestOrderPaymentUseCase>();
         services.AddScoped<ConfirmOrderUseCase>();
         services.AddScoped<MarkOrderPaymentFailedUseCase>();
+        services.AddScoped<ExpireUnpaidOrderUseCase>();
+
+        // Orders left waiting without any payment started stop holding stock (Orders:UnpaidOrderExpiry).
+        services.AddOptions<UnpaidOrderExpiryOptions>().Bind(configuration.GetSection(UnpaidOrderExpiryOptions.SectionName));
+        services.AddHostedService<UnpaidOrderExpiryBackgroundService>();
+
         services.AddScoped<CancelOrderUseCase>();
         services.AddScoped<CancelOrderOnExpiredAuthorizationUseCase>();
         services.AddScoped<GetOrderByIdUseCase>();
