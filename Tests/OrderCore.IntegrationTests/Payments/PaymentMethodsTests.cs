@@ -33,6 +33,7 @@ public sealed class PaymentMethodsTests : IClassFixture<OrderCoreApiFactory>
         {
             builder.UseSetting("Payments:Stripe:SecretKey", "sk_test_ordercore");
             builder.UseSetting("Payments:Stripe:PublishableKey", "pk_test_ordercore");
+            builder.UseSetting("Payments:Stripe:WebhookSecret", "whsec_ordercore");
         });
 
         var methods = await stripe.CreateClient().GetFromJsonAsync<JsonElement>("/api/payments/methods");

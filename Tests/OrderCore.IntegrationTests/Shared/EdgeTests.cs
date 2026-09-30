@@ -31,6 +31,11 @@ public sealed class EdgeTests : IClassFixture<OrderCoreApiFactory>
         _factory.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Production");
+
+            // The settings a deployment must provide (the production settings check).
+            builder.UseSetting("ConnectionStrings:OrderCoreDb", "Host=db.internal;Database=ordercore;Username=ordercore;Password=unused");
+            builder.UseSetting("Cors:AllowedOrigins:0", "https://shop.example");
+            builder.UseSetting("AllowedHosts", "api.shop.example");
             builder.UseSetting("https_port", "443");
             builder.UseSetting("ForwardedHeaders:KnownProxies:0", TrustedProxy);
             builder.UseSetting("ForwardedHeaders:TrustAllProxies", trustAllProxies.ToString());
