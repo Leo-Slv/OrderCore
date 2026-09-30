@@ -26,8 +26,7 @@ public sealed class StripePaymentProviderTests : IAsyncLifetime
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-    private readonly IContainer _stripeMock = new ContainerBuilder()
-        .WithImage("stripe/stripe-mock:latest")
+    private readonly IContainer _stripeMock = new ContainerBuilder("stripe/stripe-mock:latest")
         .WithPortBinding(12111, true)
         .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(12111))
         .Build();
