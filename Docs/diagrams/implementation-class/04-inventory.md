@@ -28,6 +28,10 @@ Como [02-customers.md](02-customers.md) e [03-catalog.md](03-catalog.md), este m
   - **Alerta na mudança de estado.** `StockItem.AlertLevel` (`LowStock` com unidades até o ponto de reposição, `OutOfStock` sem nenhuma disponível, `null` fora disso). Cada operação que muda o disponível (`TryReserve`, `Release`, `Receive`, `ReturnConsumed`, `Adjust`, `SetReorderLevel`) levanta `StockAlertRaised` quando o item **entra** num desses estados — inclusive de sem estoque para estoque baixo — e nada enquanto ele continua no mesmo. Para datar o alerta, `TryReserve` e `Release` passaram a receber `now` (`ExpireReservationUseCase` ganhou `TimeProvider`). `Consume` não muda o disponível, então não alerta.
   - `InventoryUnitOfWork` recebe `IInventoryOutbox`: coleta os domain events **antes** do save, traduz (`InventoryIntegrationEventTranslator`, mantendo o id do evento) para `inventory_outbox_messages` e salva tudo junto; se o save falhar, descarta as linhas de outbox ainda não salvas, para uma nova tentativa no mesmo escopo (`ReserveStockUseCase`) não gravar eventos de uma mudança que não aconteceu. O despacho em memória para o histórico de movimentos continua depois do save. Migration `AddInventoryOutbox`.
 
+Adicionado por "pedidos sem pagamento não seguram estoque" (V5, `Docs/specs/orders/unpaid-order-expiry.md`, decisão 2):
+
+- **Validade das reservas.** `InventoryReservation.Create` define `ExpiresAt` = 2 horas depois (`Lifetime`, uma regra de domínio fixa — as reservas ativas antigas recebem o mesmo pela migration `BackfillReservationExpiry`). `ReservationExpiryBackgroundService` (a cada 5 minutos, `Inventory:ReservationExpiry`) expira as que passaram disso por `ExpireReservationUseCase`, que agora devolve o que expirou (`ExpiredReservation`) e ignora uma reserva que já foi liberada ou consumida. Cada expiração vira um aviso no log com o pedido e o produto: é a rede de segurança, os prazos do pedido e do pagamento deveriam sempre chegar antes.
+
 Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
 
 - **`InventoryMetrics`** (meter `OrderCore.Inventory`): reservas feitas, recusadas por falta de estoque, liberadas ou expiradas (registradas pelos use cases) e alertas de estoque por nível — contados por `StockAlertMetricsRecorder`, um `IDomainEventHandler<StockAlertRaised>`, porque um alerta pode nascer de qualquer operação que muda o disponível.
@@ -104,6 +108,7 @@ classDiagram
         +DateTimeOffset? ReleasedAt
         +DateTimeOffset? ConsumedAt
         +DateTimeOffset? ReturnedAt
+        +TimeSpan Lifetime$
         +Create(Guid productId, Guid orderId, Guid orderItemId, int quantity, DateTimeOffset now)$ InventoryReservation
         +Release(DateTimeOffset now) void
         +Consume(DateTimeOffset now) void
@@ -227,6 +232,7 @@ classDiagram
         +GetByIdAsync(Guid reservationId) Task~InventoryReservation?~
         +ListByOrderIdAsync(Guid orderId) Task~IReadOnlyList~InventoryReservation~~
         +ListByProductIdAsync(Guid productId, int page, int pageSize) Task~(IReadOnlyList~InventoryReservation~, int)~
+        +ListExpiredActiveAsync(DateTimeOffset now, int limit) Task~IReadOnlyList~Guid~~
         +AddAsync(InventoryReservation reservation) Task
     }
 
@@ -350,7 +356,24 @@ classDiagram
         -IUnitOfWork unitOfWork
         -InventoryMetrics metrics
         -TimeProvider timeProvider
-        +ExecuteAsync(Guid reservationId) Task
+        +ExecuteAsync(Guid reservationId) Task~ExpiredReservation?~
+    }
+
+    class ExpiredReservation {
+        +Guid ReservationId
+        +Guid OrderId
+        +Guid ProductId
+        +int Quantity
+    }
+
+    class ReservationExpiryOptions {
+        +TimeSpan CheckInterval
+        +int BatchSize
+    }
+
+    class ReservationExpiryBackgroundService {
+        -ReservationExpiryOptions options
+        +CheckAsync() Task
     }
 
     class AdjustStockUseCase {
@@ -692,6 +715,9 @@ classDiagram
     ExpireReservationUseCase --> InventoryMetrics : expired
     IDomainEventHandler~TEvent~ <|.. StockAlertMetricsRecorder
     StockAlertMetricsRecorder --> InventoryMetrics : alerts by level
+    ReservationExpiryBackgroundService --> IInventoryReservationRepository : ListExpiredActiveAsync
+    ReservationExpiryBackgroundService --> ExpireReservationUseCase : warning per expiry
+    ExpireReservationUseCase ..> ExpiredReservation
 
 ```
 

@@ -56,6 +56,11 @@ Adicionado pelo rastreamento em tempo real (`Docs/specs/tracking/realtime-order-
 - **`OrderTrackingMetrics`** (meter `OrderCore.Tracking`): conexões abertas por público e atualizações enviadas por status.
 
 
+Adicionado por "pedidos sem pagamento não seguram estoque" (V5, `Docs/specs/orders/unpaid-order-expiry.md`):
+
+- `Order.PaymentRequestedAt` (quando o pedido começou a esperar pagamento; migration `AddPaymentRequestedAt` preenche os que já esperavam). `ExpireUnpaidOrderUseCase`, rodado a cada minuto pelo `UnpaidOrderExpiryBackgroundService` (`Orders:UnpaidOrderExpiry`, 30 minutos), encerra um pedido ainda `PendingPayment` sem nenhum pagamento iniciado: `MarkOrderPaymentFailedUseCase` com o motivo `payment_not_started`, o mesmo caminho de um pagamento recusado (libera as reservas, publica `OrderPaymentFailed`). Pedido com pagamento fica para a janela de pagamento.
+- **Autorização atrasada é anulada:** `ConfirmOrderUseCase` agora recebe `IPaymentGateway` e, para um pedido já `PaymentFailed` ou `Cancelled`, acerta o pagamento (void) em vez de só ignorar — cobre a repetição de checkout que inicia o pagamento no instante em que o pedido expira.
+
 Adicionado pela prontidão para produção (V4, `Docs/specs/operations/production-readiness.md`): o checkout tem limite por cliente (`OrdersRateLimits`, 10 por minuto; acima dele, `429 too_many_requests`).
 
 Adicionado pelo Stripe como provedor de pagamento (`Docs/specs/payments/stripe-provider.md`; o lado do Payments em [06-payments.md](06-payments.md)):
@@ -236,6 +241,7 @@ classDiagram
         +string? CheckoutIdempotencyKey
         +DateTimeOffset CreatedAt
         +DateTimeOffset UpdatedAt
+        +DateTimeOffset? PaymentRequestedAt
         +DateTimeOffset? ConfirmedAt
         +DateTimeOffset? CancelledAt
         +DateTimeOffset? ShippedAt
@@ -366,6 +372,7 @@ classDiagram
         +ListAsync(ListOrdersFilter filter) Task~ValueTuple~IReadOnlyList~Order~, int~~
         +CountByStatusAsync(DateTimeOffset from, DateTimeOffset to) Task~IReadOnlyDictionary~OrderStatus, int~~
         +SumConfirmedTotalsAsync(DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection~OrderStatus~ statuses) Task~IReadOnlyDictionary~string, decimal~~
+        +ListPendingPaymentRequestedBeforeAsync(DateTimeOffset cutoff, int limit) Task~IReadOnlyList~Guid~~
         +AddAsync(Order order) Task
         +SaveChangesAsync() Task
     }
@@ -734,6 +741,7 @@ classDiagram
     class ConfirmOrderUseCase {
         -IOrderRepository orderRepository
         -IInventoryService inventoryService
+        -IPaymentGateway paymentGateway
         -OrdersMetrics metrics
         -TimeProvider timeProvider
         -ILogger logger
@@ -747,6 +755,26 @@ classDiagram
         -TimeProvider timeProvider
         -ILogger logger
         +ExecuteAsync(Guid orderId, string reason) Task
+    }
+
+    class ExpireUnpaidOrderUseCase {
+        -IOrderRepository orderRepository
+        -IPaymentGateway paymentGateway
+        -MarkOrderPaymentFailedUseCase markPaymentFailed
+        -OrdersMetrics metrics
+        +string PaymentNotStartedReason$
+        +FindExpiredAsync(TimeSpan window, int limit) Task~IReadOnlyList~Guid~~
+        +ExpireAsync(Guid orderId, TimeSpan window) Task~bool~
+    }
+
+    class UnpaidOrderExpiryOptions {
+        +TimeSpan Window
+        +TimeSpan CheckInterval
+        +int BatchSize
+    }
+
+    class UnpaidOrderExpiryBackgroundService {
+        -UnpaidOrderExpiryOptions options
     }
 
     class CancelOrderUseCase {
@@ -1450,6 +1478,12 @@ classDiagram
     PaymentAuthorizedIntegrationEventHandler --> ConfirmOrderUseCase
     PaymentFailedIntegrationEventHandler --> MarkOrderPaymentFailedUseCase
     PaymentAuthorizationExpiredIntegrationEventHandler --> CancelOrderOnExpiredAuthorizationUseCase
+    ExpireUnpaidOrderUseCase --> IOrderRepository
+    ExpireUnpaidOrderUseCase --> IPaymentGateway : no payment started?
+    ExpireUnpaidOrderUseCase --> MarkOrderPaymentFailedUseCase : payment_not_started
+    UnpaidOrderExpiryBackgroundService --> ExpireUnpaidOrderUseCase : every minute
+    UnpaidOrderExpiryBackgroundService --> UnpaidOrderExpiryOptions
+    ConfirmOrderUseCase --> IPaymentGateway : voids a late authorization
     OrdersController ..> OrdersRateLimits : checkout 10/min per customer
     CancelOrderOnExpiredAuthorizationUseCase --> CancelOrderUseCase : as the system
     CancelOrderOnExpiredAuthorizationUseCase --> IOrderRepository
@@ -1499,6 +1533,7 @@ classDiagram
         +OrderCreated(string channel) void
         +OrderConfirmed(decimal totalAmount, string currency) void
         +OrderPaymentFailed() void
+        +UnpaidOrderExpired() void
         +OrderShipped() void
         +OrderDelivered() void
         +OrderCancelled(string cancelledBy) void
