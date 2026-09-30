@@ -18,6 +18,7 @@ using OrderCore.Api.Shared.Presentation.ExceptionHandling;
 using OrderCore.Api.Shared.Presentation.Hosting;
 using OrderCore.Api.Shared.Presentation.Observability;
 using OrderCore.Api.Shared.Presentation.OpenApi;
+using OrderCore.Api.Shared.Presentation.RateLimiting;
 using OrderCore.Api.Shared.Presentation.Security;
 using Scalar.AspNetCore;
 
@@ -76,6 +77,7 @@ builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = 
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddStorefrontCors(builder.Configuration);
 builder.Services.AddOrderCoreForwardedHeaders(builder.Configuration);
+builder.Services.AddOrderCoreRateLimiting();
 builder.Services.AddHsts(options =>
 {
     options.MaxAge = TimeSpan.FromDays(365);
@@ -92,6 +94,7 @@ builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer<BearerSecurityTransformer>();
     options.AddOperationTransformer<BearerSecurityTransformer>();
+    options.AddOperationTransformer<RateLimitResponseTransformer>();
 });
 
 var app = builder.Build();
@@ -130,6 +133,10 @@ app.UseStatusCodePages();
 app.UseStorefrontCors();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// After authentication: checkout is limited per signed-in customer. Each
+// module declares its policies (RateLimits section); over a limit, 429.
+app.UseRateLimiter();
 
 // OpenAPI ("swagger") document + Scalar UI, Development-only (same
 // posture as the ASP.NET Core templates' own SwaggerUI-in-Development

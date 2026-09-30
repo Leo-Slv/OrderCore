@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using OrderCore.Api.Modules.Payments.Infrastructure.Webhooks;
 
 namespace OrderCore.Api.Modules.Payments.Presentation.Controllers;
@@ -13,6 +14,7 @@ namespace OrderCore.Api.Modules.Payments.Presentation.Controllers;
 [ApiController]
 [AllowAnonymous]
 [Route("payments/webhooks/stripe")]
+[EnableRateLimiting(PaymentsRateLimits.StripeWebhook)]
 public sealed class StripeWebhooksController : ControllerBase
 {
     private readonly StripeWebhookHandler _handler;

@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Modules.Orders.Presentation.Presenters;
@@ -91,6 +92,7 @@ public sealed class OrdersController : ControllerBase
     /// </summary>
     [HttpPost("checkout")]
     [Authorize(Policy = AuthorizationPolicies.Customer)]
+    [EnableRateLimiting(OrdersRateLimits.Checkout)]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]

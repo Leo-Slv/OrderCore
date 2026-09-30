@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using OrderCore.Api.Modules.Identity.Application.UseCases;
 using OrderCore.Api.Modules.Identity.Presentation.Presenters;
 using OrderCore.Api.Modules.Identity.Presentation.Requests;
@@ -35,6 +36,7 @@ public sealed class AuthController : ControllerBase
     /// <summary>Creates a customer account and signs it in.</summary>
     [HttpPost("sign-up")]
     [AllowAnonymous]
+    [EnableRateLimiting(IdentityRateLimits.SignUp)]
     [ProducesResponseType(typeof(AuthTokensResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
@@ -47,6 +49,7 @@ public sealed class AuthController : ControllerBase
 
     [HttpPost("sign-in")]
     [AllowAnonymous]
+    [EnableRateLimiting(IdentityRateLimits.SignIn)]
     [ProducesResponseType(typeof(AuthTokensResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthTokensResponse>> SignInAsync([FromBody] SignInRequest request, CancellationToken cancellationToken)
@@ -62,6 +65,7 @@ public sealed class AuthController : ControllerBase
     /// </summary>
     [HttpPost("refresh")]
     [AllowAnonymous]
+    [EnableRateLimiting(IdentityRateLimits.Refresh)]
     [ProducesResponseType(typeof(AuthTokensResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthTokensResponse>> RefreshAsync([FromBody] RefreshTokenRequest request, CancellationToken cancellationToken)

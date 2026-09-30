@@ -15,6 +15,7 @@ using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Stripe;
 using OrderCore.Api.Modules.Payments.Infrastructure.Webhooks;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
+using OrderCore.Api.Modules.Payments.Presentation;
 
 namespace OrderCore.Api.Modules.Payments;
 
@@ -30,6 +31,7 @@ public static class PaymentsDependencyInjection
     {
         services.Configure<FakePaymentProviderOptions>(_ => { });
         services.AddSingleton<PaymentsMetrics>();
+        services.AddPaymentsRateLimits(configuration);
         services.AddOptions<StripeOptions>().Bind(configuration.GetSection(StripeOptions.SectionName));
         services.AddSingleton<FakePaymentProvider>();
         services.AddHttpClient(StripePaymentProvider.HttpClientName);

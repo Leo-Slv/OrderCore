@@ -14,8 +14,9 @@ using OrderCore.Api.Modules.Orders.Presentation.Realtime;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
-using IntegrationEvents = OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
+using OrderCore.Api.Modules.Orders.Presentation;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
+using IntegrationEvents = OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
 
 namespace OrderCore.Api.Modules.Orders;
 
@@ -41,6 +42,7 @@ public static class OrdersDependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("OrderCoreDb")));
 
         services.AddSingleton<OrdersMetrics>();
+        services.AddOrdersRateLimits(configuration);
         services.AddScoped<IOrderRepository, EfOrderRepository>();
         services.AddScoped<IOrderNumberGenerator, SequentialOrderNumberGenerator>();
         services.AddScoped<IProductCatalog, ProductCatalogAdapter>();

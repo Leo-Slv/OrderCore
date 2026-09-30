@@ -7,6 +7,7 @@ using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Identity.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Identity.Infrastructure.Security;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
+using OrderCore.Api.Modules.Identity.Presentation;
 
 namespace OrderCore.Api.Modules.Identity;
 
@@ -33,6 +34,7 @@ public static class IdentityDependencyInjection
                 $"Jwt:SigningKey must be set (at least {JwtOptions.MinimumSigningKeyBytes} bytes), from the environment or user-secrets.")
             .ValidateOnStart();
         services.AddOrderCoreJwtBearer();
+        services.AddIdentityRateLimits(configuration);
 
         services.AddOptions<IdentitySeedOptions>().Bind(configuration.GetSection(IdentitySeedOptions.SectionName));
         services.AddHostedService<AdminSeedHostedService>();
