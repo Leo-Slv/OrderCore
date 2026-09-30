@@ -26,6 +26,9 @@ public static class HealthEndpoints
     /// <summary>A dependency the API can't serve requests without.</summary>
     public const string Ready = "ready";
 
+    /// <summary>Where every health endpoint lives (probed over plain HTTP by platforms, so never redirected).</summary>
+    public const string PathPrefix = "/health";
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public static IServiceCollection AddOrderCoreHealthChecks(this IServiceCollection services)
@@ -38,7 +41,7 @@ public static class HealthEndpoints
     public static IEndpointRouteBuilder MapOrderCoreHealthChecks(this IEndpointRouteBuilder endpoints)
     {
         var live = new HealthCheckOptions { Predicate = _ => false };
-        endpoints.MapHealthChecks("/health", live).AllowAnonymous();
+        endpoints.MapHealthChecks(PathPrefix, live).AllowAnonymous();
         endpoints.MapHealthChecks("/health/live", live).AllowAnonymous();
 
         endpoints.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains(Ready) })

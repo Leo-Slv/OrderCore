@@ -15,8 +15,10 @@ using OrderCore.Api.Shared.Presentation.Cors;
 using OrderCore.Api.Shared.Infrastructure.Observability;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
 using OrderCore.Api.Shared.Presentation.ExceptionHandling;
+using OrderCore.Api.Shared.Presentation.Hosting;
 using OrderCore.Api.Shared.Presentation.Observability;
 using OrderCore.Api.Shared.Presentation.OpenApi;
+using OrderCore.Api.Shared.Presentation.Security;
 using Scalar.AspNetCore;
 
 // `dotnet OrderCore.Api.dll migrate` applies every module's migrations and
@@ -73,6 +75,12 @@ builder.Services
 builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = TraceResponseExtensions.Customize);
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddStorefrontCors(builder.Configuration);
+builder.Services.AddOrderCoreForwardedHeaders(builder.Configuration);
+builder.Services.AddHsts(options =>
+{
+    options.MaxAge = TimeSpan.FromDays(365);
+    options.IncludeSubDomains = true;
+});
 builder.Services.AddOrderCoreHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
 
@@ -93,6 +101,24 @@ if (migrate)
 {
     return await app.Services.GetRequiredService<DatabaseMigrator>().RunAsync(CancellationToken.None);
 }
+
+// First: the client's real address and scheme from a trusted proxy in front
+// of the API (ForwardedHeaders section), which everything after relies on.
+app.UseForwardedHeaders();
+
+// Outside development the API is served over HTTPS (terminated by the
+// proxy): browsers are told to stay on it, and a plain-HTTP request is
+// redirected — except the health checks, which platforms probe over HTTP
+// inside their own network.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseWhen(
+        context => !context.Request.Path.StartsWithSegments(HealthEndpoints.PathPrefix),
+        branch => branch.UseHttpsRedirection());
+}
+
+app.UseSecurityHeaders();
 
 // Every response names its trace (W3C traceparent header).
 app.UseTraceResponseHeader();
