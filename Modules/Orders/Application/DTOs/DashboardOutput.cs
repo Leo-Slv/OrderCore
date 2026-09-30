@@ -13,7 +13,7 @@ namespace OrderCore.Api.Modules.Orders.Application.DTOs;
 /// <item><see cref="NewCustomers"/>: customers who signed up in the period;</item>
 /// <item><see cref="Stock"/>: low- and out-of-stock products right now, not per period;</item>
 /// <item><see cref="ExpiringAuthorizations"/>: authorized payments whose authorization expires
-/// within <c>AuthorizationExpiry.WarningPeriod</c>  14 orders to ship first (right now);</item>
+/// within <c>AuthorizationExpiry.WarningPeriod</c>: orders to ship first (right now);</item>
 /// <item><see cref="RecentOrders"/>: the latest orders overall.</item>
 /// </list>
 /// </summary>
