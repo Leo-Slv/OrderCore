@@ -16,6 +16,10 @@ Decisões que moldam o módulo:
 
 Onde cada coisa mora: as abstrações que todo módulo usa ficam no Shared (`Shared/Application/Messaging`: `IntegrationEvent`, `IIntegrationEventHandler<T>`, `IOutbox`, `IMessageContext`; `Shared/Infrastructure/Messaging`: envelope, outbox/inbox, registro); os contratos de cada módulo ficam em `Modules/<Módulo>/Contracts/IntegrationEvents`, a única parte de um módulo que um handler de mensagem de outro módulo pode conhecer (regra validada em `OrderCore.ArchitectureTests/IntegrationEventTests`).
 
+Adicionado pela prontidão para produção (V4, `Docs/specs/operations/production-readiness.md`):
+
+- **Retenção.** `RetentionBackgroundService` roda `RetentionCleaner` uma vez por dia (`Messaging:Retention`): apaga em lotes as linhas enviadas de todo outbox registrado e as tratadas de toda inbox com mais de 30 dias, e as mensagens com falha resolvidas (reprocessadas ou descartadas) há mais de 90; as pendentes nunca. Cada tabela é limpa separadamente e contada em `ordercore.messaging.retention.deleted`. O registro passou a conhecer as inboxes (`InboxSources`): as dos consumidores entram pelo `AddIntegrationEventConsumer`, e uma inbox fora do consumer host (a dos webhooks do Stripe no Payments) se declara com `AddInboxSource<TDbContext>()`. A timeline do pedido e a auditoria não são tocadas. Migrations `AddRetentionIndexes` criam os índices usados (`SentAt` do outbox, `ProcessedAt` da inbox, `ResolvedAt` das mensagens com falha).
+
 Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
 
 - **`MessagingTelemetry`** (activity source e meter `OrderCore.Messaging`): o relay publica dentro de um span *producer*, filho do trace de quem gravou a linha, e manda esse span como `traceparent`; o consumidor trata cada entrega num span *consumer* filho dele, com a tentativa — um checkout até a confirmação é um trace só, com cada retentativa nele. Sem ninguém ouvindo, uma `Activity` simples mantém o contexto fluindo. Métricas: backlog e idade da linha mais antiga por outbox (medidos a cada ciclo do relay), publicadas, falhas de publicação, consumidas, retentativas, postas de lado e duração do tratamento.
@@ -118,6 +122,7 @@ classDiagram
 
     class IntegrationEventRegistry {
         +IReadOnlyCollection~Type~ OutboxSources
+        +IReadOnlyCollection~Type~ InboxSources
         +IReadOnlyCollection~ConsumerRegistration~ Consumers
         +RoutingKey(string name, int version)$ string
         +ContractOf(Type eventType) EventContract
@@ -136,6 +141,7 @@ classDiagram
         +AddIntegrationEvent~TEvent~(string name, int version) IServiceCollection
         +AddOutboxSource~TDbContext~() IServiceCollection
         +AddIntegrationEventConsumer~TEvent, THandler, TInboxDbContext~(string queue) IServiceCollection
+        +AddInboxSource~TDbContext~() IServiceCollection
     }
 
     %% OrderCore.Api.Modules.Messaging.Domain
@@ -318,6 +324,25 @@ classDiagram
         +Retried(string queue, string type, int nextAttempt) void
         +SetAside(string queue, string type, string reason) void
         +ReportBacklog(string module, long pending, TimeSpan oldestAge) void
+        +RetentionDeleted(string table, long rows) void
+    }
+
+    %% OrderCore.Api.Modules.Messaging.Infrastructure.Retention (V4)
+    class RetentionOptions {
+        +TimeSpan MessageRecords
+        +TimeSpan ResolvedFailedMessages
+        +TimeSpan Interval
+        +int BatchSize
+    }
+
+    class RetentionCleaner {
+        -IntegrationEventRegistry registry
+        -RetentionOptions options
+        +RunAsync(DateTimeOffset now) Task~long~
+    }
+
+    class RetentionBackgroundService {
+        -RetentionCleaner cleaner
     }
 
     %% OrderCore.Api.Modules.Messaging.Infrastructure.Health
@@ -335,6 +360,10 @@ classDiagram
     RabbitMqHealthCheck --> RabbitMqConnection : ready
     MessagingHealthCheck --> MessagingTelemetry : outbox backlog
     MessagingHealthCheck --> IFailedMessageRepository : pending failed messages
+    RetentionBackgroundService --> RetentionCleaner : daily
+    RetentionCleaner --> IntegrationEventRegistry : outbox and inbox sources
+    RetentionCleaner --> RetentionOptions
+    RetentionCleaner --> MessagingTelemetry : rows removed per table
 
 ```
 

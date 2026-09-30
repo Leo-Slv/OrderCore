@@ -27,6 +27,12 @@ Adicionado pela observabilidade (`Docs/specs/observability/observability.md`):
 - **`MeasuredPaymentProvider`** envolve o provedor configurado (hoje o `FakePaymentProvider`, registrado como tipo concreto) e mede cada chamada por operação e resultado (`succeeded`, `refused`, `error`) — o Stripe ganha isso sem código a mais.
 - Os use cases marcam o span com `payment.id`/`order.id`.
 
+Adicionado pela prontidão para produção (V4, `Docs/specs/operations/production-readiness.md`):
+
+- **`StripeOptionsValidator`** (com `ValidateOnStart`): com uma chave secreta configurada, a API não sobe com chave `live` sem `Payments:Stripe:AllowLiveKeys=true`, sem chave publicável ou com uma de outro modo, nem sem o segredo do webhook. As mensagens dizem qual configuração corrigir e nunca repetem as chaves.
+- **`PaymentsRateLimits`**: o webhook do Stripe tem limite por endereço (300 por minuto).
+- A inbox dos webhooks se declara com `AddInboxSource<PaymentsDbContext>()` para entrar na retenção ([09-messaging.md](09-messaging.md)).
+
 Adicionado pelo Stripe como provedor (`Docs/specs/payments/stripe-provider.md` e o plano de implementação, com as notas de execução):
 
 - **Escolha do provedor e capacidades:** `PaymentsDependencyInjection` registra o `StripePaymentProvider` quando `Payments:Stripe:SecretKey` está configurada e o `FakePaymentProvider` caso contrário, sempre envolvido pelo `MeasuredPaymentProvider`. `IPaymentProvider.Info` (`PaymentProviderInfo`: nome, formas aceitas, chave publicável) substitui qualquer "if Stripe" nos use cases: `CreatePaymentUseCase` recusa uma forma que o provedor não aceita (`400 payment_method_unavailable`, Pix com o Stripe) e grava `Info.Name` como `Provider`. `GET payments/methods` (anônimo, `PaymentMethodsController` → `GetAvailablePaymentMethodsUseCase`) diz o que oferecer.
@@ -557,7 +563,19 @@ classDiagram
         +string? ApiBase
         +TimeSpan RequestTimeout
         +int MaxNetworkRetries
+        +bool AllowLiveKeys
         +bool IsEnabled
+    }
+
+    class StripeOptionsValidator {
+        +Validate(string? name, StripeOptions options) ValidateOptionsResult
+    }
+
+    %% OrderCore.Api.Modules.Payments.Presentation (V4)
+    class PaymentsRateLimits {
+        <<static>>
+        +string StripeWebhook$
+        +AddPaymentsRateLimits(IServiceCollection services, IConfiguration configuration)$ IServiceCollection
     }
 
     class StripePaymentProvider {
@@ -803,6 +821,8 @@ classDiagram
     IPaymentProvider <|.. StripePaymentProvider
     StripePaymentProvider --> StripeOptions
     StripeWebhookHandler --> StripeOptions : webhook secret
+    StripeOptionsValidator ..> StripeOptions : checked at startup
+    StripeWebhooksController ..> PaymentsRateLimits : 300/min per address
     StripeWebhookHandler --> PaymentsDbContext : inbox stripe-webhooks
     StripeWebhookHandler --> ApplyPaymentProviderUpdateUseCase
     StripeWebhookHandler --> StripePaymentProvider : capture deadline

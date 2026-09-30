@@ -56,6 +56,8 @@ Adicionado pelo rastreamento em tempo real (`Docs/specs/tracking/realtime-order-
 - **`OrderTrackingMetrics`** (meter `OrderCore.Tracking`): conexões abertas por público e atualizações enviadas por status.
 
 
+Adicionado pela prontidão para produção (V4, `Docs/specs/operations/production-readiness.md`): o checkout tem limite por cliente (`OrdersRateLimits`, 10 por minuto; acima dele, `429 too_many_requests`).
+
 Adicionado pelo Stripe como provedor de pagamento (`Docs/specs/payments/stripe-provider.md`; o lado do Payments em [06-payments.md](06-payments.md)):
 
 - **Formas disponíveis.** `IPaymentGateway.GetAvailableMethods()` diz o que o provedor configurado aceita; `PaymentMethodAvailability.Ensure` (usado por `CheckoutUseCase` e `RequestOrderPaymentUseCase`, antes de qualquer efeito) recusa as outras com `400 payment_method_unavailable` — Pix com o Stripe.
@@ -1050,6 +1052,13 @@ classDiagram
 
 
     %% OrderCore.Api.Modules.Orders.Presentation
+    %% OrderCore.Api.Modules.Orders.Presentation (V4)
+    class OrdersRateLimits {
+        <<static>>
+        +string Checkout$
+        +AddOrdersRateLimits(IServiceCollection services, IConfiguration configuration)$ IServiceCollection
+    }
+
     class OrdersController {
         -CreateOrderHandler createOrderHandler
         -SetOrderAddressesUseCase setOrderAddressesUseCase
@@ -1441,6 +1450,7 @@ classDiagram
     PaymentAuthorizedIntegrationEventHandler --> ConfirmOrderUseCase
     PaymentFailedIntegrationEventHandler --> MarkOrderPaymentFailedUseCase
     PaymentAuthorizationExpiredIntegrationEventHandler --> CancelOrderOnExpiredAuthorizationUseCase
+    OrdersController ..> OrdersRateLimits : checkout 10/min per customer
     CancelOrderOnExpiredAuthorizationUseCase --> CancelOrderUseCase : as the system
     CancelOrderOnExpiredAuthorizationUseCase --> IOrderRepository
     CheckoutUseCase ..> CheckoutResult

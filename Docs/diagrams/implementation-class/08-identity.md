@@ -12,6 +12,9 @@ Decisões que moldam o módulo:
 - **Tokens.** O access token é um JWT HMAC-SHA256 (claims `sub`, `email`, `role`, `customer_id`), de 15 minutos. O refresh token tem 256 bits aleatórios, dura 14 dias e só o SHA-256 dele é guardado. A chave de assinatura vem do ambiente (`Jwt__SigningKey`) ou de user-secrets; a API não sobe sem uma chave de pelo menos 32 bytes.
 - **Primeiro admin.** `AdminSeedHostedService` roda `SeedAdminUseCase` na subida quando `IdentitySeed:AdminEmail`/`AdminPassword` estão configurados; cria só se ainda não existe nenhum admin, e uma falha (ex.: migrações ainda não aplicadas) é registrada no log sem derrubar a API. O use case devolve o id do admin criado (ou nada, se já existia um), e é esse id — nunca o e-mail — que vai para o log.
 
+- **Bloqueio de conta** (V4, `Docs/specs/operations/production-readiness.md`): senhas erradas em sequência (`LockoutPolicy`, `Identity:Lockout`: 5, 15 minutos) bloqueiam a conta; a conta bloqueada responde exatamente como senha errada, mesmo com a certa, e a senha continua sendo verificada. O primeiro login certo depois do prazo zera a contagem; sessões abertas continuam valendo. Cada bloqueio é auditado (`AccountLockedOut`) e contado (`IdentityMetrics`). Duas senhas erradas simultâneas não podem responder `409` (revelaria a conta): o repositório traduz o conflito do EF em `AccountConcurrencyConflictException`, e o login o ignora. Migration `AddAccountLockout`.
+- **Limites** (V4): login, cadastro e refresh têm limite por endereço do cliente (`IdentityRateLimits`).
+
 A autorização em si (políticas `Customer`/`Admin`, bloqueio por padrão, `ICurrentUser`) é compartilhada e está em [01-shared-kernel.md](01-shared-kernel.md).
 
 ```mermaid
@@ -60,6 +63,8 @@ classDiagram
         +DateTimeOffset CreatedAt
         +DateTimeOffset UpdatedAt
         +DateTimeOffset? LastSignedInAt
+        +int FailedSignInCount
+        +DateTimeOffset? LockedOutUntil
         +IReadOnlyCollection~RefreshSession~ Sessions
         +NormalizeEmail(string email)$ string
         +CreateCustomer(string email, string passwordHash, DateTimeOffset now)$ UserAccount
@@ -70,6 +75,15 @@ classDiagram
         +RotateSession(string presentedTokenHash, string newTokenHash, DateTimeOffset expiresAt, DateTimeOffset now) ValueTuple~SessionRotationOutcome, RefreshSession?~
         +EndSession(string tokenHash, DateTimeOffset now) void
         +Deactivate(DateTimeOffset now) void
+        +IsLockedOut(DateTimeOffset now) bool
+        +RecordFailedSignIn(LockoutPolicy policy, DateTimeOffset now) bool
+    }
+
+    %% OrderCore.Api.Modules.Identity.Domain.Policies (V4)
+    class LockoutPolicy {
+        +int MaxFailedAttempts
+        +TimeSpan Duration
+        +LockoutPolicy Default$
     }
 
     class RefreshSession {
@@ -221,7 +235,29 @@ classDiagram
         -IAccessTokenIssuer accessTokens
         -ICustomerRegistry customers
         -TimeProvider timeProvider
+        -LockoutPolicy lockoutPolicy
+        -IAuditLogService auditLog
+        -IdentityMetrics metrics
         +ExecuteAsync(SignInCommand command) Task~AuthTokens~
+    }
+
+    %% OrderCore.Api.Modules.Identity.Application.Telemetry (V4)
+    class IdentityMetrics {
+        +LockedOut() void
+    }
+
+    %% OrderCore.Api.Modules.Identity.Application.Contracts (V4)
+    class AccountConcurrencyConflictException {
+        +string ErrorCode$
+    }
+
+    %% OrderCore.Api.Modules.Identity.Presentation (V4)
+    class IdentityRateLimits {
+        <<static>>
+        +string SignIn$
+        +string SignUp$
+        +string Refresh$
+        +AddIdentityRateLimits(IServiceCollection services, IConfiguration configuration)$ IServiceCollection
     }
 
     class RefreshSessionUseCase {
@@ -458,6 +494,12 @@ classDiagram
     AuthController --> ICurrentUser
     AuthController --> AuthPresenter
     AuthPresenter --> AuthTokensResponse
+    UserAccount ..> LockoutPolicy
+    SignInUseCase --> LockoutPolicy : 5 wrong in a row, 15 min
+    SignInUseCase --> IdentityMetrics : lockouts
+    SignInUseCase ..> AccountConcurrencyConflictException : racing wrong passwords
+    EfUserAccountRepository ..> AccountConcurrencyConflictException : translates EF conflicts
+    AuthController ..> IdentityRateLimits : sign-in / sign-up / refresh limited
 
 ```
 
