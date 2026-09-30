@@ -25,7 +25,9 @@ public static class UserAccountMapper
         model.UpdatedAt,
         model.LastSignedInAt,
         model.Version,
-        model.Sessions.Select(ToDomain));
+        model.Sessions.Select(ToDomain),
+        model.FailedSignInCount,
+        model.LockedOutUntil);
 
     public static UserAccountPersistenceModel ToPersistence(UserAccount domain) => new()
     {
@@ -39,6 +41,8 @@ public static class UserAccountMapper
         CreatedAt = domain.CreatedAt,
         UpdatedAt = domain.UpdatedAt,
         LastSignedInAt = domain.LastSignedInAt,
+        FailedSignInCount = domain.FailedSignInCount,
+        LockedOutUntil = domain.LockedOutUntil,
         Version = domain.Version,
         Sessions = domain.Sessions.Select(s => ToPersistence(s, domain.Id)).ToList(),
     };
@@ -50,6 +54,8 @@ public static class UserAccountMapper
         model.Active = domain.Active;
         model.UpdatedAt = domain.UpdatedAt;
         model.LastSignedInAt = domain.LastSignedInAt;
+        model.FailedSignInCount = domain.FailedSignInCount;
+        model.LockedOutUntil = domain.LockedOutUntil;
         model.Version = domain.Version;
 
         ChildCollectionReconciler.Reconcile(

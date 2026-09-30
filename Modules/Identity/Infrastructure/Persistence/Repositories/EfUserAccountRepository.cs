@@ -67,7 +67,14 @@ public sealed class EfUserAccountRepository : IUserAccountRepository
             UserAccountMapper.ApplyChanges(domain, model);
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new AccountConcurrencyConflictException("A concurrent request changed the account.", ex);
+        }
     }
 
     private UserAccount Track(UserAccountPersistenceModel model)

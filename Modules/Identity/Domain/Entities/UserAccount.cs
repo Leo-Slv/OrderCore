@@ -1,5 +1,6 @@
 using OrderCore.Api.Modules.Identity.Domain.Enums;
 using OrderCore.Api.Modules.Identity.Domain.Events;
+using OrderCore.Api.Modules.Identity.Domain.Policies;
 using OrderCore.Api.Shared.Domain;
 using OrderCore.Api.Shared.Domain.Exceptions;
 
@@ -36,6 +37,12 @@ public sealed class UserAccount : AggregateRoot<Guid>
     public DateTimeOffset UpdatedAt { get; private set; }
 
     public DateTimeOffset? LastSignedInAt { get; private set; }
+
+    /// <summary>Wrong passwords in a row since the last successful sign-in or lockout.</summary>
+    public int FailedSignInCount { get; private set; }
+
+    /// <summary>Until when sign-in is refused after too many wrong passwords; null when not locked.</summary>
+    public DateTimeOffset? LockedOutUntil { get; private set; }
 
     public IReadOnlyCollection<RefreshSession> Sessions => _sessions.AsReadOnly();
 
@@ -133,9 +140,41 @@ public sealed class UserAccount : AggregateRoot<Guid>
         var session = RefreshSession.Create(tokenHash, familyId: Guid.NewGuid(), expiresAt, now);
         _sessions.Add(session);
         LastSignedInAt = now;
+        FailedSignInCount = 0;
+        LockedOutUntil = null;
         UpdatedAt = now;
         IncrementVersion();
         return session;
+    }
+
+    public bool IsLockedOut(DateTimeOffset now) => LockedOutUntil is { } until && until > now;
+
+    /// <summary>
+    /// A wrong password. Counts toward the <paramref name="policy"/>'s limit; reaching
+    /// it locks the account for the policy's duration and starts a new count.
+    /// A lock that has run out is cleared first, so the next attempts count
+    /// from zero.
+    /// </summary>
+    /// <returns>Whether this attempt locked the account.</returns>
+    public bool RecordFailedSignIn(LockoutPolicy policy, DateTimeOffset now)
+    {
+        if (LockedOutUntil is { } until && until <= now)
+        {
+            LockedOutUntil = null;
+            FailedSignInCount = 0;
+        }
+
+        FailedSignInCount++;
+        var locked = FailedSignInCount >= policy.MaxFailedAttempts;
+        if (locked)
+        {
+            LockedOutUntil = now + policy.Duration;
+            FailedSignInCount = 0;
+        }
+
+        UpdatedAt = now;
+        IncrementVersion();
+        return locked;
     }
 
     public (SessionRotationOutcome Outcome, RefreshSession? NewSession) RotateSession(
@@ -240,7 +279,9 @@ public sealed class UserAccount : AggregateRoot<Guid>
         DateTimeOffset updatedAt,
         DateTimeOffset? lastSignedInAt,
         int version,
-        IEnumerable<RefreshSession> sessions)
+        IEnumerable<RefreshSession> sessions,
+        int failedSignInCount = 0,
+        DateTimeOffset? lockedOutUntil = null)
     {
         var account = new UserAccount(id, email, passwordHash, role, createdAt)
         {
@@ -248,6 +289,8 @@ public sealed class UserAccount : AggregateRoot<Guid>
             Active = active,
             UpdatedAt = updatedAt,
             LastSignedInAt = lastSignedInAt,
+            FailedSignInCount = failedSignInCount,
+            LockedOutUntil = lockedOutUntil,
             Version = version,
         };
 

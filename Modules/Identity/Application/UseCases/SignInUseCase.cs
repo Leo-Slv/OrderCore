@@ -1,7 +1,11 @@
+using OrderCore.Api.Modules.AuditLogs.Application.Constants;
+using OrderCore.Api.Modules.AuditLogs.Application.Services;
 using OrderCore.Api.Modules.Identity.Application.Contracts;
 using OrderCore.Api.Modules.Identity.Application.DTOs;
+using OrderCore.Api.Modules.Identity.Application.Telemetry;
 using OrderCore.Api.Modules.Identity.Domain.Entities;
 using OrderCore.Api.Modules.Identity.Domain.Enums;
+using OrderCore.Api.Modules.Identity.Domain.Policies;
 using OrderCore.Api.Shared.Application.Exceptions;
 
 namespace OrderCore.Api.Modules.Identity.Application.UseCases;
@@ -15,6 +19,14 @@ namespace OrderCore.Api.Modules.Identity.Application.UseCases;
 /// it still reveals nothing to someone who doesn't know it. For
 /// an unknown e-mail a password is still verified against a throwaway
 /// hash, so the response time doesn't reveal which e-mails exist.
+/// <para>
+/// Wrong passwords in a row lock the account for a while
+/// (<see cref="LockoutPolicy"/>, production-readiness spec, decision 4). A
+/// locked account answers exactly like a wrong password — even with the right
+/// one — so a lock tells nothing about which accounts exist; the next
+/// successful sign-in after it runs out resets the count. Sessions already
+/// open keep working: the lock is about guessing passwords.
+/// </para>
 /// </summary>
 public sealed class SignInUseCase
 {
@@ -30,6 +42,9 @@ public sealed class SignInUseCase
     private readonly IAccessTokenIssuer _accessTokens;
     private readonly ICustomerRegistry _customers;
     private readonly TimeProvider _timeProvider;
+    private readonly LockoutPolicy _lockoutPolicy;
+    private readonly IAuditLogService _auditLog;
+    private readonly IdentityMetrics _metrics;
 
     public SignInUseCase(
         IUserAccountRepository accounts,
@@ -37,8 +52,14 @@ public sealed class SignInUseCase
         IRefreshTokenGenerator refreshTokens,
         IAccessTokenIssuer accessTokens,
         ICustomerRegistry customers,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        LockoutPolicy lockoutPolicy,
+        IAuditLogService auditLog,
+        IdentityMetrics metrics)
     {
+        _lockoutPolicy = lockoutPolicy;
+        _auditLog = auditLog;
+        _metrics = metrics;
         _accounts = accounts;
         _passwordHasher = passwordHasher;
         _refreshTokens = refreshTokens;
@@ -56,8 +77,22 @@ public sealed class SignInUseCase
             throw InvalidCredentials();
         }
 
+        // The password is verified even for a locked account, so a lock doesn't
+        // answer faster than a wrong password.
         var check = _passwordHasher.Verify(account.PasswordHash, command.Password);
-        if (check == PasswordCheck.Failed || !account.Active || (account.Role == UserRole.Customer && account.CustomerId is null))
+        var attemptAt = _timeProvider.GetUtcNow();
+        if (account.IsLockedOut(attemptAt))
+        {
+            throw InvalidCredentials();
+        }
+
+        if (check == PasswordCheck.Failed)
+        {
+            await RecordFailedSignInAsync(account, attemptAt, cancellationToken);
+            throw InvalidCredentials();
+        }
+
+        if (!account.Active || (account.Role == UserRole.Customer && account.CustomerId is null))
         {
             throw InvalidCredentials();
         }
@@ -81,6 +116,38 @@ public sealed class SignInUseCase
         await _accounts.SaveChangesAsync(cancellationToken);
 
         return SessionTokens.For(account, refreshToken.Token, session, _accessTokens, now);
+    }
+
+    /// <summary>
+    /// Counts the wrong password; the one that reaches the limit locks the
+    /// account, which is audited and measured. Two wrong passwords racing on
+    /// the same account can collide on its version: the loser's count is
+    /// dropped rather than answered as a conflict, which would tell the caller
+    /// the account exists.
+    /// </summary>
+    private async Task RecordFailedSignInAsync(UserAccount account, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var locked = account.RecordFailedSignIn(_lockoutPolicy, now);
+        try
+        {
+            await _accounts.SaveChangesAsync(cancellationToken);
+        }
+        catch (AccountConcurrencyConflictException)
+        {
+            return;
+        }
+
+        if (locked)
+        {
+            _metrics.LockedOut();
+            await _auditLog.RecordAsync(
+                AuditLogActionNames.AccountLockedOut,
+                "UserAccount",
+                account.Id,
+                new Dictionary<string, string?> { ["lockedOutUntil"] = account.LockedOutUntil?.ToString("O") },
+                userId: null,
+                cancellationToken);
+        }
     }
 
     private static UnauthorizedException InvalidCredentials() =>

@@ -22,6 +22,10 @@ public sealed class UserAccountPersistenceModel
 
     public DateTimeOffset? LastSignedInAt { get; set; }
 
+    public int FailedSignInCount { get; set; }
+
+    public DateTimeOffset? LockedOutUntil { get; set; }
+
     public int Version { get; set; }
 
     public ICollection<RefreshSessionPersistenceModel> Sessions { get; set; } = new List<RefreshSessionPersistenceModel>();

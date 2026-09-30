@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Identity.Application.Contracts;
 using OrderCore.Api.Modules.Identity.Application.UseCases;
+using OrderCore.Api.Modules.Identity.Application.Telemetry;
+using OrderCore.Api.Modules.Identity.Domain.Policies;
 using OrderCore.Api.Modules.Identity.Infrastructure.Adapters;
 using OrderCore.Api.Modules.Identity.Infrastructure.Hosting;
 using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
@@ -35,6 +37,13 @@ public static class IdentityDependencyInjection
             .ValidateOnStart();
         services.AddOrderCoreJwtBearer();
         services.AddIdentityRateLimits(configuration);
+
+        // Identity:Lockout (MaxFailedAttempts, Duration); 5 in a row, 15 minutes by default.
+        var lockout = configuration.GetSection("Identity:Lockout");
+        services.AddSingleton(new LockoutPolicy(
+            lockout.GetValue("MaxFailedAttempts", LockoutPolicy.Default.MaxFailedAttempts),
+            lockout.GetValue("Duration", LockoutPolicy.Default.Duration)));
+        services.AddSingleton<IdentityMetrics>();
 
         services.AddOptions<IdentitySeedOptions>().Bind(configuration.GetSection(IdentitySeedOptions.SectionName));
         services.AddHostedService<AdminSeedHostedService>();
