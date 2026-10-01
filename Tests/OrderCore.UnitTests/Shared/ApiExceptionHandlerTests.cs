@@ -84,6 +84,15 @@ public sealed class ApiExceptionHandlerTests
         code.Should().Be("invalid_credentials");
     }
 
+    [Fact]
+    public void Forbidden_maps_to_403_with_its_own_code()
+    {
+        var (status, code, _) = ApiExceptionHandler.Classify(new ForbiddenException("email_not_confirmed", "confirm first"));
+
+        status.Should().Be(StatusCodes.Status403Forbidden);
+        code.Should().Be("email_not_confirmed");
+    }
+
     [Theory]
     [InlineData(StatusCodes.Status400BadRequest, "validation_error")]
     [InlineData(StatusCodes.Status401Unauthorized, "unauthenticated")]

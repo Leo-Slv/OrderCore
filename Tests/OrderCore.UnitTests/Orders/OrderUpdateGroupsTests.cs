@@ -8,7 +8,7 @@ namespace OrderCore.UnitTests.Orders;
 /// <summary>The groups a connection joins come from its token alone.</summary>
 public sealed class OrderUpdateGroupsTests
 {
-    private sealed record User(Guid? UserId, Guid? CustomerId, string? Role) : ICurrentUser;
+    private sealed record User(Guid? UserId, Guid? CustomerId, string? Role, bool EmailConfirmed = true) : ICurrentUser;
 
     [Fact]
     public void A_customer_follows_only_their_own_orders()

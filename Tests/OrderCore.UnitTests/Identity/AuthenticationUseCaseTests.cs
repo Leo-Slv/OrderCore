@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using OrderCore.Api.Modules.Identity.Application.DTOs;
 using OrderCore.Api.Modules.Identity.Application.UseCases;
 using OrderCore.Api.Modules.Identity.Domain.Entities;
@@ -23,7 +24,18 @@ public sealed class AuthenticationUseCaseTests
     private readonly FakeAuditLogService _auditLog = new();
     private readonly FakeTimeProvider _clock = new();
 
-    private SignUpCustomerUseCase SignUp() => new(_accounts, _customers, _hasher, _refreshTokens, _accessTokens, _auditLog, _clock);
+    private readonly FakeAccountEmails _emails = new();
+
+    private SignUpCustomerUseCase SignUp() => new(
+        _accounts,
+        _customers,
+        _hasher,
+        _refreshTokens,
+        _accessTokens,
+        _auditLog,
+        _clock,
+        new RequestEmailConfirmationUseCase(_accounts, _refreshTokens, _customers, _emails, _clock),
+        NullLogger<SignUpCustomerUseCase>.Instance);
 
     private static readonly LockoutPolicy Lockout = new(MaxFailedAttempts: 3, Duration: TimeSpan.FromMinutes(15));
 
@@ -94,7 +106,7 @@ public sealed class AuthenticationUseCaseTests
 
         var tokens = await SignIn().ExecuteAsync(new SignInCommand("Jane@Example.com", Password), CancellationToken.None);
 
-        tokens.RefreshToken.Should().Be("refresh-2");
+        tokens.RefreshToken.Should().Be("refresh-3", "refresh-2 went into the sign-up's confirmation link");
         _accounts.Accounts.Single().Sessions.Should().HaveCount(2);
     }
 

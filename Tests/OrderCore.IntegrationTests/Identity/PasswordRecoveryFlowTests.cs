@@ -52,7 +52,7 @@ public sealed partial class PasswordRecoveryFlowTests : IClassFixture<ApiDatabas
 
         (await client.PostAsJsonAsync("/api/auth/password/forgot", new { email })).StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        var message = await TestMailpit.WaitForMessageAsync(email);
+        var message = await TestMailpit.WaitForMessageAsync(email, subject: "Redefinição de senha");
         message.Subject.Should().Be("Redefinição de senha");
         message.Html.Should().Contain("Olá, Jane Doe.").And.Contain("O link vale por 30 minutos");
         var link = ResetLink().Match(message.Text);
@@ -86,7 +86,7 @@ public sealed partial class PasswordRecoveryFlowTests : IClassFixture<ApiDatabas
         forStranger.StatusCode.Should().Be(HttpStatusCode.Accepted);
         forKnown.StatusCode.Should().Be(HttpStatusCode.Accepted);
         (await forStranger.Content.ReadAsStringAsync()).Should().Be(await forKnown.Content.ReadAsStringAsync());
-        await TestMailpit.WaitForMessageAsync(known);
+        await TestMailpit.WaitForMessageAsync(known, subject: "Redefinição de senha");
         (await TestMailpit.CountAsync(stranger)).Should().Be(0);
     }
 

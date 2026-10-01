@@ -94,9 +94,15 @@ public sealed class ApiDatabase : IAsyncLifetime
         return client;
     }
 
-    /// <summary>A new customer account (unique e-mail), with the client already carrying its access token.</summary>
+    /// <summary>
+    /// A new customer account (unique e-mail), with the client already carrying
+    /// its access token. Its address is confirmed, as checkout requires, unless
+    /// <paramref name="confirmEmail"/> is false — straight in the database, the
+    /// e-mail round trip being what <c>EmailConfirmationTests</c> covers — and
+    /// the session refreshed, so the token says so.
+    /// </summary>
     public static async Task<(HttpClient Client, JsonElement Tokens)> SignUpCustomerAsync(
-        WebApplicationFactory<Program> factory, string name = "Jane Doe")
+        WebApplicationFactory<Program> factory, string name = "Jane Doe", bool confirmEmail = true)
     {
         var client = factory.CreateClient();
         var response = await client.PostAsJsonAsync("/api/auth/sign-up", new
@@ -107,6 +113,22 @@ public sealed class ApiDatabase : IAsyncLifetime
         });
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var tokens = await response.Content.ReadFromJsonAsync<JsonElement>(Json);
+
+        if (confirmEmail)
+        {
+            var userId = tokens.GetProperty("userId").GetGuid();
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().UserAccounts
+                    .Where(a => a.Id == userId)
+                    .ExecuteUpdateAsync(set => set.SetProperty(a => a.EmailConfirmedAt, DateTimeOffset.UtcNow));
+            }
+
+            var refreshed = await client.PostAsJsonAsync("/api/auth/refresh", new { refreshToken = tokens.GetProperty("refreshToken").GetString() });
+            refreshed.StatusCode.Should().Be(HttpStatusCode.OK);
+            tokens = await refreshed.Content.ReadFromJsonAsync<JsonElement>(Json);
+        }
+
         UseAccessToken(client, tokens);
         return (client, tokens);
     }

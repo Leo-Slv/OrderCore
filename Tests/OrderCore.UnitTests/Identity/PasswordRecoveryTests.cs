@@ -1,5 +1,5 @@
 using FluentAssertions;
-using OrderCore.Api.Modules.Identity.Application.Contracts;
+using Microsoft.Extensions.Logging.Abstractions;
 using OrderCore.Api.Modules.Identity.Application.DTOs;
 using OrderCore.Api.Modules.Identity.Application.UseCases;
 using OrderCore.Api.Modules.Identity.Domain.Entities;
@@ -43,7 +43,16 @@ public sealed class PasswordRecoveryTests
         new(_accounts, _hasher, _tokens, _accessTokens, _customers, _clock, Lockout, _auditLog, TestMetrics.Identity);
 
     private async Task<AuthTokens> SignUpJaneAsync() =>
-        await new SignUpCustomerUseCase(_accounts, _customers, _hasher, _tokens, _accessTokens, _auditLog, _clock)
+        await new SignUpCustomerUseCase(
+                _accounts,
+                _customers,
+                _hasher,
+                _tokens,
+                _accessTokens,
+                _auditLog,
+                _clock,
+                new RequestEmailConfirmationUseCase(_accounts, _tokens, _customers, _emails, _clock),
+                NullLogger<SignUpCustomerUseCase>.Instance)
             .ExecuteAsync(new SignUpCommand("Jane Doe", "jane@example.com", Password, Phone: null), CancellationToken.None);
 
     private UserAccount Jane => _accounts.Accounts.Single();
@@ -59,8 +68,7 @@ public sealed class PasswordRecoveryTests
         email.Email.Should().Be("jane@example.com");
         email.Name.Should().Be("Jane Doe");
         email.ValidFor.Should().Be(TimeSpan.FromMinutes(30));
-        var token = Jane.Tokens.Should().ContainSingle().Subject;
-        token.Purpose.Should().Be(AccountTokenPurpose.PasswordReset);
+        var token = Jane.Tokens.Should().ContainSingle(t => t.Purpose == AccountTokenPurpose.PasswordReset).Subject;
         token.TokenHash.Should().Be(_tokens.Hash(email.Token), "only the hash is kept");
         token.ExpiresAt.Should().Be(_clock.GetUtcNow().AddMinutes(30));
         _auditLog.Actions.Should().Contain("PasswordResetRequested");
@@ -77,7 +85,7 @@ public sealed class PasswordRecoveryTests
 
         await act.Should().NotThrowAsync();
         _emails.PasswordResets.Should().BeEmpty();
-        Jane.Tokens.Should().BeEmpty();
+        Jane.Tokens.Should().NotContain(t => t.Purpose == AccountTokenPurpose.PasswordReset);
     }
 
     [Fact]
@@ -232,16 +240,5 @@ public sealed class PasswordRecoveryTests
         var whileLocked = () => Change().ExecuteAsync(Jane.Id, Password, NewPassword, null, CancellationToken.None);
         await whileLocked.Should().ThrowAsync<DomainRuleViolationException>().Where(e => e.Code == "invalid_current_password");
         Jane.PasswordHash.Should().Be(FakePasswordHasher.Prefix + Password);
-    }
-
-    private sealed class FakeAccountEmails : IAccountEmails
-    {
-        public List<(string Email, string? Name, string Token, TimeSpan ValidFor)> PasswordResets { get; } = [];
-
-        public Task SendPasswordResetAsync(string email, string? name, string token, TimeSpan validFor, CancellationToken cancellationToken)
-        {
-            PasswordResets.Add((email, name, token, validFor));
-            return Task.CompletedTask;
-        }
     }
 }

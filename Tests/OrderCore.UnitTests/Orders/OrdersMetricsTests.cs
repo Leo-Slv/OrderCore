@@ -4,6 +4,7 @@ using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Modules.Orders.Application.UseCases;
 using OrderCore.Api.Shared.Application.Exceptions;
+using OrderCore.UnitTests.AuditLogs;
 using Xunit;
 
 namespace OrderCore.UnitTests.Orders;
@@ -32,7 +33,7 @@ public sealed class OrdersMetricsTests : IDisposable
     public void Dispose() => _probe.Dispose();
 
     private CheckoutUseCase Checkout() => new(
-        _orders, _catalog, _customers, _inventory, _payments, new FakeOrderNumberGenerator(), _auditLog, _metrics, TimeProvider.System);
+        _orders, _catalog, _customers, _inventory, _payments, new FakeOrderNumberGenerator(), _auditLog, _metrics, TimeProvider.System, new FakeCurrentUser());
 
     private CheckoutCommand Command(Guid productId, int quantity = 1, string key = "key-1") =>
         new(CustomerId, [new CheckoutItem(productId, quantity)], _addressId, _addressId, PaymentMethodChoice.Pix, key, null, null);

@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Orders.Domain.Entities;
 using OrderCore.Api.Modules.Orders.Domain.Enums;
 using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Domain.Exceptions;
+using OrderCore.UnitTests.AuditLogs;
 using Xunit;
 
 namespace OrderCore.UnitTests.Orders;
@@ -25,8 +26,17 @@ public sealed class CheckoutUseCaseTests
         _addressId = _customers.AddAddress(CustomerId);
     }
 
-    private CheckoutUseCase CreateUseCase() => new(
-        _orders, _catalog, _customers, _inventory, _payments, new FakeOrderNumberGenerator(), new FakeAuditLogService(), TestMetrics.Orders, TimeProvider.System);
+    private CheckoutUseCase CreateUseCase(bool emailConfirmed = true) => new(
+        _orders,
+        _catalog,
+        _customers,
+        _inventory,
+        _payments,
+        new FakeOrderNumberGenerator(),
+        new FakeAuditLogService(),
+        TestMetrics.Orders,
+        TimeProvider.System,
+        new FakeCurrentUser { CustomerId = CustomerId, Role = "Customer", EmailConfirmed = emailConfirmed });
 
     private CatalogProductSnapshot InStockProduct(decimal price = 50m, int stock = 10, string currency = "BRL")
     {
@@ -59,6 +69,19 @@ public sealed class CheckoutUseCaseTests
         order.CheckoutIdempotencyKey.Should().Be("checkout-1");
         _inventory.Reserved.Should().ContainKey(orderId);
         _payments.Requests.Should().ContainSingle().Which.Should().Be((orderId, 100m, PaymentMethodChoice.Pix));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_refuses_a_customer_whose_email_is_not_confirmed_before_touching_anything()
+    {
+        var product = InStockProduct();
+
+        var act = () => CreateUseCase(emailConfirmed: false).ExecuteAsync(Command([new CheckoutItem(product.Id, 1)]), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ForbiddenException>().Where(e => e.Code == "email_not_confirmed");
+        _orders.Orders.Should().BeEmpty();
+        _inventory.Reserved.Should().BeEmpty();
+        _payments.Requests.Should().BeEmpty();
     }
 
     [Fact]

@@ -33,14 +33,18 @@ public static class TestMailpit
     /// <summary>A recipient address no other test uses.</summary>
     public static string NewAddress(string prefix = "someone") => $"{prefix}-{Guid.NewGuid():N}@example.com";
 
-    /// <summary>Waits until a message to <paramref name="to"/> arrives, and returns it (subject, HTML and text).</summary>
-    public static async Task<MailpitMessage> WaitForMessageAsync(string to, TimeSpan? timeout = null)
+    /// <summary>
+    /// Waits until a message to <paramref name="to"/> arrives — with
+    /// <paramref name="subject"/>, when given — and returns the newest one
+    /// (subject, HTML and text).
+    /// </summary>
+    public static async Task<MailpitMessage> WaitForMessageAsync(string to, TimeSpan? timeout = null, string? subject = null)
     {
         var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(20));
         using var http = Http();
         while (true)
         {
-            var messages = await SearchAsync(http, to);
+            var messages = await SearchAsync(http, to, subject);
             if (messages.Count > 0)
             {
                 var id = messages[0].GetProperty("ID").GetString();
@@ -69,9 +73,10 @@ public static class TestMailpit
         return (await SearchAsync(http, to)).Count;
     }
 
-    private static async Task<IReadOnlyList<JsonElement>> SearchAsync(HttpClient http, string to)
+    private static async Task<IReadOnlyList<JsonElement>> SearchAsync(HttpClient http, string to, string? subject = null)
     {
-        var result = await http.GetFromJsonAsync<JsonElement>($"api/v1/search?query={Uri.EscapeDataString($"to:\"{to}\"")}");
+        var query = subject is null ? $"to:\"{to}\"" : $"to:\"{to}\" subject:\"{subject}\"";
+        var result = await http.GetFromJsonAsync<JsonElement>($"api/v1/search?query={Uri.EscapeDataString(query)}");
         return result.GetProperty("messages").EnumerateArray().ToList();
     }
 

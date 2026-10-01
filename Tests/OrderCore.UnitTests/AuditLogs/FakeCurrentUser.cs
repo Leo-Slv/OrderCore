@@ -9,4 +9,6 @@ internal sealed class FakeCurrentUser : ICurrentUser
     public Guid? CustomerId { get; init; }
 
     public string? Role { get; init; }
+
+    public bool EmailConfirmed { get; init; } = true;
 }
