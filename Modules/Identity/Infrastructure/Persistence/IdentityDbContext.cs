@@ -13,6 +13,8 @@ public sealed class IdentityDbContext : DbContext
 
     public DbSet<RefreshSessionPersistenceModel> RefreshSessions => Set<RefreshSessionPersistenceModel>();
 
+    public DbSet<AccountTokenPersistenceModel> AccountTokens => Set<AccountTokenPersistenceModel>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(IdentityDbContext).Assembly, type =>

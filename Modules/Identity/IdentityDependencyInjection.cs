@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using OrderCore.Api.Modules.Identity.Application.Contracts;
 using OrderCore.Api.Modules.Identity.Application.UseCases;
 using OrderCore.Api.Modules.Identity.Application.Telemetry;
@@ -54,11 +55,19 @@ public static class IdentityDependencyInjection
         services.AddSingleton<IRefreshTokenGenerator, RandomRefreshTokenGenerator>();
         services.AddScoped<ICustomerRegistry, CustomerRegistryAdapter>();
 
+        // The account e-mails go through Notifications; their links point at the storefront.
+        services.AddOptions<AccountLinksOptions>().Bind(configuration.GetSection(AccountLinksOptions.SectionName)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<AccountLinksOptions>, AccountLinksOptionsValidator>();
+        services.AddScoped<IAccountEmails, AccountEmailsAdapter>();
+
         services.AddScoped<SignUpCustomerUseCase>();
         services.AddScoped<SignInUseCase>();
         services.AddScoped<RefreshSessionUseCase>();
         services.AddScoped<SignOutUseCase>();
         services.AddScoped<SeedAdminUseCase>();
+        services.AddScoped<RequestPasswordResetUseCase>();
+        services.AddScoped<ResetPasswordUseCase>();
+        services.AddScoped<ChangePasswordUseCase>();
 
         return services;
     }

@@ -28,5 +28,10 @@ public sealed class UserAccountConfiguration : IEntityTypeConfiguration<UserAcco
             .WithOne()
             .HasForeignKey(s => s.UserAccountId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(a => a.Tokens)
+            .WithOne()
+            .HasForeignKey(t => t.UserAccountId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

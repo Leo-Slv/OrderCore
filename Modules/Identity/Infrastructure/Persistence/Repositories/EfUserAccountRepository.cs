@@ -42,6 +42,15 @@ public sealed class EfUserAccountRepository : IUserAccountRepository
         return model is null ? null : Track(model);
     }
 
+    public async Task<UserAccount?> GetByAccountTokenHashAsync(
+        AccountTokenPurpose purpose, string tokenHash, CancellationToken cancellationToken)
+    {
+        var purposeName = purpose.ToString();
+        var model = await Query().FirstOrDefaultAsync(
+            a => a.Tokens.Any(t => t.TokenHash == tokenHash && t.Purpose == purposeName), cancellationToken);
+        return model is null ? null : Track(model);
+    }
+
     public Task<bool> AnyAdminAsync(CancellationToken cancellationToken) =>
         _dbContext.UserAccounts.AnyAsync(a => a.Role == AdminRole, cancellationToken);
 
@@ -84,5 +93,6 @@ public sealed class EfUserAccountRepository : IUserAccountRepository
         return domain;
     }
 
-    private IQueryable<UserAccountPersistenceModel> Query() => _dbContext.UserAccounts.Include(a => a.Sessions);
+    private IQueryable<UserAccountPersistenceModel> Query() =>
+        _dbContext.UserAccounts.Include(a => a.Sessions).Include(a => a.Tokens).AsSplitQuery();
 }

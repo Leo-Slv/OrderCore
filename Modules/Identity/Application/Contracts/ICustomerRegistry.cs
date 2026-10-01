@@ -18,4 +18,7 @@ public interface ICustomerRegistry
     /// exist: either way their account must not get a session.
     /// </summary>
     Task<bool> IsActiveAsync(Guid customerId, CancellationToken cancellationToken);
+
+    /// <summary>The customer's name, to greet them in an e-mail; null when there is no such customer.</summary>
+    Task<string?> GetNameAsync(Guid customerId, CancellationToken cancellationToken);
 }

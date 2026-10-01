@@ -29,4 +29,6 @@ public sealed class UserAccountPersistenceModel
     public int Version { get; set; }
 
     public ICollection<RefreshSessionPersistenceModel> Sessions { get; set; } = new List<RefreshSessionPersistenceModel>();
+
+    public ICollection<AccountTokenPersistenceModel> Tokens { get; set; } = new List<AccountTokenPersistenceModel>();
 }

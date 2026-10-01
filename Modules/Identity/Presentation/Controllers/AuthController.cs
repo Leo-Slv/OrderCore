@@ -10,8 +10,9 @@ using OrderCore.Api.Shared.Application.Abstractions;
 namespace OrderCore.Api.Modules.Identity.Presentation.Controllers;
 
 /// <summary>
-/// Sign-up, sign-in, token refresh and sign-out. Tokens travel in the JSON
-/// body, not in cookies set by the API; see <see cref="AuthTokensResponse"/>.
+/// Sign-up, sign-in, token refresh, sign-out and the password: forgot, reset
+/// and change (Docs/specs/identity/password-recovery.md). Tokens travel in
+/// the JSON body, not in cookies set by the API; see <see cref="AuthTokensResponse"/>.
 /// </summary>
 [ApiController]
 [Route("auth")]
@@ -21,15 +22,28 @@ public sealed class AuthController : ControllerBase
     private readonly SignInUseCase _signIn;
     private readonly RefreshSessionUseCase _refresh;
     private readonly SignOutUseCase _signOut;
+    private readonly RequestPasswordResetUseCase _requestPasswordReset;
+    private readonly ResetPasswordUseCase _resetPassword;
+    private readonly ChangePasswordUseCase _changePassword;
     private readonly ICurrentUser _currentUser;
 
     public AuthController(
-        SignUpCustomerUseCase signUp, SignInUseCase signIn, RefreshSessionUseCase refresh, SignOutUseCase signOut, ICurrentUser currentUser)
+        SignUpCustomerUseCase signUp,
+        SignInUseCase signIn,
+        RefreshSessionUseCase refresh,
+        SignOutUseCase signOut,
+        RequestPasswordResetUseCase requestPasswordReset,
+        ResetPasswordUseCase resetPassword,
+        ChangePasswordUseCase changePassword,
+        ICurrentUser currentUser)
     {
         _signUp = signUp;
         _signIn = signIn;
         _refresh = refresh;
         _signOut = signOut;
+        _requestPasswordReset = requestPasswordReset;
+        _resetPassword = resetPassword;
+        _changePassword = changePassword;
         _currentUser = currentUser;
     }
 
@@ -82,6 +96,53 @@ public sealed class AuthController : ControllerBase
     public async Task<IActionResult> SignOutAsync([FromBody] RefreshTokenRequest request, CancellationToken cancellationToken)
     {
         await _signOut.ExecuteAsync(_currentUser.UserId!.Value, request.RefreshToken, cancellationToken);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Asks for a password-reset e-mail. Always 202, whether the address has an
+    /// account or not, so the form can't tell who has one.
+    /// </summary>
+    [HttpPost("password/forgot")]
+    [AllowAnonymous]
+    [EnableRateLimiting(IdentityRateLimits.ForgotPassword)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> ForgotPasswordAsync([FromBody] ForgotPasswordRequest request, CancellationToken cancellationToken)
+    {
+        await _requestPasswordReset.ExecuteAsync(request.Email, cancellationToken);
+
+        return Accepted();
+    }
+
+    /// <summary>Sets a new password with the token from the reset e-mail; every session of the account ends.</summary>
+    [HttpPost("password/reset")]
+    [AllowAnonymous]
+    [EnableRateLimiting(IdentityRateLimits.ResetPassword)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ResetPasswordAsync([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        await _resetPassword.ExecuteAsync(request.Token, request.NewPassword, cancellationToken);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Replaces the signed-in user's password, confirming the current one. The
+    /// session of the given refresh token stays; every other one ends.
+    /// </summary>
+    [HttpPost("password/change")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ChangePasswordAsync([FromBody] ChangePasswordRequest request, CancellationToken cancellationToken)
+    {
+        await _changePassword.ExecuteAsync(
+            _currentUser.UserId!.Value, request.CurrentPassword, request.NewPassword, request.RefreshToken, cancellationToken);
 
         return NoContent();
     }

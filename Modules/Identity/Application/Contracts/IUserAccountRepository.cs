@@ -1,4 +1,5 @@
 using OrderCore.Api.Modules.Identity.Domain.Entities;
+using OrderCore.Api.Modules.Identity.Domain.Enums;
 
 namespace OrderCore.Api.Modules.Identity.Application.Contracts;
 
@@ -15,6 +16,9 @@ public interface IUserAccountRepository
 
     /// <summary>The account owning the refresh session with this token hash, sessions included.</summary>
     Task<UserAccount?> GetBySessionTokenHashAsync(string tokenHash, CancellationToken cancellationToken);
+
+    /// <summary>The account holding the e-mailed token with this hash and purpose (used or not).</summary>
+    Task<UserAccount?> GetByAccountTokenHashAsync(AccountTokenPurpose purpose, string tokenHash, CancellationToken cancellationToken);
 
     Task<bool> AnyAdminAsync(CancellationToken cancellationToken);
 

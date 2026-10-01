@@ -49,6 +49,9 @@ public static class AuditLogActionNames
     public const string UserAccountCreated = "UserAccountCreated";
     public const string RefreshTokenReuseDetected = "RefreshTokenReuseDetected";
     public const string AccountLockedOut = "AccountLockedOut";
+    public const string PasswordResetRequested = "PasswordResetRequested";
+    public const string PasswordReset = "PasswordReset";
+    public const string PasswordChanged = "PasswordChanged";
 
     public const string FailedMessageReplayed = "FailedMessageReplayed";
     public const string FailedMessageDiscarded = "FailedMessageDiscarded";

@@ -27,7 +27,8 @@ public static class UserAccountMapper
         model.Version,
         model.Sessions.Select(ToDomain),
         model.FailedSignInCount,
-        model.LockedOutUntil);
+        model.LockedOutUntil,
+        model.Tokens.Select(ToDomain));
 
     public static UserAccountPersistenceModel ToPersistence(UserAccount domain) => new()
     {
@@ -45,6 +46,7 @@ public static class UserAccountMapper
         LockedOutUntil = domain.LockedOutUntil,
         Version = domain.Version,
         Sessions = domain.Sessions.Select(s => ToPersistence(s, domain.Id)).ToList(),
+        Tokens = domain.Tokens.Select(t => ToPersistence(t, domain.Id)).ToList(),
     };
 
     public static void ApplyChanges(UserAccount domain, UserAccountPersistenceModel model)
@@ -60,7 +62,25 @@ public static class UserAccountMapper
 
         ChildCollectionReconciler.Reconcile(
             domain.Sessions, model.Sessions, s => ToPersistence(s, domain.Id), ApplyChanges, s => s.Id);
+        ChildCollectionReconciler.Reconcile(
+            domain.Tokens, model.Tokens, t => ToPersistence(t, domain.Id), ApplyChanges, t => t.Id);
     }
+
+    private static AccountTokenPersistenceModel ToPersistence(AccountToken domain, Guid userAccountId) => new()
+    {
+        Id = domain.Id,
+        UserAccountId = userAccountId,
+        Purpose = domain.Purpose.ToString(),
+        TokenHash = domain.TokenHash,
+        CreatedAt = domain.CreatedAt,
+        ExpiresAt = domain.ExpiresAt,
+        UsedAt = domain.UsedAt,
+    };
+
+    private static void ApplyChanges(AccountToken domain, AccountTokenPersistenceModel model) => model.UsedAt = domain.UsedAt;
+
+    private static AccountToken ToDomain(AccountTokenPersistenceModel model) => AccountToken.Rehydrate(
+        model.Id, Enum.Parse<AccountTokenPurpose>(model.Purpose), model.TokenHash, model.CreatedAt, model.ExpiresAt, model.UsedAt);
 
     private static RefreshSessionPersistenceModel ToPersistence(RefreshSession domain, Guid userAccountId) => new()
     {

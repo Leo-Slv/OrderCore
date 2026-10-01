@@ -16,14 +16,18 @@ public sealed class ProductionSettings
     public bool EmailApiConfigured { get; set; }
 
     public string? SmtpHost { get; set; }
+
+    /// <summary>The storefront pages the account e-mails link to (<c>Identity:Links</c>).</summary>
+    public IReadOnlyList<string?> AccountLinks { get; set; } = [];
 }
 
 /// <summary>
 /// Outside Development, stops the API at startup when a setting a deployment
 /// must provide is missing or still has its development value
 /// (production-readiness spec, item 5): the database, the storefront origins
-/// allowed by CORS, the host names the API answers for, the broker and a way
-/// to send e-mail. Each failure names the setting; nothing secret is echoed.
+/// allowed by CORS, the host names the API answers for, the broker, a way to
+/// send e-mail and the storefront links in account e-mails. Each failure
+/// names the setting; nothing secret is echoed.
 /// Development keeps its local defaults and isn't checked.
 /// </summary>
 public static class ProductionSettingsCheck
@@ -45,6 +49,7 @@ public static class ProductionSettingsCheck
                 settings.BrokerHost = configuration["RabbitMq:Host"];
                 settings.EmailApiConfigured = !string.IsNullOrWhiteSpace(configuration["Notifications:Resend:ApiKey"]);
                 settings.SmtpHost = configuration["Notifications:Smtp:Host"];
+                settings.AccountLinks = [configuration["Identity:Links:ResetPassword"], configuration["Identity:Links:ConfirmEmail"]];
             })
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<ProductionSettings>, ProductionSettingsValidator>();
@@ -91,6 +96,12 @@ public sealed class ProductionSettingsValidator : IValidateOptions<ProductionSet
         if (!settings.EmailApiConfigured && (string.IsNullOrWhiteSpace(settings.SmtpHost) || PointsToLocalhost(settings.SmtpHost)))
         {
             failures.Add("Notifications:Resend:ApiKey is required (or Notifications:Smtp:Host naming a real SMTP server, not localhost).");
+        }
+
+        // A missing link is reported by Identity's own check; here, only the local one.
+        if (settings.AccountLinks.Any(link => !string.IsNullOrWhiteSpace(link) && PointsToLocalhost(link)))
+        {
+            failures.Add("Identity:Links still point to localhost: the account e-mails must link to the storefront.");
         }
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);

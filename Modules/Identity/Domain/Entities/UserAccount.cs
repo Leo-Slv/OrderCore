@@ -17,7 +17,10 @@ namespace OrderCore.Api.Modules.Identity.Domain.Entities;
 /// </summary>
 public sealed class UserAccount : AggregateRoot<Guid>
 {
+    public const string InvalidOrExpiredTokenCode = "invalid_or_expired_token";
+
     private readonly List<RefreshSession> _sessions = new();
+    private readonly List<AccountToken> _tokens = new();
 
     public string Email { get; private set; } = string.Empty;
 
@@ -45,6 +48,9 @@ public sealed class UserAccount : AggregateRoot<Guid>
     public DateTimeOffset? LockedOutUntil { get; private set; }
 
     public IReadOnlyCollection<RefreshSession> Sessions => _sessions.AsReadOnly();
+
+    /// <summary>The single-use tokens e-mailed to the owner (password reset, e-mail confirmation).</summary>
+    public IReadOnlyCollection<AccountToken> Tokens => _tokens.AsReadOnly();
 
     private UserAccount()
     {
@@ -230,6 +236,67 @@ public sealed class UserAccount : AggregateRoot<Guid>
         RevokeFamily(session.FamilyId, now);
     }
 
+    /// <summary>
+    /// A new single-use token for <paramref name="purpose"/>: one asked for
+    /// earlier for the same purpose stops working (asking again replaces the
+    /// previous request), and expired tokens are pruned.
+    /// </summary>
+    public AccountToken IssueToken(AccountTokenPurpose purpose, string tokenHash, TimeSpan lifetime, DateTimeOffset now)
+    {
+        EnsureActive();
+
+        _tokens.RemoveAll(t => t.Purpose == purpose || t.IsExpired(now));
+        var token = AccountToken.Create(purpose, tokenHash, lifetime, now);
+        _tokens.Add(token);
+        UpdatedAt = now;
+        IncrementVersion();
+        return token;
+    }
+
+    /// <summary>
+    /// A new password chosen with a password-reset token (password-recovery
+    /// spec, item 3): the token must be unused and unexpired, and is spent.
+    /// Every session ends — whoever had the old password is signed out
+    /// everywhere — and the lockout is cleared. A deactivated account's token
+    /// is refused like an unknown one.
+    /// </summary>
+    public void ResetPassword(string tokenHash, string newPasswordHash, DateTimeOffset now)
+    {
+        var token = _tokens.FirstOrDefault(t => t.Purpose == AccountTokenPurpose.PasswordReset && t.TokenHash == tokenHash);
+        if (token is null || !token.IsUsable(now) || !Active)
+        {
+            throw InvalidOrExpiredToken();
+        }
+
+        SetPasswordHash(newPasswordHash);
+        token.MarkUsed(now);
+        RevokeSessionsExcept(keepFamilyId: null, now);
+        FailedSignInCount = 0;
+        LockedOutUntil = null;
+        UpdatedAt = now;
+        IncrementVersion();
+    }
+
+    /// <summary>
+    /// A new password chosen while signed in, the current one already
+    /// checked (password-recovery spec, item 4): every other session ends;
+    /// the one <paramref name="currentSessionTokenHash"/> belongs to stays.
+    /// An unknown token keeps nothing, so every session ends.
+    /// </summary>
+    public void ChangePassword(string newPasswordHash, string? currentSessionTokenHash, DateTimeOffset now)
+    {
+        EnsureActive();
+
+        var current = _sessions.FirstOrDefault(s => s.TokenHash == currentSessionTokenHash && s.IsActive(now));
+        SetPasswordHash(newPasswordHash);
+        RevokeSessionsExcept(current?.FamilyId, now);
+        UpdatedAt = now;
+        IncrementVersion();
+    }
+
+    public static DomainRuleViolationException InvalidOrExpiredToken() =>
+        new(InvalidOrExpiredTokenCode, "This link is invalid or has expired. Ask for a new one.");
+
     public void Deactivate(DateTimeOffset now)
     {
         if (!Active)
@@ -258,6 +325,24 @@ public sealed class UserAccount : AggregateRoot<Guid>
         IncrementVersion();
     }
 
+    private void RevokeSessionsExcept(Guid? keepFamilyId, DateTimeOffset now)
+    {
+        foreach (var session in _sessions.Where(s => s.FamilyId != keepFamilyId))
+        {
+            session.Revoke(now);
+        }
+    }
+
+    private void SetPasswordHash(string passwordHash)
+    {
+        if (string.IsNullOrWhiteSpace(passwordHash))
+        {
+            throw new ArgumentException("A password hash is required.", nameof(passwordHash));
+        }
+
+        PasswordHash = passwordHash;
+    }
+
     private void PruneExpiredSessions(DateTimeOffset now) => _sessions.RemoveAll(s => s.IsExpired(now));
 
     private void EnsureActive()
@@ -281,7 +366,8 @@ public sealed class UserAccount : AggregateRoot<Guid>
         int version,
         IEnumerable<RefreshSession> sessions,
         int failedSignInCount = 0,
-        DateTimeOffset? lockedOutUntil = null)
+        DateTimeOffset? lockedOutUntil = null,
+        IEnumerable<AccountToken>? tokens = null)
     {
         var account = new UserAccount(id, email, passwordHash, role, createdAt)
         {
@@ -295,6 +381,7 @@ public sealed class UserAccount : AggregateRoot<Guid>
         };
 
         account._sessions.AddRange(sessions);
+        account._tokens.AddRange(tokens ?? []);
 
         return account;
     }

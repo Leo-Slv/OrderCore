@@ -40,4 +40,16 @@ public sealed class CustomerRegistryAdapter : ICustomerRegistry
             return false;
         }
     }
+
+    public async Task<string?> GetNameAsync(Guid customerId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return (await _getCustomerById.ExecuteAsync(customerId, cancellationToken)).Name;
+        }
+        catch (NotFoundException)
+        {
+            return null;
+        }
+    }
 }
