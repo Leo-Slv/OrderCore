@@ -24,6 +24,7 @@ Adicionado pelo MVP do storefront (`Docs/specs/storefront/storefront-api-mvp.md`
 Adicionado pela autenticação (V2, `Docs/specs/identity/authentication-and-account.md`):
 
 - **O cliente vem do token.** O checkout (política `Customer`) usa `ICurrentUser.CustomerId`; `CheckoutRequest.CustomerId` foi removido, então ninguém compra em nome de outro cliente.
+- **E-mail confirmado para comprar** (V5, `Docs/specs/identity/password-recovery.md`, decisões 4 e 9): `CheckoutUseCase` lê `ICurrentUser.EmailConfirmed` (a claim `email_confirmed` do token) antes de qualquer outra coisa e recusa com `403 email_not_confirmed` (`ForbiddenException`), sem reservar nem cobrar; o Orders não depende do Identity. Os eventos `order-confirmed/shipped/cancelled/payment-failed` também alimentam os e-mails do pedido no [Notifications](10-notifications.md) (fila `notifications.order-emails`).
 - **Só o dono vê o pedido.** `GetOrderDetailsUseCase`/`GetOrderStatusHistoryUseCase` recebem o cliente que está pedindo (`null` para admin); `OrderAccess` responde `order_not_found` para o pedido de outro cliente, igual a um pedido que não existe, para ids não poderem ser sondados. É regra de caso de uso, não do controller.
 - **`GET orders/me`**: o histórico do cliente logado. `GET orders/customers/{id}` e os endpoints passo a passo (`POST orders`, `PUT …/addresses`, `request-payment`, `cancel`) ficaram só para admin.
 
@@ -681,6 +682,8 @@ classDiagram
         -IAuditLogService auditLog
         -OrdersMetrics metrics
         -TimeProvider timeProvider
+        -ICurrentUser currentUser
+        +string EmailNotConfirmedCode$
         +ExecuteAsync(CheckoutCommand command) Task~CheckoutResult~
     }
 
@@ -1395,6 +1398,7 @@ classDiagram
     ListCustomerOrdersUseCase --> IOrderRepository
     CreateOrderCommand "1" *-- "1..*" CreateOrderItem
     CheckoutUseCase --> IOrderRepository
+    CheckoutUseCase --> ICurrentUser : e-mail confirmed? (403 email_not_confirmed)
     CheckoutUseCase --> IProductCatalog
     CheckoutUseCase --> ICustomerDirectory
     CheckoutUseCase --> IInventoryService

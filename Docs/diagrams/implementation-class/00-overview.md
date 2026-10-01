@@ -14,6 +14,7 @@ graph LR
     AuditLogs["AuditLogs module\n(technical/cross-cutting, not a business bounded context)"]
     Identity["Identity module\n(technical/cross-cutting: accounts, credentials, sessions, JWT)"]
     Messaging["Messaging module\n(technical/cross-cutting: RabbitMQ, outbox relay, consumer host,\nretries, failed messages)"]
+    Notifications["Notifications module\n(technical/cross-cutting: e-mail queue, Resend/SMTP,\npt-BR templates, account and order e-mails)"]
     Broker[("RabbitMQ\nexchange ordercore.events")]
     Shared["Shared kernel\n(Entity, AggregateRoot, IDomainEvent, Address, Slug, PagedResult, PagedResponse,\nexceções tipadas + ApiExceptionHandler, CORS,\nICurrentUser + políticas Customer/Admin,
 observabilidade: OpenTelemetry, ids nos spans, health checks)"]
@@ -38,6 +39,9 @@ observabilidade: OpenTelemetry, ids nos spans, health checks)"]
     Customers -.->|IAuditLogService| AuditLogs
     Identity -->|"ICustomerRegistry (cadastro, cliente ativo?)"| Customers
     Identity -.->|IAuditLogService| AuditLogs
+    Identity -->|"IAccountEmails (redefinição de senha, confirmação de e-mail)"| Notifications
+    Notifications -->|"ICustomerContacts (nome e e-mail)"| Customers
+    Orders -.->|"eventos: order-confirmed/shipped/cancelled/payment-failed (notifications.order-emails)"| Notifications
 
     Customers --> Shared
     Catalog --> Shared
@@ -47,6 +51,7 @@ observabilidade: OpenTelemetry, ids nos spans, health checks)"]
     AuditLogs --> Shared
     Identity --> Shared
     Messaging --> Shared
+    Notifications --> Shared
 ```
 
 ## Diagramas detalhados (um por módulo, cada um pequeno o suficiente para renderizar)
@@ -60,6 +65,7 @@ observabilidade: OpenTelemetry, ids nos spans, health checks)"]
 7. [AuditLogs](07-auditlogs.md) — registro de ações via `IAuditLogService`, persistido no PostgreSQL, listagem paginada filtrável por entidade, autor e ação.
 8. [Identity](08-identity.md) — contas (cliente/admin), senhas, sessões de refresh e emissão/validação dos JWT.
 9. [Messaging](09-messaging.md) — eventos de integração pelo RabbitMQ: outbox por módulo, relay, consumidores com inbox e retentativas, trace nas mensagens e as mensagens que falharam no backoffice.
+10. [Notifications](10-notifications.md) — fila de e-mails com retentativas e conteúdo apagado ao terminar, Resend ou SMTP (Mailpit local), templates pt-BR, e-mails da conta (pedidos pelo Identity) e do pedido (pelos eventos do Orders).
 
 Todos os diagramas refletem código já implementado; cada um lista, no topo, onde o código difere do desenho original e o que foi acrescentado depois (o MVP do storefront, `Docs/specs/storefront/storefront-api-mvp.md`; a autenticação, `Docs/specs/identity/authentication-and-account.md`; o backoffice, `Docs/specs/backoffice/backoffice-api.md`). Todas as setas novas do backoffice seguem as direções que já existiam: nenhum módulo passou a depender de um que dependa dele.
 

@@ -15,6 +15,15 @@ Decisões que moldam o módulo:
 - **Bloqueio de conta** (V4, `Docs/specs/operations/production-readiness.md`): senhas erradas em sequência (`LockoutPolicy`, `Identity:Lockout`: 5, 15 minutos) bloqueiam a conta; a conta bloqueada responde exatamente como senha errada, mesmo com a certa, e a senha continua sendo verificada. O primeiro login certo depois do prazo zera a contagem; sessões abertas continuam valendo. Cada bloqueio é auditado (`AccountLockedOut`) e contado (`IdentityMetrics`). Duas senhas erradas simultâneas não podem responder `409` (revelaria a conta): o repositório traduz o conflito do EF em `AccountConcurrencyConflictException`, e o login o ignora. Migration `AddAccountLockout`.
 - **Limites** (V4): login, cadastro e refresh têm limite por endereço do cliente (`IdentityRateLimits`).
 
+Adicionado pela recuperação de senha e e-mail (V5, `Docs/specs/identity/password-recovery.md`):
+
+- **Tokens de uso único por e-mail.** `AccountToken` (filho do `UserAccount`, como as sessões): propósito (`PasswordReset` ou `EmailConfirmation`), hash SHA-256 do token, validade e uso. Pedir de novo troca o anterior do mesmo propósito (`IssueToken`); o token em si só existe no e-mail até ele sair. Migration `AddAccountTokens`.
+- **Esqueci a senha** (clientes e admins): `RequestPasswordResetUseCase` responde igual com ou sem conta (o endpoint sempre `202`) e, para uma conta ativa, emite um token de 30 minutos e pede o e-mail por `IAccountEmails`. `ResetPasswordUseCase` troca a senha (mesmas regras do cadastro), gasta o token, encerra todas as sessões e limpa o bloqueio; token desconhecido, usado ou vencido é `400 invalid_or_expired_token`. Não houve o hash falso do login: aqui ele deixaria a resposta "sem conta" mais lenta em vez de igual; a diferença que sobra são as gravações no banco, e o limite por endereço vale para o formulário.
+- **Trocar a senha logado**: `ChangePasswordUseCase` confere a senha atual como o login (conta para o bloqueio; bloqueada recusa até a certa) e responde `400 invalid_current_password`; mantém a sessão do refresh token enviado e encerra as outras (`ChangePassword`). A lógica de senha errada é a mesma do login (`FailedSignIns`).
+- **Confirmação de e-mail**: `UserAccount.EmailConfirmedAt`. O cadastro começa sem confirmar e envia um link de 24 horas (por último e em melhor esforço — se enfileirar falhar, o cadastro conclui e o cliente pede outro); `ConfirmEmailUseCase` confirma (abrir de novo depois de confirmado não é erro); `RequestEmailConfirmationUseCase` manda um link novo (`409 email_already_confirmed` se já confirmado). Admins nascem confirmados; a migration `AddEmailConfirmation` marca todas as contas existentes como confirmadas. O access token leva `email_confirmed`, que o checkout lê (`403 email_not_confirmed`) — a loja renova a sessão depois de confirmar.
+- **E-mails pelo Notifications.** `IAccountEmails` (contrato do Identity) → `AccountEmailsAdapter` → `QueueEmailUseCase` do [Notifications](10-notifications.md): monta o link da loja a partir de `Identity:Links:ResetPassword`/`ConfirmEmail` (com `{token}`; validados na subida por `AccountLinksOptionsValidator`) e a saudação em português. O nome vem do Customers (`ICustomerRegistry.GetNameAsync`); admins recebem "Olá!".
+- **Auditoria, métricas e limites**: `PasswordResetRequested`, `PasswordReset`, `PasswordChanged`, `EmailConfirmed`; `ordercore.identity.password_reset_requests` e `password_changes`; limites por endereço para esqueci (5/15 min), redefinir (10/15 min) e confirmar (10/15 min), e por cliente para pedir outro link (5/h).
+
 A autorização em si (políticas `Customer`/`Admin`, bloqueio por padrão, `ICurrentUser`) é compartilhada e está em [01-shared-kernel.md](01-shared-kernel.md).
 
 ```mermaid
@@ -65,7 +74,10 @@ classDiagram
         +DateTimeOffset? LastSignedInAt
         +int FailedSignInCount
         +DateTimeOffset? LockedOutUntil
+        +DateTimeOffset? EmailConfirmedAt
+        +bool EmailConfirmed
         +IReadOnlyCollection~RefreshSession~ Sessions
+        +IReadOnlyCollection~AccountToken~ Tokens
         +NormalizeEmail(string email)$ string
         +CreateCustomer(string email, string passwordHash, DateTimeOffset now)$ UserAccount
         +CreateAdmin(string email, string passwordHash, DateTimeOffset now)$ UserAccount
@@ -77,6 +89,28 @@ classDiagram
         +Deactivate(DateTimeOffset now) void
         +IsLockedOut(DateTimeOffset now) bool
         +RecordFailedSignIn(LockoutPolicy policy, DateTimeOffset now) bool
+        +IssueToken(AccountTokenPurpose purpose, string tokenHash, TimeSpan lifetime, DateTimeOffset now) AccountToken
+        +ResetPassword(string tokenHash, string newPasswordHash, DateTimeOffset now) void
+        +ChangePassword(string newPasswordHash, string? currentSessionTokenHash, DateTimeOffset now) void
+        +ConfirmEmail(string tokenHash, DateTimeOffset now) void
+        +InvalidOrExpiredToken()$ DomainRuleViolationException
+    }
+
+    %% OrderCore.Api.Modules.Identity.Domain (V5)
+    class AccountToken {
+        +AccountTokenPurpose Purpose
+        +string TokenHash
+        +DateTimeOffset CreatedAt
+        +DateTimeOffset ExpiresAt
+        +DateTimeOffset? UsedAt
+        +IsExpired(DateTimeOffset now) bool
+        +IsUsable(DateTimeOffset now) bool
+    }
+
+    class AccountTokenPurpose {
+        <<enumeration>>
+        PasswordReset
+        EmailConfirmation
     }
 
     %% OrderCore.Api.Modules.Identity.Domain.Policies (V4)
@@ -137,6 +171,7 @@ classDiagram
         +GetByIdAsync(Guid userAccountId) Task~UserAccount?~
         +GetByNormalizedEmailAsync(string normalizedEmail) Task~UserAccount?~
         +GetBySessionTokenHashAsync(string tokenHash) Task~UserAccount?~
+        +GetByAccountTokenHashAsync(AccountTokenPurpose purpose, string tokenHash) Task~UserAccount?~
         +AnyAdminAsync() Task~bool~
         +AddAsync(UserAccount account) Task
         +Remove(UserAccount account) void
@@ -182,6 +217,13 @@ classDiagram
         <<interface>>
         +RegisterAsync(string name, string email, string? phone) Task~Guid~
         +IsActiveAsync(Guid customerId) Task~bool~
+        +GetNameAsync(Guid customerId) Task~string?~
+    }
+
+    class IAccountEmails {
+        <<interface>>
+        +SendPasswordResetAsync(string email, string? name, string token, TimeSpan validFor) Task
+        +SendEmailConfirmationAsync(string email, string? name, string token, TimeSpan validFor) Task
     }
 
 
@@ -225,7 +267,56 @@ classDiagram
         -IAccessTokenIssuer accessTokens
         -IAuditLogService auditLog
         -TimeProvider timeProvider
+        -RequestEmailConfirmationUseCase emailConfirmation
         +ExecuteAsync(SignUpCommand command) Task~AuthTokens~
+    }
+
+    %% OrderCore.Api.Modules.Identity.Application.UseCases (V5)
+    class RequestPasswordResetUseCase {
+        +TimeSpan TokenLifetime$
+        -IUserAccountRepository accounts
+        -IRefreshTokenGenerator tokens
+        -ICustomerRegistry customers
+        -IAccountEmails emails
+        +ExecuteAsync(string email) Task
+    }
+
+    class ResetPasswordUseCase {
+        -IUserAccountRepository accounts
+        -IPasswordHasher passwordHasher
+        -IRefreshTokenGenerator tokens
+        +ExecuteAsync(string token, string newPassword) Task
+    }
+
+    class ChangePasswordUseCase {
+        +string InvalidCurrentPasswordCode$
+        -IUserAccountRepository accounts
+        -IPasswordHasher passwordHasher
+        -IRefreshTokenGenerator tokens
+        -LockoutPolicy lockoutPolicy
+        +ExecuteAsync(Guid userAccountId, string currentPassword, string newPassword, string? currentRefreshToken) Task
+    }
+
+    class RequestEmailConfirmationUseCase {
+        +string AlreadyConfirmedCode$
+        +TimeSpan TokenLifetime$
+        -IUserAccountRepository accounts
+        -IRefreshTokenGenerator tokens
+        -ICustomerRegistry customers
+        -IAccountEmails emails
+        +ExecuteAsync(Guid userAccountId) Task
+    }
+
+    class ConfirmEmailUseCase {
+        -IUserAccountRepository accounts
+        -IRefreshTokenGenerator tokens
+        -IAuditLogService auditLog
+        +ExecuteAsync(string token) Task
+    }
+
+    class FailedSignIns {
+        <<static>>
+        +RecordAsync(UserAccount account, IUserAccountRepository accounts, LockoutPolicy policy, IAuditLogService auditLog, IdentityMetrics metrics, DateTimeOffset now) Task
     }
 
     class SignInUseCase {
@@ -244,6 +335,8 @@ classDiagram
     %% OrderCore.Api.Modules.Identity.Application.Telemetry (V4)
     class IdentityMetrics {
         +LockedOut() void
+        +PasswordResetRequested(string outcome) void
+        +PasswordChanged(string how) void
     }
 
     %% OrderCore.Api.Modules.Identity.Application.Contracts (V4)
@@ -257,6 +350,10 @@ classDiagram
         +string SignIn$
         +string SignUp$
         +string Refresh$
+        +string ForgotPassword$
+        +string ResetPassword$
+        +string ConfirmEmail$
+        +string EmailConfirmation$
         +AddIdentityRateLimits(IServiceCollection services, IConfiguration configuration)$ IServiceCollection
     }
 
@@ -302,8 +399,22 @@ classDiagram
         +string Role
         +Guid? CustomerId
         +bool Active
+        +int FailedSignInCount
+        +DateTimeOffset? LockedOutUntil
+        +DateTimeOffset? EmailConfirmedAt
         +int Version
         +ICollection~RefreshSessionPersistenceModel~ Sessions
+        +ICollection~AccountTokenPersistenceModel~ Tokens
+    }
+
+    class AccountTokenPersistenceModel {
+        +Guid Id
+        +Guid UserAccountId
+        +string Purpose
+        +string TokenHash
+        +DateTimeOffset CreatedAt
+        +DateTimeOffset ExpiresAt
+        +DateTimeOffset? UsedAt
     }
 
     class RefreshSessionPersistenceModel {
@@ -325,6 +436,7 @@ classDiagram
     class IdentityDbContext {
         +DbSet~UserAccountPersistenceModel~ UserAccounts
         +DbSet~RefreshSessionPersistenceModel~ RefreshSessions
+        +DbSet~AccountTokenPersistenceModel~ AccountTokens
     }
 
     class EfUserAccountRepository {
@@ -367,7 +479,32 @@ classDiagram
         -GetCustomerByIdUseCase getCustomerById
         +RegisterAsync(string name, string email, string? phone) Task~Guid~
         +IsActiveAsync(Guid customerId) Task~bool~
+        +GetNameAsync(Guid customerId) Task~string?~
     }
+
+    class AccountEmailsAdapter {
+        -QueueEmailUseCase queueEmail
+        -AccountLinksOptions links
+        +Greeting(string? name)$ string
+        +Duration(TimeSpan duration)$ string
+    }
+
+    class AccountLinksOptions {
+        +string? ResetPassword
+        +string? ConfirmEmail
+        +ResetPasswordLink(string token) string
+        +ConfirmEmailLink(string token) string
+    }
+
+    class AccountLinksOptionsValidator {
+        +Validate(string? name, AccountLinksOptions options) ValidateOptionsResult
+    }
+
+    class QueueEmailUseCase {
+        <<external>>
+    }
+
+    note for QueueEmailUseCase "Notifications module — ver 10-notifications.md"
 
     class IdentitySeedOptions {
         +string? AdminEmail
@@ -393,6 +530,30 @@ classDiagram
         +SignInAsync(SignInRequest request) Task~ActionResult~AuthTokensResponse~~
         +RefreshAsync(RefreshTokenRequest request) Task~ActionResult~AuthTokensResponse~~
         +SignOutAsync(RefreshTokenRequest request) Task~IActionResult~
+        +ForgotPasswordAsync(ForgotPasswordRequest request) Task~IActionResult~
+        +ResetPasswordAsync(ResetPasswordRequest request) Task~IActionResult~
+        +ChangePasswordAsync(ChangePasswordRequest request) Task~IActionResult~
+        +ConfirmEmailAsync(ConfirmEmailRequest request) Task~IActionResult~
+        +RequestEmailConfirmationAsync() Task~IActionResult~
+    }
+
+    class ForgotPasswordRequest {
+        +string Email
+    }
+
+    class ResetPasswordRequest {
+        +string Token
+        +string NewPassword
+    }
+
+    class ChangePasswordRequest {
+        +string CurrentPassword
+        +string NewPassword
+        +string? RefreshToken
+    }
+
+    class ConfirmEmailRequest {
+        +string Token
     }
 
     class SignUpRequest {
@@ -501,6 +662,29 @@ classDiagram
     EfUserAccountRepository ..> AccountConcurrencyConflictException : translates EF conflicts
     AuthController ..> IdentityRateLimits : sign-in / sign-up / refresh limited
 
+    Entity~TId~ <|-- AccountToken
+    UserAccount "1" *-- "0..*" AccountToken
+    AccountToken --> AccountTokenPurpose
+    UserAccountPersistenceModel "1" *-- "0..*" AccountTokenPersistenceModel
+    RequestPasswordResetUseCase --> IUserAccountRepository
+    RequestPasswordResetUseCase --> IAccountEmails : 30-minute link
+    ResetPasswordUseCase --> IUserAccountRepository
+    ChangePasswordUseCase --> IUserAccountRepository
+    ChangePasswordUseCase ..> FailedSignIns
+    SignInUseCase ..> FailedSignIns
+    SignUpCustomerUseCase --> RequestEmailConfirmationUseCase : 24-hour link, best effort
+    RequestEmailConfirmationUseCase --> IAccountEmails
+    ConfirmEmailUseCase --> IUserAccountRepository
+    IAccountEmails <|.. AccountEmailsAdapter
+    AccountEmailsAdapter --> QueueEmailUseCase : queues the e-mail
+    AccountEmailsAdapter --> AccountLinksOptions
+    AccountLinksOptionsValidator ..> AccountLinksOptions
+    AuthController --> RequestPasswordResetUseCase
+    AuthController --> ResetPasswordUseCase
+    AuthController --> ChangePasswordUseCase
+    AuthController --> ConfirmEmailUseCase
+    AuthController --> RequestEmailConfirmationUseCase
+
 ```
 
 ## Endpoints
@@ -511,14 +695,20 @@ classDiagram
 | `POST /api/auth/sign-in` | público | 200 com os tokens; 401 `invalid_credentials` |
 | `POST /api/auth/refresh` | público (é chamado justamente quando o access token venceu) | 200 com um par novo; 401 `invalid_refresh_token` |
 | `POST /api/auth/sign-out` | qualquer usuário logado | 204 sempre |
+| `POST /api/auth/password/forgot` | público | 202 sempre (com ou sem conta) |
+| `POST /api/auth/password/reset` | público | 204; 400 `invalid_or_expired_token`/`weak_password` |
+| `POST /api/auth/password/change` | qualquer usuário logado | 204; 400 `invalid_current_password`/`weak_password` |
+| `POST /api/auth/email/confirm` | público | 204 (também se já confirmado); 400 `invalid_or_expired_token` |
+| `POST /api/auth/email/confirmation` | cliente | 202 (link novo); 409 `email_already_confirmed` |
 
 Os tokens vão no corpo JSON, não em cookies definidos pela API. O front (Next.js) guarda o refresh token num cookie httpOnly da própria origem, agindo como BFF.
 
 ## Consome outros módulos
 
 - **Customers**, no cadastro: `ICustomerRegistry` → `CustomerRegistryAdapter` → `RegisterCustomerUseCase` (só a camada Application do Customers). Volta apenas o id do novo cliente. No login e no refresh, o mesmo adapter usa `GetCustomerByIdUseCase` para saber se o cliente está ativo (só um sim/não volta).
-- **AuditLogs**: registra `UserAccountCreated` e `RefreshTokenReuseDetected`.
+- **AuditLogs**: registra `UserAccountCreated`, `RefreshTokenReuseDetected`, `AccountLockedOut`, `PasswordResetRequested`, `PasswordReset`, `PasswordChanged` e `EmailConfirmed`.
+- **Notifications** (V5): `IAccountEmails` → `AccountEmailsAdapter` → `QueueEmailUseCase` — enfileira os e-mails de redefinição de senha e de confirmação. O nome do cliente vem do Customers por `ICustomerRegistry.GetNameAsync`.
 
 ## Consumido por outros módulos
 
-Nenhum módulo chama o Identity diretamente. Os demais só enxergam o resultado da autenticação, pelo `ICurrentUser` do shared kernel (quem está logado, o papel e, se for cliente, o `CustomerId`).
+Nenhum módulo chama o Identity diretamente. Os demais só enxergam o resultado da autenticação, pelo `ICurrentUser` do shared kernel (quem está logado, o papel, se for cliente o `CustomerId`, e se o e-mail foi confirmado — que o checkout do Orders exige).
