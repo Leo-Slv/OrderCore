@@ -74,14 +74,24 @@ services:
       # Alert rules as code, and the collector with tail sampling of traces.
       - ./deploy/grafana/alerting/ordercore-rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/ordercore-rules.yaml:ro
       - ./deploy/otel/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro
+    depends_on:
+      mailpit:
+        condition: service_started
     environment:
       # Keep every trace locally (debugging); the collector's default is 10%.
       TRACE_SAMPLING_PERCENTAGE: ${TRACE_SAMPLING_PERCENTAGE:-100}
+      # Grafana's e-mail goes to Mailpit, so an "Email" contact point works
+      # locally: alerts land in http://localhost:8025 with the store's e-mails.
+      GF_SMTP_ENABLED: "true"
+      GF_SMTP_HOST: mailpit:1025
+      GF_SMTP_FROM_ADDRESS: grafana@ordercore.local
+      GF_SMTP_FROM_NAME: OrderCore Grafana
+      GF_SMTP_STARTTLS_POLICY: NoStartTLS
     networks:
       - ordercore-net
 
-  # Catches every e-mail the API sends locally (nothing reaches a real
-  # inbox): web inbox at http://localhost:8025, SMTP on 1025.
+  # Catches every e-mail the API and Grafana send locally (nothing reaches
+  # a real inbox): web inbox at http://localhost:8025, SMTP on 1025.
   mailpit:
     image: axllent/mailpit:latest
     container_name: ordercore-mailpit

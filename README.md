@@ -546,6 +546,11 @@ exportados por OTLP para o Grafana LGTM do `docker compose`:
   e alertas de estoque) e **API e mensageria** (requisições, latência e
   erros por rota, tempo de banco, backlog do outbox, mensagens tratadas,
   retentativas e falhas, traces recentes com erro).
+- **Alertas** (`deploy/grafana/alerting`) aparecem em Alerting → Alert
+  rules. Para recebê-los, crie em Alerting → Contact points um destino do
+  tipo **Email** (qualquer endereço) e escolha-o na Default policy em
+  Notification policies: localmente o Grafana envia pelo Mailpit, e os
+  alertas chegam em <http://localhost:8025>, junto com os e-mails da loja.
 - **Um checkout é um trace só**, da requisição até a confirmação pelo
   RabbitMQ. Toda resposta traz o cabeçalho `traceparent` e todo erro
   (`ProblemDetails`) o `traceId`: com ele, o trace e os logs daquela
