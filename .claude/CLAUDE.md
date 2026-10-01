@@ -25,6 +25,9 @@ Existing modules include:
 - Messaging (cross-cutting/technical module: the RabbitMQ connection and
   topology, the outbox relay, the consumer host with inbox and retries,
   and the failed messages admins replay or discard — see Messaging below)
+- Notifications (cross-cutting/technical module: the e-mail queue and its
+  dispatcher, the Resend/SMTP senders, the pt-BR templates, and the order
+  e-mails driven by Orders' integration events — see E-mail below)
 
 Cross-cutting functionality belongs under:
 
@@ -181,7 +184,8 @@ to a module.
 
 The project targets PostgreSQL via Entity Framework Core. Every module —
 the five business modules (Customers, Catalog, Orders, Inventory,
-Payments) and the technical ones (Identity, AuditLogs, Messaging) — has
+Payments) and the technical ones (Identity, AuditLogs, Messaging,
+Notifications) — has
 `Infrastructure/Persistence` implemented end to end. Follow their shape
 when implementing persistence for a new module:
 
@@ -351,6 +355,37 @@ Screens get order changes pushed over SignalR
   reconnect instead of expecting a replay.
 - One instance is assumed; running several needs a SignalR backplane.
 
+## E-mail (Notifications)
+
+E-mail goes out through the Notifications module
+(`Docs/specs/identity/password-recovery.md`,
+`Docs/diagrams/implementation-class/10-notifications.md`):
+
+- **Queue, never send from a request.** A module asks for an e-mail
+  through a contract of its own (`IAccountEmails` in Identity) whose
+  adapter calls Notifications' `QueueEmailUseCase`; something another
+  module announces anyway goes through its integration events
+  (`OrderEmailsHandler` on `notifications.order-emails`). Nothing but
+  `EmailDispatcherBackgroundService` talks to the provider, and a
+  request never waits for it or fails because it is down.
+- **Templates live in `Modules/Notifications/Infrastructure/Templates`**
+  (embedded): `<name>.html` and `<name>.txt` (first line `Subject: …`),
+  pt-BR, with `{{placeholders}}` the caller fills — the renderer
+  HTML-encodes them, and a missing value is an error. A new e-mail adds
+  its template there and its name in `EmailTemplateNames`. Show the
+  customer friendly text, never a raw code or a backoffice note.
+- **Never put an address, a token or a link in logs, spans or metrics**
+  — the message id and the template only. Tokens are stored as hashes;
+  the link lives in the queued e-mail until it is sent or given up on,
+  then the body is erased and the recipient masked.
+- Resend in production (`Notifications:Resend:ApiKey`, never
+  committed), SMTP otherwise — Mailpit in docker compose
+  (<http://localhost:8025>) and in the integration tests (`TestMailpit`,
+  read through its API; look a message up by a recipient no other test
+  uses, and by subject when an account gets several).
+- Storefront links in account e-mails come from `Identity:Links`
+  (`{token}` placeholder), validated at startup.
+
 ## Payment providers (fake and Stripe)
 
 Payments talks to a provider only through `IPaymentProvider`
@@ -477,7 +512,9 @@ Cross-cutting concerns shared across multiple business modules belong under
   `Exceptions/DomainRuleViolationException`.
 - `Shared/Application` — technical DTOs used by more than one module, e.g.
   `PagedResult<T>`; `Exceptions/NotFoundException`/`ConflictException`/
-  `UnauthorizedException`; `Abstractions/ICurrentUser` and `UserRoles`.
+  `UnauthorizedException`/`ForbiddenException`; `Abstractions/ICurrentUser`
+  (including `EmailConfirmed`, from the `email_confirmed` claim) and
+  `UserRoles`.
 - `Shared/Presentation` — technical response shapes used by more than one
   module, e.g. `PagedResponse<T>`; `ExceptionHandling/ApiExceptionHandler`;
   `Cors/CorsExtensions`; `Conventions/ApiRoutePrefixConvention`;
@@ -527,6 +564,9 @@ shared typed exceptions, each with a stable snake_case `code`:
   invariant or state-machine rule was broken (e.g. `invalid_order_state`) → 400;
 - `NotFoundException` (`Shared/Application/Exceptions`) — the resource the
   use case was asked to act on doesn't exist (e.g. `order_not_found`) → 404;
+- `ForbiddenException` (`Shared/Application/Exceptions`) — signed in and
+  the resource is theirs, but something about the account keeps the
+  caller from doing this yet (e.g. `email_not_confirmed` at checkout) → 403;
 - `ConflictException` (`Shared/Application/Exceptions`) — valid request that
   conflicts with current state (e.g. `insufficient_stock`,
   `sku_already_exists`) → 409. It is not sealed: a module may derive its
@@ -644,7 +684,9 @@ API-level integration tests go through the real host:
 signing key; `CreateAdminClient`/`CreateCustomerClient` issue real tokens
 for made-up accounts, enough when no database is involved) and
 `ApiDatabase` (a migrated PostgreSQL container, the host with a seeded
-admin, and the shared HTTP steps: sign in as admin, sign a customer up,
+admin, the SMTP pointed at the shared `TestMailpit`, and the shared HTTP
+steps: sign in as admin, sign a customer up (e-mail already confirmed, so
+checkout works; `confirmEmail: false` for an unconfirmed one),
 add an address, publish a product, check out, `PollOrderUntilAsync`
 for the outbox to confirm an order). Use `ApiDatabase` as a class
 fixture, or one per test when a test needs an empty database. Creating a

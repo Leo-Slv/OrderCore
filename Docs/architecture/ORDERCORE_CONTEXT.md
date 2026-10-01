@@ -327,6 +327,16 @@ falharam, que o admin reprocessa ou descarta pelo backoffice. As
 abstrações que todo módulo usa ficam no `Shared`
 (`Shared/Application/Messaging`, `Shared/Infrastructure/Messaging`).
 
+Um quarto módulo técnico, `Notifications` (V5,
+`Docs/specs/identity/password-recovery.md`), envia os e-mails: uma fila
+gravada no banco que um job esvazia com retentativas, pelo Resend em
+produção ou por SMTP (o Mailpit do docker compose) no desenvolvimento,
+com templates em português no repositório. Ele envia os e-mails da conta
+(redefinição de senha e confirmação de e-mail), que o Identity pede por um
+contrato próprio, e os do pedido, movidos pelos eventos de integração do
+Orders. O corpo de cada e-mail é apagado quando ele sai ou quando o
+envio é abandonado.
+
 ---
 
 # 7. Regra fundamental de modularização
@@ -387,9 +397,12 @@ Contratos entre módulos existentes hoje:
 | Orders → Payments | `IPaymentGateway` | `PaymentGatewayAdapter` → `CreatePaymentUseCase`, `GetPaymentByOrderIdUseCase`, `GetPaymentsByOrderIdsUseCase`, `CapturePaymentUseCase` (por pedido), `SettlePaymentForCancellationUseCase`, `GetAvailablePaymentMethodsUseCase`, `GetPaymentNextActionUseCase`, `CountExpiringAuthorizationsUseCase` |
 | Orders → Customers | `ICustomerDirectory` | `CustomerDirectoryAdapter` → `GetCustomerAddressUseCase`, `GetCustomersByIdsUseCase`, `CountNewCustomersUseCase` |
 | Catalog → Inventory | `IStockAvailabilityProvider` (vitrine) e `IStockLevels` (backoffice) | `InventoryStockAvailabilityAdapter` → `GetStockAvailabilityUseCase`, `EnsureStockItemUseCase`, `GetStockLevelsUseCase`, `ListProductIdsInStockStateUseCase` |
-| Identity → Customers | `ICustomerRegistry` | `CustomerRegistryAdapter` → `RegisterCustomerUseCase`, `GetCustomerByIdUseCase` (cliente ativo?) |
+| Identity → Customers | `ICustomerRegistry` | `CustomerRegistryAdapter` → `RegisterCustomerUseCase`, `GetCustomerByIdUseCase` (cliente ativo? nome para o e-mail) |
+| Identity → Notifications | `IAccountEmails` | `AccountEmailsAdapter` → `QueueEmailUseCase` (redefinição de senha, confirmação de e-mail) |
+| Notifications → Customers | `ICustomerContacts` | `CustomerContactsAdapter` → `GetCustomerByIdUseCase` (nome e e-mail) |
 | Payments → Orders | eventos pelo RabbitMQ (seção 21) | `PaymentAuthorized`/`PaymentFailed` → handlers do Orders na fila `orders.payment-outcomes` |
 | Payments, Inventory, Orders → Orders | eventos pelo RabbitMQ | todos os eventos sobre um pedido → `OrderTimelineProjector` na fila `orders.timeline` (timeline do admin) |
+| Orders → Notifications | eventos pelo RabbitMQ | `OrderConfirmed`/`OrderShipped`/`OrderCancelled`/`OrderPaymentFailed` → `OrderEmailsHandler` na fila `notifications.order-emails` (e-mails do pedido) |
 
 Um evento de integração é contrato público do módulo que o publica e
 mora em `Modules/<Módulo>/Contracts/IntegrationEvents` — a única parte de
@@ -398,7 +411,8 @@ um módulo que um handler de mensagem de outro módulo pode conhecer
 Domain/Application/Infrastructure do próprio módulo).
 
 Todas as dependências seguem uma só direção (Orders → Catalog/Inventory/
-Payments/Customers, Catalog → Inventory, Identity → Customers): quando o
+Payments/Customers, Catalog → Inventory, Identity → Customers/Notifications,
+Notifications → Customers): quando o
 backoffice precisou de uma tela que juntasse dados de dois módulos na
 direção contrária, a composição foi feita no módulo que já dependia do
 outro (a tela de estoque é a lista de produtos do Catalog com os números
@@ -1639,9 +1653,26 @@ Acrescentado pela prontidão para produção (V4,
   configurações de produção ausentes impedem a API de subir;
 * a imagem roda sem root.
 
-Ainda não implementado: verificação de e-mail e recuperação de senha
-(V5, `Docs/specs/identity/password-recovery.md`) e permissões finas de
-admin.
+Acrescentado pela recuperação de senha e e-mail (V5,
+`Docs/specs/identity/password-recovery.md`):
+
+* **esqueci a senha** para clientes e admins: um link de uso único, válido
+  por 30 minutos, para a página da loja; a resposta é a mesma com ou sem
+  conta (o formulário não revela quem tem uma). Redefinir encerra todas as
+  sessões e limpa o bloqueio. Trocar a senha logado confere a atual (conta
+  para o bloqueio) e mantém só a sessão de quem trocou;
+* **e-mail confirmado para comprar**: o cadastro envia um link de 24
+  horas, e até ele ser aberto o checkout responde
+  `403 email_not_confirmed`. O token de acesso leva a claim
+  `email_confirmed`, então o Orders não depende do Identity. Contas que já
+  existiam contam como confirmadas;
+* só o hash de cada token é guardado; o link existe apenas no e-mail até
+  ele sair, quando o corpo é apagado e o destinatário mascarado. Nenhum
+  endereço, token ou link vai para logs, traces ou métricas;
+* limites por endereço nos formulários anônimos (esqueci, redefinir,
+  confirmar) e por cliente no "mandar outro link".
+
+Ainda não implementado: permissões finas de admin.
 
 Quando utilizar Stripe, os dados sensíveis devem ser tratados conforme o modelo de integração escolhido pelo provider.
 
@@ -2006,6 +2037,15 @@ escrita à mão para as linhas pendentes sobreviverem), `AddOrdersInbox`,
 `AddOrdersOutbox` e `AddOrderTimeline` (Orders —
 `orders_processed_messages`, `orders_outbox_messages` e `order_timeline`)
 e `AddInventoryOutbox` (Inventory — `inventory_outbox_messages`).
+A V5 acrescentou `InitialNotificationsSchema` (Notifications —
+`notification_emails`) e `AddOrderEmailsInbox`
+(`notifications_processed_messages`), `AddAccountTokens` e
+`AddEmailConfirmation` (Identity — `account_tokens` e
+`user_accounts.EmailConfirmedAt`, preenchido com `CreatedAt` para toda
+conta que já existia), além de `AddPaymentRequestedAt` (Orders) e
+`BackfillReservationExpiry` (Inventory) do prazo dos pedidos sem
+pagamento. O `migrate` aplica o `NotificationsDbContext` por último
+(ordem 90).
 `IProductCatalog` (contrato do próprio Orders) também ganhou sua
 implementação real, `ProductCatalogAdapter` (`Modules/Orders/Infrastructure/Adapters`),
 que lê de `IProductRepository` do Catalog — a indireção de "Application
