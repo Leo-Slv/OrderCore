@@ -62,6 +62,15 @@ public sealed class ProductionSettingsValidatorTests
     }
 
     [Fact]
+    public void Account_links_to_a_local_storefront_are_refused()
+    {
+        var local = Valid();
+        local.AccountLinks = ["https://shop.example/redefinir-senha?token={token}", "http://localhost:3000/confirmar-email?token={token}"];
+
+        FailuresOf(local).Should().ContainSingle().Which.Should().StartWith("Identity:Links");
+    }
+
+    [Fact]
     public void A_real_smtp_server_can_stand_in_for_resend()
     {
         var smtp = Valid();

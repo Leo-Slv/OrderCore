@@ -90,6 +90,7 @@ public sealed class StartupValidationTests : IClassFixture<OrderCoreApiFactory>
         var messages = Messages(exception!);
 
         messages.Should().Contain("ConnectionStrings:OrderCoreDb").And.Contain("Cors:AllowedOrigins").And.Contain("AllowedHosts")
-            .And.Contain("Notifications:From").And.Contain("Notifications:Resend:ApiKey");
+            .And.Contain("Notifications:From").And.Contain("Notifications:Resend:ApiKey")
+            .And.Contain("Identity:Links:ResetPassword");
     }
 }

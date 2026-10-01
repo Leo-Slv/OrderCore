@@ -26,4 +26,7 @@ internal sealed class FakeCustomerRegistry : ICustomerRegistry
 
     public Task<bool> IsActiveAsync(Guid customerId, CancellationToken cancellationToken) =>
         Task.FromResult(!Inactive.Contains(customerId));
+
+    public Task<string?> GetNameAsync(Guid customerId, CancellationToken cancellationToken) =>
+        Task.FromResult(Registered.Where(c => c.Id == customerId).Select(c => (string?)c.Name).FirstOrDefault());
 }

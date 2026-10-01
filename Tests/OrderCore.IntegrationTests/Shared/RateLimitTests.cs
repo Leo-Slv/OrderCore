@@ -34,7 +34,7 @@ public sealed class RateLimitTests : IClassFixture<OrderCoreApiFactory>
     private WebApplicationFactory<Program> LowLimits() =>
         _factory.WithWebHostBuilder(builder =>
         {
-            foreach (var policy in new[] { "SignIn", "SignUp", "Refresh", "Checkout", "StripeWebhook" })
+            foreach (var policy in new[] { "SignIn", "SignUp", "Refresh", "ForgotPassword", "ResetPassword", "Checkout", "StripeWebhook" })
             {
                 builder.UseSetting($"RateLimits:{policy}:PermitLimit", "2");
                 builder.UseSetting($"RateLimits:{policy}:Window", "01:00:00");
@@ -55,6 +55,8 @@ public sealed class RateLimitTests : IClassFixture<OrderCoreApiFactory>
         "/api/auth/sign-in",
         "/api/auth/sign-up",
         "/api/auth/refresh",
+        "/api/auth/password/forgot",
+        "/api/auth/password/reset",
         "/api/payments/webhooks/stripe",
     ];
 

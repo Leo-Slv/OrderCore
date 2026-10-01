@@ -38,6 +38,8 @@ public sealed class EdgeTests : IClassFixture<OrderCoreApiFactory>
             builder.UseSetting("AllowedHosts", "api.shop.example");
             builder.UseSetting("Notifications:From", "OrderCore <no-reply@shop.example>");
             builder.UseSetting("Notifications:Smtp:Host", "smtp.mail.example");
+            builder.UseSetting("Identity:Links:ResetPassword", "https://shop.example/redefinir-senha?token={token}");
+            builder.UseSetting("Identity:Links:ConfirmEmail", "https://shop.example/confirmar-email?token={token}");
             builder.UseSetting("https_port", "443");
             builder.UseSetting("ForwardedHeaders:KnownProxies:0", TrustedProxy);
             builder.UseSetting("ForwardedHeaders:TrustAllProxies", trustAllProxies.ToString());

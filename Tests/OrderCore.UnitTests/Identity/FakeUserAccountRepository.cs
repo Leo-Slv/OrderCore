@@ -21,6 +21,10 @@ internal sealed class FakeUserAccountRepository : IUserAccountRepository
     public Task<UserAccount?> GetBySessionTokenHashAsync(string tokenHash, CancellationToken cancellationToken) =>
         Task.FromResult(_accounts.Values.FirstOrDefault(a => a.Sessions.Any(s => s.TokenHash == tokenHash)));
 
+    public Task<UserAccount?> GetByAccountTokenHashAsync(
+        AccountTokenPurpose purpose, string tokenHash, CancellationToken cancellationToken) =>
+        Task.FromResult(_accounts.Values.FirstOrDefault(a => a.Tokens.Any(t => t.Purpose == purpose && t.TokenHash == tokenHash)));
+
     public Task<bool> AnyAdminAsync(CancellationToken cancellationToken) =>
         Task.FromResult(_accounts.Values.Any(a => a.Role == UserRole.Admin));
 

@@ -31,7 +31,7 @@ public class OrderCoreApiFactory : WebApplicationFactory<Program>
 
         // Many tests sign up and sign in several accounts on one host, all from the
         // same (absent) address; the rate-limit tests set their own low limits.
-        foreach (var policy in new[] { "SignIn", "SignUp", "Refresh", "Checkout", "StripeWebhook" })
+        foreach (var policy in new[] { "SignIn", "SignUp", "Refresh", "ForgotPassword", "ResetPassword", "Checkout", "StripeWebhook" })
         {
             builder.UseSetting($"RateLimits:{policy}:PermitLimit", "100000");
         }
