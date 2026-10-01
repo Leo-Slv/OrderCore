@@ -47,6 +47,11 @@ of it.
 Starting the API never applies migrations; `migrate` is the only way they
 run outside development.
 
+`seed-demo` (`docker run <image> seed-demo`, same database settings as
+`migrate`) fills the catalog with the Marfim storefront's demo pieces. It is
+meant for local development and the demo, never runs by itself, and only
+adds what is missing; don't run it against a real store.
+
 ## Settings a deployment provides
 
 Set as environment variables (`__` for `:`, e.g. `ConnectionStrings__OrderCoreDb`)

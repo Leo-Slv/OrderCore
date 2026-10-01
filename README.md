@@ -415,6 +415,12 @@ dotnet user-secrets set "RabbitMq:Password" "<a mesma RABBITMQ_PASSWORD do .env>
 docker compose up -d postgres rabbitmq mailpit
 dotnet run --project OrderCore.Api.csproj
 
+# Aplicar as migrations e (opcional) preencher o catálogo da loja Marfim:
+# 4 categorias e 8 peças publicadas, com estoque variado. Só roda quando chamado;
+# rodar de novo só acrescenta o que falta.
+docker compose run --rm --no-deps api migrate
+docker compose run --rm --no-deps api seed-demo
+
 # Rodar todos os testes (os do Stripe usam o stripe-mock em container; não precisam de conta)
 dotnet test
 ```
