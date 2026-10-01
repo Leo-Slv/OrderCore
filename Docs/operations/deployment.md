@@ -31,9 +31,9 @@ of it.
      ghcr.io/<owner>/ordercore-api:sha-<commit> migrate
    ```
 
-   It applies the pending migrations of the eight module databases in a
+   It applies the pending migrations of the nine module databases in a
    fixed order (Identity, Customers, Catalog, Inventory, Orders, Payments,
-   AuditLogs, Messaging) and exits `0`. On the first failure it stops,
+   AuditLogs, Messaging, Notifications) and exits `0`. On the first failure it stops,
    leaves the remaining databases untouched and exits non-zero — **stop
    the deploy there** and fix (or restore) before trying again. Running it
    again only applies what is still pending. It needs only the database
@@ -53,7 +53,7 @@ Set as environment variables (`__` for `:`, e.g. `ConnectionStrings__OrderCoreDb
 or the platform's secret store; none of them are committed.
 `appsettings.Production.json` blanks the development defaults, and outside
 Development the API **refuses to start** — naming the setting — when one
-marked *checked* is missing or still local, or when Stripe is configured in
+marked *checked* is missing or still local, or when Stripe or e-mail is configured in
 a way that would misbehave.
 
 | Setting | Secret | Checked at startup | Notes |
@@ -71,8 +71,12 @@ a way that would misbehave.
 | `Payments__Stripe__PublishableKey` | no | same mode as the secret key | |
 | `Payments__Stripe__WebhookSecret` | yes | required with a secret key | from the webhook endpoint registered in Stripe's dashboard |
 | `Payments__Stripe__AllowLiveKeys` | no | required for `sk_live_` keys | real money only on purpose |
+| `Notifications__From` | no | required, an address | the sender, e.g. `OrderCore <no-reply@shop.example>`; with Resend, on a domain verified there |
+| `Notifications__Resend__ApiKey` | yes | required unless a real SMTP server is set; `re_…` | e-mail goes out through Resend |
+| `Notifications__Smtp__Host` / `__Port` / `__Username` / `__Password` | password yes | not localhost when Resend isn't set | only to send through an SMTP server instead of Resend |
+| `Identity__Links__ResetPassword` / `__ConfirmEmail` | no | required, absolute http(s) with `{token}`, not localhost | the storefront pages the account e-mails link to, e.g. `https://shop.example/redefinir-senha?token={token}` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | no | — | where traces, metrics and logs go |
-| `RateLimits__<Policy>__PermitLimit` / `__Window` | no | — | only to change the defaults (`SignIn`, `SignUp`, `Refresh`, `Checkout`, `StripeWebhook`) |
+| `RateLimits__<Policy>__PermitLimit` / `__Window` | no | — | only to change the defaults (`SignIn`, `SignUp`, `Refresh`, `ForgotPassword`, `ResetPassword`, `ConfirmEmail`, `EmailConfirmation`, `Checkout`, `StripeWebhook`) |
 | `Identity__Lockout__MaxFailedAttempts` / `__Duration` | no | — | only to change 5 / 15 minutes |
 
 ## Observability in production
@@ -87,7 +91,7 @@ a way that would misbehave.
   (Grafana's provisioning format, Prometheus datasource `prometheus`):
   API not reporting, events stuck in an outbox, failed messages, card
   declines above normal, payment provider errors, many rate-limited
-  requests, many accounts locked. Where they are sent is a **contact point
+  requests, many accounts locked, e-mails given up on. Where they are sent is a **contact point
   configured in that Grafana** (e-mail, Slack, a webhook) — nothing about
   it is committed; without one, alerts show in Grafana's alerting page.
 - Dashboards: `deploy/grafana/dashboards`, provisioned the same way.

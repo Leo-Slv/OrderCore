@@ -46,8 +46,10 @@ OrderCore
 ├── Inventory
 ├── Payments   ← bounded context isolado desde o início
 │
-├── AuditLogs  ← módulos técnicos/transversais,
-└── Identity   ← não bounded contexts de negócio
+├── AuditLogs      ← módulos técnicos/transversais,
+├── Identity       ← não bounded contexts de negócio
+├── Messaging
+└── Notifications  ← e-mails da conta e do pedido
 ```
 
 O código de produção é um único projeto (`OrderCore.Api.csproj`, na raiz
@@ -120,6 +122,8 @@ em Development).
 | Produto | `GET /api/catalog/products/by-slug/{slug}` → só produtos publicados |
 | Carrinho | `POST /api/orders/cart/quote` → preço atual e problemas por linha (`PriceChanged`, `InsufficientStock`, `Unavailable`, `NotFound`), sem reservar nada |
 | Cadastro / login | `POST /api/auth/sign-up`, `POST /api/auth/sign-in` → access token (JWT, 15 min) + refresh token (14 dias); `POST /api/auth/refresh` troca o refresh token por um par novo; `POST /api/auth/sign-out` encerra a sessão |
+| Confirmar e-mail | o cadastro envia um link de 24 h para a página `Identity:Links:ConfirmEmail` da loja; ela manda o token em `POST /api/auth/email/confirm` e depois **renova a sessão** (`/auth/refresh`), porque o checkout lê a confirmação do token; `POST /api/auth/email/confirmation` (cliente) manda um link novo |
+| Esqueci / trocar a senha | `POST /api/auth/password/forgot` (sempre 202) envia um link de 30 min, de uso único, para `Identity:Links:ResetPassword`; a página manda token e senha nova em `POST /api/auth/password/reset` (encerra todas as sessões); logado, `POST /api/auth/password/change` com a senha atual, a nova e o refresh token da sessão que fica |
 | Minha conta | `GET`/`PUT /api/customers/me`, `GET`/`POST /api/customers/me/addresses`, `PUT`/`DELETE /api/customers/me/addresses/{addressId}`, `POST …/{addressId}/default-shipping` e `…/default-billing` |
 | Formas de pagamento | `GET /api/payments/methods` (anônimo) → o provedor, as formas que o checkout aceita agora (`Card`/`Pix` com o fake, só `Card` com o Stripe) e a chave publicável do Stripe |
 | Checkout | `GET /api/customers/me/addresses`, depois `POST /api/orders/checkout` com header `Idempotency-Key` → 202 com o pedido já em `PendingPayment` (o cliente vem do token); com o Stripe, `payment.nextAction` traz a confirmação do cartão (ver [Pagando com cartão](#pagando-com-cartão-stripe)) |
@@ -133,14 +137,17 @@ o mesmo pedido, nunca um segundo.
 
 Erros de negócio chegam como `ProblemDetails` (RFC 7807) com um `code`
 estável para o front decidir o que mostrar — por exemplo
-`409 insufficient_stock`, `409 price_changed`, `404 address_not_found`.
+`409 insufficient_stock`, `409 price_changed`, `404 address_not_found`,
+`403 email_not_confirmed` (checkout antes de confirmar o e-mail: ofereça
+mandar o link de novo).
 A API só aceita chamadas de navegador das origens em `Cors:AllowedOrigins`
 (`http://localhost:3000` por padrão).
 
 **Acesso.** A API bloqueia por padrão: toda rota exige
 `Authorization: Bearer <access token>`, exceto a vitrine (listagem e
 produto por slug), a cotação do carrinho, as formas de pagamento,
-`auth/sign-up|sign-in|refresh`, `/health` e a documentação — e o webhook
+`auth/sign-up|sign-in|refresh`, `auth/password/forgot|reset`,
+`auth/email/confirm`, `/health` e a documentação — e o webhook
 do Stripe, que não usa token mas só aceita o que o Stripe assinou. Checkout, `customers/me` e `orders/me` exigem
 um token de cliente; os endpoints administrativos (clientes, estoque,
 pagamentos, auditoria, gestão do catálogo) exigem um token de admin.
@@ -149,8 +156,9 @@ Um cliente desativado pela loja recebe `401 account_inactive` no login
 (só com a senha certa; senha errada continua `invalid_credentials`).
 Cinco senhas erradas seguidas bloqueiam a conta por 15 minutos; enquanto
 isso, o login responde `invalid_credentials` como para uma senha errada
-(mesmo com a certa). Login, cadastro, refresh, checkout e o webhook do
-Stripe têm limite de requisições: acima dele, `429 too_many_requests` com
+(mesmo com a certa). Login, cadastro, refresh, esqueci/redefinir a senha,
+confirmar o e-mail, pedir outro link, checkout e o webhook do Stripe têm
+limite de requisições: acima dele, `429 too_many_requests` com
 o cabeçalho `Retry-After` (segundos para tentar de novo).
 Os detalhes estão em
 [`Docs/specs/identity/authentication-and-account.md`](Docs/specs/identity/authentication-and-account.md).
@@ -394,7 +402,7 @@ repositório:
 # JWT_SIGNING_KEY, ADMIN_EMAIL, ADMIN_PASSWORD, RABBITMQ_USER e RABBITMQ_PASSWORD
 cp .env.example .env
 
-# Subir PostgreSQL + RabbitMQ + Grafana LGTM + API
+# Subir PostgreSQL + RabbitMQ + Grafana LGTM + Mailpit + API
 docker compose up --build
 
 # Rodando a API localmente (fora do container): guarde os segredos em user-secrets
@@ -403,13 +411,21 @@ dotnet user-secrets set "IdentitySeed:AdminEmail" "admin@ordercore.local"
 dotnet user-secrets set "IdentitySeed:AdminPassword" "<senha com letra e dígito>"
 dotnet user-secrets set "RabbitMq:Password" "<a mesma RABBITMQ_PASSWORD do .env>"
 
-# ...suba só PostgreSQL e RabbitMQ pelo compose e rode a API
-docker compose up -d postgres rabbitmq
+# ...suba só PostgreSQL, RabbitMQ e Mailpit pelo compose e rode a API
+docker compose up -d postgres rabbitmq mailpit
 dotnet run --project OrderCore.Api.csproj
 
 # Rodar todos os testes (os do Stripe usam o stripe-mock em container; não precisam de conta)
 dotnet test
 ```
+
+**E-mail.** Localmente nenhum e-mail sai de verdade: tudo vai para o
+Mailpit, com uma caixa de entrada em <http://localhost:8025> — é lá que se
+clica no link de confirmação ou de redefinição de senha (eles apontam
+para a loja em `http://localhost:3000`). Em produção, o envio é pelo
+Resend: `Notifications:Resend:ApiKey` (do ambiente, nunca no repositório)
+e `Notifications:From` num domínio verificado no Resend
+([`Docs/specs/identity/password-recovery.md`](Docs/specs/identity/password-recovery.md)).
 
 **Stripe em modo de teste (opcional).** Sem chaves, a API usa o provedor
 fake. Para usar o Stripe:
@@ -501,7 +517,9 @@ A hospedagem ainda não foi escolhida; tudo é neutro de plataforma
   na porta 8080, atrás de um proxy que termina o HTTPS.
 - **Configuração:** o runbook lista tudo o que um deploy informa. Fora de
   Development a API **não sobe** sem banco, origens do CORS, `AllowedHosts`
-  e RabbitMQ de produção, nem com uma configuração do Stripe que
+  e RabbitMQ de produção, sem um jeito de enviar e-mail (Resend, ou um SMTP
+que não seja localhost) e os links da loja nos e-mails da conta, nem com
+uma configuração do Stripe que
   funcionaria mal (chave live sem `AllowLiveKeys`, modos misturados, sem
   segredo do webhook) — e a mensagem diz o que corrigir.
 - **Borda:** cabeçalhos encaminhados só de proxies confiáveis
@@ -509,7 +527,7 @@ A hospedagem ainda não foi escolhida; tudo é neutro de plataforma
   `/health`), cabeçalhos de segurança em toda resposta e `no-store` nas
   autenticadas.
 - **Operação:** retenção diária dos registros técnicos (outbox, inbox,
-  mensagens com falha resolvidas); alertas como código em
+  mensagens com falha resolvidas, e-mails enviados há mais de 90 dias); alertas como código em
   `deploy/grafana/alerting`; amostragem de traces no coletor
   (`deploy/otel/otelcol-config.yaml`: todo erro, todo lento e 10% do resto;
   100% no compose local).
@@ -552,6 +570,10 @@ própria — ver
 `Messaging`, o terceiro módulo técnico, leva os eventos entre os módulos
 pelo RabbitMQ — ver
 [09-messaging.md](Docs/diagrams/implementation-class/09-messaging.md).
+`Notifications`, o quarto, envia os e-mails (fila com retentativas, Resend
+ou SMTP/Mailpit, templates em português): redefinição de senha,
+confirmação de e-mail e os e-mails do pedido — ver
+[10-notifications.md](Docs/diagrams/implementation-class/10-notifications.md).
 `AuditLogs` recebe entradas de verdade: as 27 ações de
 `AuditLogActionNames` (ciclo de vida do pedido, autorização/captura/
 anulação/falha/estorno de pagamento, reserva/liberação/consumo/expiração
@@ -585,6 +607,13 @@ refresh com rotação, papéis cliente/admin, posse dos próprios dados) e
 testadas pela API HTTP em `Tests/OrderCore.IntegrationTests/Identity`,
 `Shared/EndpointAccessTests`, `Orders/OrderOwnershipTests` e
 `Customers/MyAccountTests`.
+
+Recuperação de senha, confirmação de e-mail e os e-mails do pedido são
+testados com o e-mail chegando de verdade num Mailpit em container (o
+link lido da mensagem, a redefinição e a confirmação feitas por ele, o
+checkout recusado até confirmar, uma reentrega que não manda outro
+e-mail): `Tests/OrderCore.IntegrationTests/Identity/PasswordRecoveryFlowTests.cs`,
+`Identity/EmailConfirmationTests.cs` e `Notifications`.
 
 O backoffice está implementado e testado pela API HTTP real, inclusive os
 fluxos que atravessam módulos (cancelar um pedido confirmado anula o
