@@ -156,3 +156,46 @@ contracts only.
 3. `feat(identity,orders): e-mail confirmation required to check out`
 4. `feat(notifications): order e-mails`
 5. `docs: ...`
+
+## Execution notes (what differed from this plan)
+
+- **Stage 1.** Templates are a `.html` fragment plus a `.txt` whose first
+  line is `Subject: …`, embedded under a stable resource name
+  (`EmailTemplates/<file>`). Values are encoded with an `HtmlEncoder`
+  that keeps accented letters (the BCL's default turned "Olá" into an
+  entity). The dispatcher also runs the 90-day retention, once a day, in
+  the same background service. Besides the plan's checks,
+  `NotificationsOptionsValidator` refuses a Resend key that isn't `re_…`
+  and an SMTP-less setup without Resend. A "E-mails failing" alert rule
+  was added (`ordercore.notifications.emails{outcome="failed"}`), and
+  every host built by `ApiDatabase` sends to the shared `TestMailpit`.
+- **Stage 2.** No decoy work in "forgot password": a decoy password hash
+  would make the answer for an unknown address *slower*, not equal; what
+  differs is a couple of database writes, and the form is rate limited
+  per address. Changing the password takes the caller's refresh token to
+  know which session to keep (as sign-out does). The account tokens reuse
+  `IRefreshTokenGenerator` (256 random bits, SHA-256 stored). The wrong-
+  password handling of sign-in moved to `FailedSignIns`, shared with the
+  password change. Templates take a ready `greeting` instead of a name,
+  so an admin (no customer name) gets "Olá!".
+- **Stage 3.** `ICurrentUser.EmailConfirmed` treats a token *without* the
+  claim as confirmed: it was issued before this feature, to an account the
+  migration marks confirmed. The confirmation link is sent last in
+  sign-up, best effort: if queuing it fails, sign-up still succeeds and the
+  customer asks for another. `POST auth/email/confirm` is anonymous, so it
+  also got a per-address rate limit (`ConfirmEmail`, 10 per 15 min), per the
+  V4 convention. Asking for a link on a confirmed address is
+  `409 email_already_confirmed`; opening a link again after confirming is
+  a `204`. `ApiDatabase.SignUpCustomerAsync` confirms the customer in the
+  database and refreshes the session, since most tests check out; the real
+  e-mail round trip has its own tests.
+- **Stage 4.** A shipment with a usable http(s) tracking link uses a
+  separate template (`order-shipped-tracking`, with the button); without
+  one, `order-shipped`. A cancellation reason is shown only when it is the
+  storefront's default customer cancellation or the payment deadline;
+  anything else is free text someone typed and is replaced by a neutral
+  sentence. Money is formatted by hand (`R$ 1.234,56`) so the container
+  needs no culture data. The inbox row commits with the queued e-mail,
+  since both live in `NotificationsDbContext`.
+- Every stage was merged into `master` through its `v5/<topic>` branch
+  after a green CI run; `dotnet ef` output converted to LF.
