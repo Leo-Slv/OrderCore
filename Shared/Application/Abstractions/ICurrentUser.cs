@@ -18,6 +18,14 @@ public interface ICurrentUser
     /// <summary>One of <see cref="UserRoles"/>, or null when nobody is signed in.</summary>
     string? Role { get; }
 
+    /// <summary>
+    /// Whether the signed-in account confirmed its e-mail address, as of when
+    /// its access token was issued (password-recovery spec, decision 9); the
+    /// client refreshes the session after confirming. False when nobody is
+    /// signed in.
+    /// </summary>
+    bool EmailConfirmed { get; }
+
     bool IsAuthenticated => UserId is not null;
 
     bool IsAdmin => Role == UserRoles.Admin;

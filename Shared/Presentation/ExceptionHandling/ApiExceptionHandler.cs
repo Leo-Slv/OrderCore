@@ -70,6 +70,7 @@ public sealed class ApiExceptionHandler : IExceptionHandler
     {
         DomainRuleViolationException e => (StatusCodes.Status400BadRequest, e.Code, "Business rule violated."),
         UnauthorizedException e => (StatusCodes.Status401Unauthorized, e.Code, "Authentication failed."),
+        ForbiddenException e => (StatusCodes.Status403Forbidden, e.Code, "Not allowed yet."),
         NotFoundException e => (StatusCodes.Status404NotFound, e.Code, "Resource not found."),
         ConflictException e => (StatusCodes.Status409Conflict, e.Code, "Request conflicts with the current state."),
         DbUpdateConcurrencyException => (StatusCodes.Status409Conflict, ConcurrencyConflictCode, "Request conflicts with the current state."),

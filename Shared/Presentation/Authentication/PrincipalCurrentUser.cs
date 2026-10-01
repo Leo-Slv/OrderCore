@@ -26,6 +26,13 @@ public sealed class PrincipalCurrentUser : ICurrentUser
 
     public string? Role => _principal?.FindFirstValue(OrderCoreClaimTypes.Role);
 
+    /// <summary>
+    /// A token without the claim was issued before e-mail confirmation existed,
+    /// to an account that therefore counts as confirmed (spec decision 4).
+    /// </summary>
+    public bool EmailConfirmed =>
+        _principal is not null && _principal.FindFirstValue(OrderCoreClaimTypes.EmailConfirmed) != "false";
+
     private Guid? ReadGuid(string claimType) =>
         Guid.TryParse(_principal?.FindFirstValue(claimType), out var value) ? value : null;
 }

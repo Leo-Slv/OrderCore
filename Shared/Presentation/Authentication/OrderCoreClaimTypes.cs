@@ -12,4 +12,7 @@ public static class OrderCoreClaimTypes
     public const string Email = "email";
     public const string Role = "role";
     public const string CustomerId = "customer_id";
+
+    /// <summary><c>true</c> or <c>false</c>: whether the account proved it owns its e-mail address.</summary>
+    public const string EmailConfirmed = "email_confirmed";
 }

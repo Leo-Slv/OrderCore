@@ -22,5 +22,7 @@ public sealed class HttpContextCurrentUser : ICurrentUser
 
     public string? Role => Current.Role;
 
+    public bool EmailConfirmed => Current.EmailConfirmed;
+
     private PrincipalCurrentUser Current => new(_httpContextAccessor.HttpContext?.User);
 }
