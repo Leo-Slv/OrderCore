@@ -17,18 +17,35 @@ public sealed class EmailTemplatesTests
         ["validFor"] = "30 minutos",
     };
 
+    /// <summary>Every value any template takes.</summary>
+    private static Dictionary<string, string> AllValues() => new(Values())
+    {
+        ["orderNumber"] = "ORD-000042",
+        ["total"] = "R$ 99,90",
+        ["shipment"] = "Transportadora: Correios.",
+        ["trackingUrl"] = "https://track.example/AB1",
+        ["reason"] = "O pagamento não foi aprovado pela operadora.",
+    };
+
     [Fact]
     public void Every_template_renders_with_its_values()
     {
-        Templates.Names.Should().BeEquivalentTo(EmailTemplateNames.PasswordReset, EmailTemplateNames.EmailConfirmation);
+        Templates.Names.Should().BeEquivalentTo(
+            EmailTemplateNames.PasswordReset,
+            EmailTemplateNames.EmailConfirmation,
+            EmailTemplateNames.OrderConfirmed,
+            EmailTemplateNames.OrderShipped,
+            EmailTemplateNames.OrderShippedWithTracking,
+            EmailTemplateNames.OrderCancelled,
+            EmailTemplateNames.OrderPaymentFailed);
 
         foreach (var name in Templates.Names)
         {
-            var email = Templates.Render(name, Values());
+            var email = Templates.Render(name, AllValues());
 
-            email.Subject.Should().NotBeNullOrWhiteSpace();
-            email.HtmlBody.Should().NotContain("{{").And.StartWith("<!DOCTYPE html>").And.Contain("lang=\"pt-BR\"");
-            email.TextBody.Should().NotContain("{{").And.Contain("https://shop.example/redefinir-senha?token=abc&x=1");
+            email.Subject.Should().NotBeNullOrWhiteSpace().And.NotContain("{{");
+            email.HtmlBody.Should().NotContain("{{").And.StartWith("<!DOCTYPE html>").And.Contain("lang=\"pt-BR\"").And.Contain("Olá, Jane.");
+            email.TextBody.Should().NotContain("{{").And.Contain("Olá, Jane.");
         }
     }
 

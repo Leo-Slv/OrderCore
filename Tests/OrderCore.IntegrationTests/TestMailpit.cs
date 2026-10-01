@@ -66,11 +66,11 @@ public static class TestMailpit
         }
     }
 
-    /// <summary>How many messages were delivered to <paramref name="to"/>.</summary>
-    public static async Task<int> CountAsync(string to)
+    /// <summary>How many messages were delivered to <paramref name="to"/> (with <paramref name="subject"/>, when given).</summary>
+    public static async Task<int> CountAsync(string to, string? subject = null)
     {
         using var http = Http();
-        return (await SearchAsync(http, to)).Count;
+        return (await SearchAsync(http, to, subject)).Count;
     }
 
     private static async Task<IReadOnlyList<JsonElement>> SearchAsync(HttpClient http, string to, string? subject = null)
