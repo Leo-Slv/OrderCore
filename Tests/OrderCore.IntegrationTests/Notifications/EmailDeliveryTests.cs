@@ -28,7 +28,7 @@ public sealed class EmailDeliveryTests : IClassFixture<ApiDatabase>
 
     private static Dictionary<string, string> ResetValues(string link) => new()
     {
-        ["name"] = "Jane",
+        ["greeting"] = "Olá, Jane.",
         ["link"] = link,
         ["validFor"] = "30 minutos",
     };

@@ -1,6 +1,6 @@
 Subject: Confirme seu e-mail
 
-Olá, {{name}}.
+{{greeting}}
 
 Falta pouco: confirme que este endereço de e-mail é seu para poder finalizar compras. Abra o link abaixo:
 

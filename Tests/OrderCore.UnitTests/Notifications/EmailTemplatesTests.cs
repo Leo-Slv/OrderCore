@@ -10,9 +10,9 @@ public sealed class EmailTemplatesTests
 {
     private static readonly EmbeddedEmailTemplates Templates = new();
 
-    private static Dictionary<string, string> Values(string name = "Jane") => new()
+    private static Dictionary<string, string> Values(string greeting = "Olá, Jane.") => new()
     {
-        ["name"] = name,
+        ["greeting"] = greeting,
         ["link"] = "https://shop.example/redefinir-senha?token=abc&x=1",
         ["validFor"] = "30 minutos",
     };
@@ -49,7 +49,7 @@ public sealed class EmailTemplatesTests
         var email = Templates.Render(EmailTemplateNames.PasswordReset, Values("<script>alert(1)</script>"));
 
         email.HtmlBody.Should().NotContain("<script>").And.Contain("&lt;script&gt;alert(1)&lt;/script&gt;");
-        email.TextBody.Should().Contain("Olá, <script>alert(1)</script>.");
+        email.TextBody.Should().Contain("<script>alert(1)</script>");
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class EmailTemplatesTests
     {
         var email = Templates.Render(EmailTemplateNames.PasswordReset, Values("{{content}}"));
 
-        email.HtmlBody.Should().Contain("Olá, {{content}}.");
+        email.HtmlBody.Should().Contain("<p>{{content}}</p>");
     }
 
     [Fact]

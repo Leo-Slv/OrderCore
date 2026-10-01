@@ -35,7 +35,7 @@ public sealed class SendEmailUseCaseTests : IDisposable
         return await queue.ExecuteAsync(
             "jane@example.com",
             "password-reset",
-            new Dictionary<string, string> { ["name"] = "Jane", ["link"] = "https://shop.example/r?token=t", ["validFor"] = "30 minutos" },
+            new Dictionary<string, string> { ["greeting"] = "Olá, Jane.", ["link"] = "https://shop.example/r?token=t", ["validFor"] = "30 minutos" },
             CancellationToken.None);
     }
 

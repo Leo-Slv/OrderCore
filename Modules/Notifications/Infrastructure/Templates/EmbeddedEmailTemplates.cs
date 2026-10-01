@@ -1,6 +1,7 @@
-using System.Net;
 using System.Reflection;
+using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
+using System.Text.Unicode;
 using OrderCore.Api.Modules.Notifications.Application.Contracts;
 
 namespace OrderCore.Api.Modules.Notifications.Infrastructure.Templates;
@@ -19,6 +20,9 @@ public sealed partial class EmbeddedEmailTemplates : IEmailTemplates
     private const string ResourcePrefix = "EmailTemplates/";
     private const string SubjectHeader = "Subject:";
     private const string LayoutName = "_layout";
+
+    // Escapes markup (<, >, &, quotes) but keeps accented letters as they are.
+    private static readonly HtmlEncoder Html = HtmlEncoder.Create(UnicodeRanges.All);
 
     private readonly IReadOnlyDictionary<string, string> _resources;
 
@@ -45,12 +49,12 @@ public sealed partial class EmbeddedEmailTemplates : IEmailTemplates
         var (subjectTemplate, textBody) = SplitSubject(template, text);
         var subject = Fill(subjectTemplate, template, values, value => value.ReplaceLineEndings(" "));
 
-        var htmlContent = Fill(html, template, values, WebUtility.HtmlEncode);
+        var htmlContent = Fill(html, template, values, Html.Encode);
         // One pass over the layout, so nothing inserted is read as a placeholder again.
         var htmlBody = Fill(
             _resources[$"{LayoutName}.html"],
             LayoutName,
-            new Dictionary<string, string> { ["subject"] = WebUtility.HtmlEncode(subject), ["content"] = htmlContent.TrimEnd() },
+            new Dictionary<string, string> { ["subject"] = Html.Encode(subject), ["content"] = htmlContent.TrimEnd() },
             value => value);
 
         var textContent = Fill(textBody, template, values, value => value);
