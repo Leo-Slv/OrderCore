@@ -26,7 +26,9 @@ public sealed class StripePaymentProviderTests : IAsyncLifetime
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-    private readonly IContainer _stripeMock = new ContainerBuilder("stripe/stripe-mock:latest")
+    // Pinned: stripe-mock v0.206.0 stopped returning a created intent's
+    // client_secret, which Stripe itself always returns. Move up on purpose.
+    private readonly IContainer _stripeMock = new ContainerBuilder("stripe/stripe-mock:v0.205.0")
         .WithPortBinding(12111, true)
         .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(12111))
         .Build();
