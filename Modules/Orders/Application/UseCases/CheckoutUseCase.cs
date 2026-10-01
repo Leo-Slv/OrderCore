@@ -5,6 +5,7 @@ using OrderCore.Api.Modules.Orders.Application.DTOs;
 using OrderCore.Api.Modules.Orders.Application.Telemetry;
 using OrderCore.Api.Modules.Orders.Domain.Entities;
 using OrderCore.Api.Modules.Orders.Domain.Enums;
+using OrderCore.Api.Shared.Application.Abstractions;
 using OrderCore.Api.Shared.Application.Exceptions;
 using OrderCore.Api.Shared.Application.Observability;
 using OrderCore.Api.Shared.Domain.Exceptions;
@@ -37,6 +38,8 @@ namespace OrderCore.Api.Modules.Orders.Application.UseCases;
 /// </summary>
 public sealed class CheckoutUseCase
 {
+    public const string EmailNotConfirmedCode = "email_not_confirmed";
+
     private readonly IOrderRepository _orderRepository;
     private readonly IProductCatalog _productCatalog;
     private readonly ICustomerDirectory _customerDirectory;
@@ -46,6 +49,7 @@ public sealed class CheckoutUseCase
     private readonly IAuditLogService _auditLog;
     private readonly OrdersMetrics _metrics;
     private readonly TimeProvider _timeProvider;
+    private readonly ICurrentUser _currentUser;
 
     public CheckoutUseCase(
         IOrderRepository orderRepository,
@@ -56,8 +60,10 @@ public sealed class CheckoutUseCase
         IOrderNumberGenerator orderNumbers,
         IAuditLogService auditLog,
         OrdersMetrics metrics,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ICurrentUser currentUser)
     {
+        _currentUser = currentUser;
         _metrics = metrics;
         _orderRepository = orderRepository;
         _productCatalog = productCatalog;
@@ -97,6 +103,7 @@ public sealed class CheckoutUseCase
     {
         DomainRuleViolationException rule => rule.Code,
         NotFoundException notFound => notFound.Code,
+        ForbiddenException forbidden => forbidden.Code,
         ConflictException conflict => conflict.Code,
         ArgumentException => "validation_error",
         _ => null,
@@ -104,6 +111,15 @@ public sealed class CheckoutUseCase
 
     private async Task<(CheckoutResult Result, string Outcome)> PlaceAsync(CheckoutCommand command, CancellationToken cancellationToken)
     {
+        // Before anything else (password-recovery spec, decision 4): a customer
+        // must prove they own their address before buying. Read from the
+        // access token (decision 9), so Orders needs nothing from Identity.
+        if (!_currentUser.EmailConfirmed)
+        {
+            throw new ForbiddenException(
+                EmailNotConfirmedCode, "Confirm your e-mail address before checking out. Ask for a new link if you need one.");
+        }
+
         if (string.IsNullOrWhiteSpace(command.IdempotencyKey))
         {
             throw new ArgumentException("An idempotency key is required.", nameof(command));

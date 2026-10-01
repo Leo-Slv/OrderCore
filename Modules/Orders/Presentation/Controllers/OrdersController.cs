@@ -95,6 +95,7 @@ public sealed class OrdersController : ControllerBase
     [EnableRateLimiting(OrdersRateLimits.Checkout)]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<OrderResponse>> CheckoutAsync(
