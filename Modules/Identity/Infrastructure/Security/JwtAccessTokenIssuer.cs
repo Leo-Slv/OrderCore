@@ -12,7 +12,8 @@ namespace OrderCore.Api.Modules.Identity.Infrastructure.Security;
 /// <summary>
 /// Issues HMAC-SHA256 signed JWTs with the claims
 /// <c>HttpContextCurrentUser</c> reads back (<see cref="OrderCoreClaimTypes"/>).
-/// <c>customer_id</c> is only present for customer accounts.
+/// <c>customer_id</c> is only present for customer accounts; <c>email_confirmed</c>
+/// is read by checkout (password-recovery spec, decision 9).
 /// </summary>
 public sealed class JwtAccessTokenIssuer : IAccessTokenIssuer
 {
@@ -33,6 +34,7 @@ public sealed class JwtAccessTokenIssuer : IAccessTokenIssuer
             new(OrderCoreClaimTypes.UserId, account.Id.ToString()),
             new(OrderCoreClaimTypes.Email, account.Email),
             new(OrderCoreClaimTypes.Role, account.Role.ToString()),
+            new(OrderCoreClaimTypes.EmailConfirmed, account.EmailConfirmed ? "true" : "false"),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 

@@ -11,4 +11,6 @@ public interface IAccountEmails
 {
     /// <param name="name">The customer's name; null for an admin.</param>
     Task SendPasswordResetAsync(string email, string? name, string token, TimeSpan validFor, CancellationToken cancellationToken);
+
+    Task SendEmailConfirmationAsync(string email, string? name, string token, TimeSpan validFor, CancellationToken cancellationToken);
 }

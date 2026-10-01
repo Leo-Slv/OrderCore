@@ -52,6 +52,7 @@ public static class AuditLogActionNames
     public const string PasswordResetRequested = "PasswordResetRequested";
     public const string PasswordReset = "PasswordReset";
     public const string PasswordChanged = "PasswordChanged";
+    public const string EmailConfirmed = "EmailConfirmed";
 
     public const string FailedMessageReplayed = "FailedMessageReplayed";
     public const string FailedMessageDiscarded = "FailedMessageDiscarded";

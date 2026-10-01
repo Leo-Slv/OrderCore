@@ -47,6 +47,16 @@ public sealed class UserAccount : AggregateRoot<Guid>
     /// <summary>Until when sign-in is refused after too many wrong passwords; null when not locked.</summary>
     public DateTimeOffset? LockedOutUntil { get; private set; }
 
+    /// <summary>
+    /// When the owner proved the e-mail address is theirs (password-recovery
+    /// spec, item 5); null while unconfirmed. Admins are created confirmed,
+    /// and accounts from before confirmation existed were marked confirmed
+    /// by the migration (decision 4).
+    /// </summary>
+    public DateTimeOffset? EmailConfirmedAt { get; private set; }
+
+    public bool EmailConfirmed => EmailConfirmedAt is not null;
+
     public IReadOnlyCollection<RefreshSession> Sessions => _sessions.AsReadOnly();
 
     /// <summary>The single-use tokens e-mailed to the owner (password reset, e-mail confirmation).</summary>
@@ -77,8 +87,13 @@ public sealed class UserAccount : AggregateRoot<Guid>
     public static UserAccount CreateCustomer(string email, string passwordHash, DateTimeOffset now) =>
         Create(email, passwordHash, UserRole.Customer, now);
 
-    public static UserAccount CreateAdmin(string email, string passwordHash, DateTimeOffset now) =>
-        Create(email, passwordHash, UserRole.Admin, now);
+    /// <summary>An admin is created by whoever runs the store, so its address counts as confirmed.</summary>
+    public static UserAccount CreateAdmin(string email, string passwordHash, DateTimeOffset now)
+    {
+        var admin = Create(email, passwordHash, UserRole.Admin, now);
+        admin.EmailConfirmedAt = now;
+        return admin;
+    }
 
     private static UserAccount Create(string email, string passwordHash, UserRole role, DateTimeOffset now)
     {
@@ -294,6 +309,30 @@ public sealed class UserAccount : AggregateRoot<Guid>
         IncrementVersion();
     }
 
+    /// <summary>
+    /// The owner opened the confirmation link (password-recovery spec, item
+    /// 5): the token must be unused and unexpired, and is spent. Opening it
+    /// again once confirmed changes nothing and isn't an error.
+    /// </summary>
+    public void ConfirmEmail(string tokenHash, DateTimeOffset now)
+    {
+        var token = _tokens.FirstOrDefault(t => t.Purpose == AccountTokenPurpose.EmailConfirmation && t.TokenHash == tokenHash);
+        if (token is not null && EmailConfirmed && Active)
+        {
+            return;
+        }
+
+        if (token is null || !token.IsUsable(now) || !Active)
+        {
+            throw InvalidOrExpiredToken();
+        }
+
+        token.MarkUsed(now);
+        EmailConfirmedAt = now;
+        UpdatedAt = now;
+        IncrementVersion();
+    }
+
     public static DomainRuleViolationException InvalidOrExpiredToken() =>
         new(InvalidOrExpiredTokenCode, "This link is invalid or has expired. Ask for a new one.");
 
@@ -367,7 +406,8 @@ public sealed class UserAccount : AggregateRoot<Guid>
         IEnumerable<RefreshSession> sessions,
         int failedSignInCount = 0,
         DateTimeOffset? lockedOutUntil = null,
-        IEnumerable<AccountToken>? tokens = null)
+        IEnumerable<AccountToken>? tokens = null,
+        DateTimeOffset? emailConfirmedAt = null)
     {
         var account = new UserAccount(id, email, passwordHash, role, createdAt)
         {
@@ -377,6 +417,7 @@ public sealed class UserAccount : AggregateRoot<Guid>
             LastSignedInAt = lastSignedInAt,
             FailedSignInCount = failedSignInCount,
             LockedOutUntil = lockedOutUntil,
+            EmailConfirmedAt = emailConfirmedAt,
             Version = version,
         };
 

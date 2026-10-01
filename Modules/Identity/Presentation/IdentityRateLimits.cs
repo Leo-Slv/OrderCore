@@ -15,6 +15,10 @@ public static class IdentityRateLimits
     public const string Refresh = "Refresh";
     public const string ForgotPassword = "ForgotPassword";
     public const string ResetPassword = "ResetPassword";
+    public const string ConfirmEmail = "ConfirmEmail";
+
+    /// <summary>Per signed-in customer: asking for a new confirmation link.</summary>
+    public const string EmailConfirmation = "EmailConfirmation";
 
     public static IServiceCollection AddIdentityRateLimits(this IServiceCollection services, IConfiguration configuration) =>
         services
@@ -22,5 +26,7 @@ public static class IdentityRateLimits
             .AddFixedWindowPolicy(configuration, SignUp, permitLimit: 5, window: TimeSpan.FromHours(1))
             .AddFixedWindowPolicy(configuration, Refresh, permitLimit: 30, window: TimeSpan.FromMinutes(1))
             .AddFixedWindowPolicy(configuration, ForgotPassword, permitLimit: 5, window: TimeSpan.FromMinutes(15))
-            .AddFixedWindowPolicy(configuration, ResetPassword, permitLimit: 10, window: TimeSpan.FromMinutes(15));
+            .AddFixedWindowPolicy(configuration, ResetPassword, permitLimit: 10, window: TimeSpan.FromMinutes(15))
+            .AddFixedWindowPolicy(configuration, ConfirmEmail, permitLimit: 10, window: TimeSpan.FromMinutes(15))
+            .AddFixedWindowPolicy(configuration, EmailConfirmation, permitLimit: 5, window: TimeSpan.FromHours(1), perCustomer: true);
 }

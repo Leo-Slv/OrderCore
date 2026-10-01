@@ -68,6 +68,8 @@ public static class IdentityDependencyInjection
         services.AddScoped<RequestPasswordResetUseCase>();
         services.AddScoped<ResetPasswordUseCase>();
         services.AddScoped<ChangePasswordUseCase>();
+        services.AddScoped<RequestEmailConfirmationUseCase>();
+        services.AddScoped<ConfirmEmailUseCase>();
 
         return services;
     }

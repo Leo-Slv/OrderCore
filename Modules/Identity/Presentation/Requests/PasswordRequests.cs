@@ -13,6 +13,12 @@ public sealed class ResetPasswordRequest
     public string NewPassword { get; init; } = string.Empty;
 }
 
+public sealed class ConfirmEmailRequest
+{
+    /// <summary>The token from the link in the confirmation e-mail.</summary>
+    public string Token { get; init; } = string.Empty;
+}
+
 public sealed class ChangePasswordRequest
 {
     public string CurrentPassword { get; init; } = string.Empty;

@@ -26,6 +26,8 @@ public sealed class UserAccountPersistenceModel
 
     public DateTimeOffset? LockedOutUntil { get; set; }
 
+    public DateTimeOffset? EmailConfirmedAt { get; set; }
+
     public int Version { get; set; }
 
     public ICollection<RefreshSessionPersistenceModel> Sessions { get; set; } = new List<RefreshSessionPersistenceModel>();

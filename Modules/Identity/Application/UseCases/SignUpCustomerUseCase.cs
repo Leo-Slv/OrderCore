@@ -20,6 +20,10 @@ namespace OrderCore.Api.Modules.Identity.Application.UseCases;
 /// is left behind, and the error is passed on;</item>
 /// <item>the account is linked to the new customer.</item>
 /// </list>
+/// The new account's address is unconfirmed: the confirmation link is
+/// e-mailed last, best effort — if queuing it fails, sign-up still succeeds
+/// and the customer can ask for the link again (password-recovery spec,
+/// item 5).
 /// </summary>
 public sealed class SignUpCustomerUseCase
 {
@@ -30,6 +34,8 @@ public sealed class SignUpCustomerUseCase
     private readonly IAccessTokenIssuer _accessTokens;
     private readonly IAuditLogService _auditLog;
     private readonly TimeProvider _timeProvider;
+    private readonly RequestEmailConfirmationUseCase _emailConfirmation;
+    private readonly ILogger<SignUpCustomerUseCase> _logger;
 
     public SignUpCustomerUseCase(
         IUserAccountRepository accounts,
@@ -38,8 +44,12 @@ public sealed class SignUpCustomerUseCase
         IRefreshTokenGenerator refreshTokens,
         IAccessTokenIssuer accessTokens,
         IAuditLogService auditLog,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        RequestEmailConfirmationUseCase emailConfirmation,
+        ILogger<SignUpCustomerUseCase> logger)
     {
+        _emailConfirmation = emailConfirmation;
+        _logger = logger;
         _accounts = accounts;
         _customers = customers;
         _passwordHasher = passwordHasher;
@@ -88,6 +98,15 @@ public sealed class SignUpCustomerUseCase
             new Dictionary<string, string?> { ["role"] = account.Role.ToString(), ["customerId"] = customerId.ToString() },
             userId: account.Id,
             cancellationToken);
+
+        try
+        {
+            await _emailConfirmation.SendAsync(account, command.Name, cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(exception, "Sending the confirmation link to new account {UserAccountId} failed; it can be asked for again.", account.Id);
+        }
 
         return SessionTokens.For(account, refreshToken.Token, session, _accessTokens, now);
     }

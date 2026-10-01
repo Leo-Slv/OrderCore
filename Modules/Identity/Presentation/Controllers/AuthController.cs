@@ -6,6 +6,7 @@ using OrderCore.Api.Modules.Identity.Presentation.Presenters;
 using OrderCore.Api.Modules.Identity.Presentation.Requests;
 using OrderCore.Api.Modules.Identity.Presentation.Responses;
 using OrderCore.Api.Shared.Application.Abstractions;
+using OrderCore.Api.Shared.Presentation.Authentication;
 
 namespace OrderCore.Api.Modules.Identity.Presentation.Controllers;
 
@@ -25,6 +26,8 @@ public sealed class AuthController : ControllerBase
     private readonly RequestPasswordResetUseCase _requestPasswordReset;
     private readonly ResetPasswordUseCase _resetPassword;
     private readonly ChangePasswordUseCase _changePassword;
+    private readonly ConfirmEmailUseCase _confirmEmail;
+    private readonly RequestEmailConfirmationUseCase _requestEmailConfirmation;
     private readonly ICurrentUser _currentUser;
 
     public AuthController(
@@ -35,8 +38,12 @@ public sealed class AuthController : ControllerBase
         RequestPasswordResetUseCase requestPasswordReset,
         ResetPasswordUseCase resetPassword,
         ChangePasswordUseCase changePassword,
+        ConfirmEmailUseCase confirmEmail,
+        RequestEmailConfirmationUseCase requestEmailConfirmation,
         ICurrentUser currentUser)
     {
+        _confirmEmail = confirmEmail;
+        _requestEmailConfirmation = requestEmailConfirmation;
         _signUp = signUp;
         _signIn = signIn;
         _refresh = refresh;
@@ -127,6 +134,38 @@ public sealed class AuthController : ControllerBase
         await _resetPassword.ExecuteAsync(request.Token, request.NewPassword, cancellationToken);
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Confirms the e-mail address with the token from the confirmation e-mail.
+    /// Refresh the session afterwards: the new access token is the one that
+    /// lets the customer check out.
+    /// </summary>
+    [HttpPost("email/confirm")]
+    [AllowAnonymous]
+    [EnableRateLimiting(IdentityRateLimits.ConfirmEmail)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ConfirmEmailAsync([FromBody] ConfirmEmailRequest request, CancellationToken cancellationToken)
+    {
+        await _confirmEmail.ExecuteAsync(request.Token, cancellationToken);
+
+        return NoContent();
+    }
+
+    /// <summary>Sends the signed-in customer a new confirmation link; the previous one stops working.</summary>
+    [HttpPost("email/confirmation")]
+    [Authorize(Policy = AuthorizationPolicies.Customer)]
+    [EnableRateLimiting(IdentityRateLimits.EmailConfirmation)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RequestEmailConfirmationAsync(CancellationToken cancellationToken)
+    {
+        await _requestEmailConfirmation.ExecuteAsync(_currentUser.UserId!.Value, cancellationToken);
+
+        return Accepted();
     }
 
     /// <summary>

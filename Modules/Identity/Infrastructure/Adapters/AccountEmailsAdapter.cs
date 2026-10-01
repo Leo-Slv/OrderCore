@@ -36,6 +36,18 @@ public sealed class AccountEmailsAdapter : IAccountEmails
             },
             cancellationToken);
 
+    public Task SendEmailConfirmationAsync(string email, string? name, string token, TimeSpan validFor, CancellationToken cancellationToken) =>
+        _queueEmail.ExecuteAsync(
+            email,
+            EmailTemplateNames.EmailConfirmation,
+            new Dictionary<string, string>
+            {
+                ["greeting"] = Greeting(name),
+                ["link"] = _links.ConfirmEmailLink(token),
+                ["validFor"] = Duration(validFor),
+            },
+            cancellationToken);
+
     /// <summary><c>Olá, Jane.</c> — or <c>Olá!</c> for an admin, who has no customer name.</summary>
     public static string Greeting(string? name) => string.IsNullOrWhiteSpace(name) ? "Olá!" : $"Olá, {name.Trim()}.";
 
