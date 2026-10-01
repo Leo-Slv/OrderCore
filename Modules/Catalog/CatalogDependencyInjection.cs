@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OrderCore.Api.Modules.Catalog.Application.Contracts;
 using OrderCore.Api.Modules.Catalog.Application.UseCases;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Adapters;
+using OrderCore.Api.Modules.Catalog.Infrastructure.DemoData;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Catalog.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
@@ -42,6 +43,9 @@ public static class CatalogDependencyInjection
         services.AddScoped<ManageProductVariantsUseCase>();
         services.AddScoped<CreateCategoryUseCase>();
         services.AddScoped<ListCategoriesUseCase>();
+
+        // `seed-demo`: the Marfim storefront's catalog, only when run on purpose.
+        services.AddSingleton<DemoCatalogSeeder>();
 
         return services;
     }

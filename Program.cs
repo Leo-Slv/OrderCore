@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using OrderCore.Api.Modules.AuditLogs;
 using OrderCore.Api.Modules.Catalog;
+using OrderCore.Api.Modules.Catalog.Infrastructure.DemoData;
 using OrderCore.Api.Modules.Customers;
 using OrderCore.Api.Modules.Identity;
 using OrderCore.Api.Modules.Inventory;
@@ -26,9 +27,12 @@ using Scalar.AspNetCore;
 // `dotnet OrderCore.Api.dll migrate` applies every module's migrations and
 // exits (Docs/operations/deployment.md) — the only way they run outside
 // development; starting the API normally never migrates.
-var migrate = args.Length > 0 && args[0] == "migrate";
+// `dotnet OrderCore.Api.dll seed-demo` fills the catalog with the Marfim
+// storefront's demo pieces and exits; it runs only when asked for.
+var command = args.Length > 0 && args[0] is "migrate" or "seed-demo" ? args[0] : null;
+var migrate = command == "migrate";
 
-var builder = WebApplication.CreateBuilder(migrate ? args[1..] : args);
+var builder = WebApplication.CreateBuilder(command is null ? args : args[1..]);
 
 // Traces, metrics and logs (OpenTelemetry, exported over OTLP when an
 // endpoint is configured) — Docs/specs/observability/observability.md.
@@ -109,6 +113,11 @@ var app = builder.Build();
 if (migrate)
 {
     return await app.Services.GetRequiredService<DatabaseMigrator>().RunAsync(CancellationToken.None);
+}
+
+if (command == "seed-demo")
+{
+    return await app.Services.GetRequiredService<DemoCatalogSeeder>().RunAsync(CancellationToken.None);
 }
 
 // First: the client's real address and scheme from a trusted proxy in front
