@@ -1,0 +1,9 @@
+Subject: Pedido {{orderNumber}} enviado
+
+{{greeting}}
+
+Seu pedido {{orderNumber}} saiu para entrega.
+
+{{shipment}}
+
+Acompanhe a entrega: {{trackingUrl}}

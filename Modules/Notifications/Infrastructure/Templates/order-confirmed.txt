@@ -1,0 +1,7 @@
+Subject: Pedido {{orderNumber}} confirmado
+
+{{greeting}}
+
+Recebemos o pagamento do seu pedido {{orderNumber}}, no valor de {{total}}. Agora vamos separá-lo e prepará-lo para o envio.
+
+Avisaremos por e-mail assim que ele sair para entrega.

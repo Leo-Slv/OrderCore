@@ -1,0 +1,9 @@
+Subject: Pagamento do pedido {{orderNumber}} não aprovado
+
+{{greeting}}
+
+Não conseguimos concluir o pagamento do seu pedido {{orderNumber}}, no valor de {{total}}.
+
+{{reason}}
+
+Nenhum valor foi cobrado e os itens voltaram para o estoque. Você pode fazer um novo pedido quando quiser.

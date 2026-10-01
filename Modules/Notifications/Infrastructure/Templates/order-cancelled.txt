@@ -1,0 +1,9 @@
+Subject: Pedido {{orderNumber}} cancelado
+
+{{greeting}}
+
+Seu pedido {{orderNumber}}, no valor de {{total}}, foi cancelado.
+
+{{reason}}
+
+Se algum valor foi cobrado, ele será devolvido pelo mesmo meio de pagamento.

@@ -5,6 +5,8 @@ using OrderCore.Api.Modules.Notifications.Application.Telemetry;
 using OrderCore.Api.Modules.Notifications.Application.UseCases;
 using OrderCore.Api.Modules.Notifications.Domain.Policies;
 using OrderCore.Api.Modules.Notifications.Domain.Repositories;
+using OrderCore.Api.Modules.Notifications.Infrastructure.Adapters;
+using OrderCore.Api.Modules.Notifications.Infrastructure.IntegrationEventHandlers;
 using OrderCore.Api.Modules.Notifications.Infrastructure.Jobs;
 using OrderCore.Api.Modules.Notifications.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Notifications.Infrastructure.Persistence.Repositories;
@@ -12,14 +14,17 @@ using OrderCore.Api.Modules.Notifications.Infrastructure.Senders;
 using OrderCore.Api.Modules.Notifications.Infrastructure.Senders.Resend;
 using OrderCore.Api.Modules.Notifications.Infrastructure.Senders.Smtp;
 using OrderCore.Api.Modules.Notifications.Infrastructure.Templates;
+using OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
+using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
 
 namespace OrderCore.Api.Modules.Notifications;
 
 /// <summary>
 /// Registers the Notifications module (Docs/specs/identity/password-recovery.md,
-/// decision 6): the e-mail queue, the templates, the sender (Resend or SMTP)
-/// and the dispatcher that sends what is queued.
+/// decision 6): the e-mail queue, the templates, the sender (Resend or SMTP),
+/// the dispatcher that sends what is queued, and the order e-mails consumed
+/// from Orders' integration events.
 /// </summary>
 public static class NotificationsDependencyInjection
 {
@@ -65,6 +70,14 @@ public static class NotificationsDependencyInjection
         services.AddScoped<SendEmailUseCase>();
         services.AddScoped<PurgeFinishedEmailsUseCase>();
         services.AddHostedService<EmailDispatcherBackgroundService>();
+
+        // The order e-mails, driven by Orders' integration events (spec item 6).
+        services.AddScoped<ICustomerContacts, CustomerContactsAdapter>();
+        services.AddScoped<QueueOrderEmailUseCase>();
+        services.AddIntegrationEventConsumer<OrderConfirmed, OrderEmailsHandler, NotificationsDbContext>(OrderEmailsHandler.Queue);
+        services.AddIntegrationEventConsumer<OrderShipped, OrderEmailsHandler, NotificationsDbContext>(OrderEmailsHandler.Queue);
+        services.AddIntegrationEventConsumer<OrderCancelled, OrderEmailsHandler, NotificationsDbContext>(OrderEmailsHandler.Queue);
+        services.AddIntegrationEventConsumer<OrderPaymentFailed, OrderEmailsHandler, NotificationsDbContext>(OrderEmailsHandler.Queue);
 
         return services;
     }
