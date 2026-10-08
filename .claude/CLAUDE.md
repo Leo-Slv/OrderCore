@@ -385,6 +385,14 @@ E-mail goes out through the Notifications module
   uses, and by subject when an account gets several).
 - Storefront links in account e-mails come from `Identity:Links`
   (`{token}` placeholder), validated at startup.
+- The e-mails share one responsive, table-based layout (`_layout.html`,
+  inline styles, one `@media` block, no web fonts or remote images). The
+  store's look is configuration, `Notifications:Brand:*` (name, wordmark,
+  accent colors, footer; `#rrggbb` validated at startup) — never hard-code a
+  store's name or colors in a template, use the `{{brandName}}`,
+  `{{brandColor}}`… values. A template `.txt` may carry `Tag:` and
+  `Preheader:` lines after `Subject:`
+  (`Docs/specs/notifications/email-branding.md`).
 
 ## Payment providers (fake and Stripe)
 

@@ -79,6 +79,7 @@ a way that would misbehave.
 | `Notifications__From` | no | required, an address | the sender, e.g. `OrderCore <no-reply@shop.example>`; with Resend, on a domain verified there |
 | `Notifications__Resend__ApiKey` | yes | required unless a real SMTP server is set; `re_…` | e-mail goes out through Resend |
 | `Notifications__Smtp__Host` / `__Port` / `__Username` / `__Password` | password yes | not localhost when Resend isn't set | only to send through an SMTP server instead of Resend |
+| `Notifications__Brand__Name` / `__Wordmark` / `__WordmarkAccent` / `__AccentColor` / `__AccentSoftColor` / `__Footer` | no | `#rrggbb` colors, name and footer not empty | how the e-mails present the store (defaults: neutral OrderCore look); the Marfim deployment sets Marfim's values |
 | `Identity__Links__ResetPassword` / `__ConfirmEmail` | no | required, absolute http(s) with `{token}`, not localhost | the storefront pages the account e-mails link to, e.g. `https://shop.example/redefinir-senha?token={token}` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | no | — | where traces, metrics and logs go |
 | `RateLimits__<Policy>__PermitLimit` / `__Window` | no | — | only to change the defaults (`SignIn`, `SignUp`, `Refresh`, `ForgotPassword`, `ResetPassword`, `ConfirmEmail`, `EmailConfirmation`, `Checkout`, `StripeWebhook`) |
