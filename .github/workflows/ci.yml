@@ -91,7 +91,8 @@ jobs:
       - name: Caddyfile
         working-directory: deploy/aws
         run: |
-          echo 'demo placeholder-hash' > mailpit-auth.caddy
+          hash="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext ci-only)"
+          echo "demo $hash" > mailpit-auth.caddy
           docker run --rm -e PUBLIC_IP_DASHED=203-0-113-10 -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$PWD/mailpit-auth.caddy:/etc/caddy/mailpit-auth.caddy:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
 
       - name: Shell scripts
