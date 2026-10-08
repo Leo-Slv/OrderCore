@@ -1,0 +1,233 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  The OrderCore public demo (Docs/specs/operations/aws-demo-deployment.md): one
+  ARM server running the stack from deploy/aws/compose.yml, its fixed address,
+  a backup bucket and a role GitHub Actions assumes to deploy. Create it after
+  the SSM parameters exist (scripts/create-parameters.sh).
+
+Parameters:
+  GitHubRepository:
+    Type: String
+    Default: Leo-Slv/OrderCore
+    Description: owner/name of the repository whose master deploys here.
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues: [t4g.small, t4g.medium]
+    Description: ARM (Graviton); the image is published for arm64.
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+  CreateGitHubOidcProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      An account has at most one GitHub OIDC provider; say false when it
+      already exists.
+
+Conditions:
+  CreateProvider: !Equals [!Ref CreateGitHubOidcProvider, "true"]
+
+Resources:
+  # Inbound 80 and 443 only: no SSH (deploys go through SSM), no database,
+  # broker or inbox ports.
+  ServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: OrderCore demo, HTTP and HTTPS only
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+
+  ServerAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-backups-after-30-days
+            Status: Enabled
+            Prefix: postgres/
+            ExpirationInDays: 30
+
+  # Non-secret values the server reads next to the secrets the user creates.
+  BackupBucketParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /ordercore/demo/backup-bucket
+      Type: String
+      Value: !Ref BackupBucket
+  PublicIpParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /ordercore/demo/public-ip
+      Type: String
+      Value: !Ref ServerAddress
+
+  ServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ordercore-demo-server
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadDemoParameters
+                Effect: Allow
+                Action: [ssm:GetParametersByPath, ssm:GetParameters, ssm:GetParameter]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ordercore/demo
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ordercore/demo/*
+              - Sid: DecryptThroughSsmOnly
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+              - Sid: Backups
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub ${BackupBucket.Arn}/*
+              - Sid: ListBackups
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt BackupBucket.Arn
+
+  ServerProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref ServerRole]
+
+  Server:
+    Type: AWS::EC2::Instance
+    DependsOn: [BackupBucketParameter, PublicIpParameter]
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref ServerProfile
+      SecurityGroupIds: [!GetAtt ServerSecurityGroup.GroupId]
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - { Key: Name, Value: ordercore-demo }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Bootstrap (idempotent): Docker, compose, swap, then a first deploy of
+          # master. The first deploy needs the SSM parameters; without them it
+          # fails harmlessly and CI (or the runbook's manual run) deploys later.
+          set -euxo pipefail
+          dnf install -y docker tar gzip
+          systemctl enable --now docker
+
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
+            -o /usr/local/lib/docker/cli-plugins/docker-compose
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+          if [ ! -f /swapfile ]; then
+            fallocate -l 1G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+          mkdir -p /opt/ordercore
+          curl -fsSL "https://raw.githubusercontent.com/${GitHubRepository}/master/deploy/aws/scripts/deploy.sh" -o /opt/ordercore/deploy.sh
+          chmod +x /opt/ordercore/deploy.sh
+          sha="$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/${GitHubRepository}/commits/master)"
+          ORDERCORE_REPO="${GitHubRepository}" /opt/ordercore/deploy.sh "$sha" \
+            || echo "First deploy failed: create the SSM parameters, then run /opt/ordercore/deploy.sh <sha> or push to master."
+
+  ServerAddressAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ServerAddress.AllocationId
+      InstanceId: !Ref Server
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  # GitHub's deploy job runs in the "demo" environment; only that can assume it.
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateProvider
+                - !Ref GitHubOidcProvider
+                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:demo
+      Policies:
+        - PolicyName: deploy-through-ssm
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Server}
+              - Effect: Allow
+                Action: [ssm:GetCommandInvocation, ssm:ListCommandInvocations]
+                Resource: "*"
+
+Outputs:
+  PublicIp:
+    Value: !Ref ServerAddress
+  ApiUrl:
+    Value: !Join ["", ["https://api.", !Join ["-", !Split [".", !Ref ServerAddress]], ".sslip.io"]]
+  MailInboxUrl:
+    Value: !Join ["", ["https://mail.", !Join ["-", !Split [".", !Ref ServerAddress]], ".sslip.io"]]
+  InstanceId:
+    Value: !Ref Server
+  BackupBucketName:
+    Value: !Ref BackupBucket
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn

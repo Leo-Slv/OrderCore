@@ -39,6 +39,11 @@ need() {
 }
 opt() { printf '%s' "${P[$1]:-}"; }
 
+# The address: PUBLIC_IP, else the stack's public-ip parameter, else the
+# instance metadata (IMDSv2).
+if [[ -z "${PUBLIC_IP:-}" && -n "${P[public-ip]:-}" ]]; then
+  PUBLIC_IP="${P[public-ip]}"
+fi
 if [[ -n "${PUBLIC_IP:-}" ]]; then
   ip="$PUBLIC_IP"
 else
