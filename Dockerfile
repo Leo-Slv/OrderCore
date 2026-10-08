@@ -1,12 +1,15 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# The SDK stage always runs on the build machine and cross-publishes for the
+# target (`-a`), so a linux/arm64 image needs no emulation to build.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
 WORKDIR /src
 
 COPY Directory.Build.props .
 COPY OrderCore.Api.csproj .
-RUN dotnet restore OrderCore.Api.csproj
+RUN dotnet restore OrderCore.Api.csproj -a $TARGETARCH
 
 COPY . .
-RUN dotnet publish OrderCore.Api.csproj -c Release -o /app --no-restore
+RUN dotnet publish OrderCore.Api.csproj -c Release -o /app --no-restore -a $TARGETARCH
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
