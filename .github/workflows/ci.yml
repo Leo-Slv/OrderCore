@@ -102,7 +102,7 @@ jobs:
 
   # Only a green master publishes: the API image, which also carries the
   # migrate step (`docker run <image> migrate`, Docs/operations/deployment.md).
-  # The deploy itself stays manual until the hosting is chosen.
+  # The demo is deployed from it by deploy-demo below; any other hosting is manual.
   publish-image:
     name: Publish the API image
     needs: build-and-test
@@ -146,3 +146,60 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Deploys the demo (Docs/specs/operations/aws-demo-deployment.md): CI asks
+  # the server, through SSM, to run deploy/aws/scripts/deploy.sh for this
+  # commit - no SSH, no AWS key in GitHub (OIDC). It only runs once the
+  # repository variable DEMO_DEPLOY_ROLE_ARN exists, so CI stays green before
+  # the stack does. Set in the GitHub "demo" environment (Docs/operations/aws-demo.md):
+  # DEMO_DEPLOY_ROLE_ARN, DEMO_INSTANCE_ID, DEMO_API_URL, DEMO_AWS_REGION (optional).
+  deploy-demo:
+    name: Deploy the demo
+    needs: publish-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DEMO_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: demo
+    concurrency:
+      group: demo-deploy
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.DEMO_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.DEMO_AWS_REGION || 'us-east-1' }}
+
+      - name: Deploy through SSM
+        env:
+          INSTANCE_ID: ${{ vars.DEMO_INSTANCE_ID }}
+          SHA: ${{ github.sha }}
+        run: |
+          command_id="$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --timeout-seconds 1800 \
+            --parameters commands="/opt/ordercore/deploy.sh $SHA" \
+            --query Command.CommandId --output text)"
+          echo "SSM command: $command_id"
+          status=Pending
+          for _ in $(seq 1 180); do
+            status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)"
+            case "$status" in Success|Failed|Cancelled|TimedOut|Cancelling) break ;; esac
+            sleep 10
+          done
+          echo "::group::Output of deploy.sh"
+          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+            --query '[StandardOutputContent,StandardErrorContent]' --output text
+          echo "::endgroup::"
+          echo "Status: $status"
+          [ "$status" = Success ]
+
+      - name: Health check through HTTPS
+        env:
+          API_URL: ${{ vars.DEMO_API_URL }}
+        run: curl -fsS --retry 6 --retry-delay 10 --retry-all-errors "$API_URL/health/ready"
