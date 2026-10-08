@@ -459,6 +459,16 @@ When writing new code:
 
 ## Production readiness (deploy, edge, limits)
 
+The public demo runs on one AWS server, described by files in `deploy/aws`
+(compose, Caddyfile, scripts, CloudFormation) and deployed by CI through SSM
+after a green `master` (`Docs/operations/aws-demo.md`,
+`Docs/specs/operations/aws-demo-deployment.md`). No secret is ever in those
+files or the image: they live in SSM Parameter Store (`/ordercore/demo/*`) and
+`deploy/aws/scripts/render-env.sh` turns them into the settings. The OpenAPI
+document and Scalar are Development-only unless `OpenApi:Expose` is true. A
+new setting a deployment needs goes in `deployment.md`'s table **and** in
+`render-env.sh` (and `create-parameters.sh` if it is a secret).
+
 The API ships as a container image built and published by CI; the
 deploy runbook is `Docs/operations/deployment.md`
 (`Docs/specs/operations/production-readiness.md`):
