@@ -153,11 +153,11 @@ app.UseAuthorization();
 // module declares its policies (RateLimits section); over a limit, 429.
 app.UseRateLimiter();
 
-// OpenAPI ("swagger") document + Scalar UI, Development-only (same
+// OpenAPI ("swagger") document + Scalar UI, Development-only by default (same
 // posture as the ASP.NET Core templates' own SwaggerUI-in-Development
 // default): the API surface isn't something to expose unauthenticated in
-// a deployed environment by default.
-if (app.Environment.IsDevelopment())
+// a deployed environment unless OpenApi:Expose says so (the public demo).
+if (OpenApiExposure.IsEnabled(app.Environment, app.Configuration))
 {
     app.MapOpenApi().AllowAnonymous();
     app.MapScalarApiReference().AllowAnonymous();
