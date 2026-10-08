@@ -464,7 +464,9 @@ The public demo runs on one AWS server, described by files in `deploy/aws`
 after a green `master` (`Docs/operations/aws-demo.md`,
 `Docs/specs/operations/aws-demo-deployment.md`). No secret is ever in those
 files or the image: they live in SSM Parameter Store (`/ordercore/demo/*`) and
-`deploy/aws/scripts/render-env.sh` turns them into the settings. The OpenAPI
+`deploy/aws/scripts/render-env.sh` turns them into the settings.
+The same files run on a server outside AWS (`Docs/operations/free-vm-demo.md`): there the parameters are a
+root-only `params.env` (`PARAMS_FILE`) and AWS is only the S3 backup bucket. The OpenAPI
 document and Scalar are Development-only unless `OpenApi:Expose` is true. A
 new setting a deployment needs goes in `deployment.md`'s table **and** in
 `render-env.sh` (and `create-parameters.sh` if it is a secret).

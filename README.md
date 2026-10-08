@@ -517,8 +517,10 @@ A demonstração pública roda numa única máquina ARM na AWS (API, PostgreSQL,
 RabbitMQ, caixa de e-mail Mailpit e Caddy com HTTPS), toda descrita em
 `deploy/aws` e implantada pelo CI a cada `master` verde — passo a passo,
 parâmetros, custo e operação em
-[`Docs/operations/aws-demo.md`](Docs/operations/aws-demo.md). O que vale para
-qualquer hospedagem:
+[`Docs/operations/aws-demo.md`](Docs/operations/aws-demo.md). Para não pagar a
+máquina, a mesma pilha roda numa VM gratuita fora da AWS (a AWS fica só com um
+bucket S3 de backups): [`Docs/operations/free-vm-demo.md`](Docs/operations/free-vm-demo.md).
+O que vale para qualquer hospedagem:
 
 - **CI** (GitHub Actions): build, `dotnet format` e os três projetos de
   teste em todo push; o `master` verde publica a imagem da API em

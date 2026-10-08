@@ -1,5 +1,8 @@
 # The OrderCore demo on AWS
 
+> Don't want to pay for the server? `Docs/operations/free-vm-demo.md` runs the same
+> stack on a free VM outside AWS and uses AWS only for an S3 bucket of backups.
+
 Runbook for `Docs/specs/operations/aws-demo-deployment.md`: the API, its
 database, broker, e-mail inbox and HTTPS proxy on one ARM server, deployed by
 CI. Everything is described by files in `deploy/aws`; nothing here creates
