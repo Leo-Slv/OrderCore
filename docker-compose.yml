@@ -132,8 +132,16 @@ services:
       Payments__Stripe__PublishableKey: ${STRIPE_PUBLISHABLE_KEY:-}
       Payments__Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
       # E-mail goes to Mailpit (Docs/specs/identity/password-recovery.md).
+      Notifications__From: Marfim <no-reply@ordercore.local>
       Notifications__Smtp__Host: mailpit
       Notifications__Smtp__Port: "1025"
+      # The Marfim storefront's look in e-mail (Docs/specs/notifications/email-branding.md).
+      Notifications__Brand__Name: Marfim
+      Notifications__Brand__Wordmark: marfim
+      Notifications__Brand__WordmarkAccent: "."
+      Notifications__Brand__AccentColor: "#3b3fd9"
+      Notifications__Brand__AccentSoftColor: "#ececfd"
+      Notifications__Brand__Footer: Você recebeu este e-mail porque tem uma conta na Marfim. Mensagem automática sobre a sua conta ou pedido. Loja de demonstração.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       # Metrics every 10 s (the SDK default is 60 s), so local dashboards react quickly.
       OTEL_METRIC_EXPORT_INTERVAL: "10000"
