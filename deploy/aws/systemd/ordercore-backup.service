@@ -1,0 +1,8 @@
+[Unit]
+Description=OrderCore demo: back up PostgreSQL to S3
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ordercore/current/scripts/backup.sh daily

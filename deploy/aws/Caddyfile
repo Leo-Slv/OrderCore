@@ -1,0 +1,17 @@
+# HTTPS for the demo (Docs/specs/operations/aws-demo-deployment.md, decision 6):
+# sslip.io names resolve to the address inside them, so Let's Encrypt can
+# issue certificates without owning a domain. PUBLIC_IP_DASHED (e.g.
+# 203-0-113-10) comes from stack.env, written by scripts/render-env.sh.
+
+api.{$PUBLIC_IP_DASHED}.sslip.io {
+	reverse_proxy api:8080
+}
+
+# The demo's e-mail inbox (Mailpit), behind a password: mailpit-auth.caddy
+# holds one line, "<user> <bcrypt hash>", rendered from SSM.
+mail.{$PUBLIC_IP_DASHED}.sslip.io {
+	basic_auth {
+		import /etc/caddy/mailpit-auth.caddy
+	}
+	reverse_proxy mailpit:8025
+}
