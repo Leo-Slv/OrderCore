@@ -97,6 +97,9 @@ jobs:
       - name: Shell scripts
         run: shellcheck deploy/aws/scripts/*.sh
 
+      - name: CloudFormation template
+        run: pipx run cfn-lint deploy/aws/ordercore-demo.yaml
+
   # Only a green master publishes: the API image, which also carries the
   # migrate step (`docker run <image> migrate`, Docs/operations/deployment.md).
   # The deploy itself stays manual until the hosting is chosen.
