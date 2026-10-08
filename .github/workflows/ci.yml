@@ -66,6 +66,37 @@ jobs:
           path: TestResults
           if-no-files-found: ignore
 
+  # The demo's server files (deploy/aws) are not exercised by the .NET tests:
+  # check that the compose file, the Caddyfile and the scripts are valid.
+  deploy-files:
+    name: Check the AWS demo's server files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compose file
+        working-directory: deploy/aws
+        run: |
+          {
+            echo IMAGE_TAG=sha-ci
+            echo PUBLIC_IP_DASHED=203-0-113-10
+            echo POSTGRES_PASSWORD=x
+            echo RABBITMQ_PASSWORD=y
+          } > stack.env
+          touch api.env mailpit-auth.caddy
+          docker compose --env-file stack.env config --quiet
+
+      - name: Caddyfile
+        working-directory: deploy/aws
+        run: |
+          echo 'demo placeholder-hash' > mailpit-auth.caddy
+          docker run --rm -e PUBLIC_IP_DASHED=203-0-113-10 -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$PWD/mailpit-auth.caddy:/etc/caddy/mailpit-auth.caddy:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+
+      - name: Shell scripts
+        run: shellcheck deploy/aws/scripts/*.sh
+
   # Only a green master publishes: the API image, which also carries the
   # migrate step (`docker run <image> migrate`, Docs/operations/deployment.md).
   # The deploy itself stays manual until the hosting is chosen.
