@@ -2,7 +2,9 @@
 
 How a new version goes out, whatever the hosting
 (`Docs/specs/operations/production-readiness.md`, decision 1: not chosen
-yet). The deploy is manual; CI only builds and publishes the image.
+yet). The deploy is manual; CI builds and publishes the image (for `linux/amd64`
+and `linux/arm64`). The public demo is the exception: CI deploys it by itself,
+see `Docs/operations/aws-demo.md` (files in `deploy/aws`).
 
 ## What CI publishes
 
