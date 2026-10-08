@@ -98,7 +98,7 @@ jobs:
         run: shellcheck deploy/aws/scripts/*.sh
 
       - name: CloudFormation template
-        run: pipx run cfn-lint deploy/aws/ordercore-demo.yaml
+        run: pipx run cfn-lint deploy/aws/ordercore-demo.yaml deploy/aws/backup-bucket.yaml
 
   # Only a green master publishes: the API image, which also carries the
   # migrate step (`docker run <image> migrate`, Docs/operations/deployment.md).
@@ -198,6 +198,48 @@ jobs:
           echo "::endgroup::"
           echo "Status: $status"
           [ "$status" = Success ]
+
+      - name: Health check through HTTPS
+        env:
+          API_URL: ${{ vars.DEMO_API_URL }}
+        run: curl -fsS --retry 6 --retry-delay 10 --retry-all-errors "$API_URL/health/ready"
+
+  # The same deploy for a server OUTSIDE AWS (Docs/operations/free-vm-demo.md):
+  # CI runs deploy.sh over SSH. Inert until the "demo" environment has the
+  # variables DEMO_SSH_HOST (and optionally DEMO_SSH_USER, default ubuntu,
+  # DEMO_API_URL) and the secret DEMO_SSH_KEY (a private key whose public half
+  # is in the server's authorized_keys; optionally DEMO_SSH_KNOWN_HOSTS).
+  deploy-demo-ssh:
+    name: Deploy the demo over SSH
+    needs: publish-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DEMO_SSH_HOST != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: demo
+    concurrency:
+      group: demo-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    steps:
+      - name: Deploy
+        env:
+          HOST: ${{ vars.DEMO_SSH_HOST }}
+          SSH_USER: ${{ vars.DEMO_SSH_USER || 'ubuntu' }}
+          SSH_KEY: ${{ secrets.DEMO_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEMO_SSH_KNOWN_HOSTS }}
+          SHA: ${{ github.sha }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$HOST" > ~/.ssh/known_hosts
+          fi
+          ssh -i ~/.ssh/id_deploy -o ServerAliveInterval=30 "$SSH_USER@$HOST" "sudo /opt/ordercore/deploy.sh $SHA"
 
       - name: Health check through HTTPS
         env:
