@@ -74,7 +74,74 @@ public sealed class EmailTemplatesTests
     {
         var email = Templates.Render(EmailTemplateNames.PasswordReset, Values("{{content}}"));
 
-        email.HtmlBody.Should().Contain("<p>{{content}}</p>");
+        email.HtmlBody.Should().Contain(">{{content}}</p>");
+    }
+
+    private static readonly EmailBrandOptions Marfim = new()
+    {
+        Name = "Marfim",
+        Wordmark = "marfim",
+        WordmarkAccent = ".",
+        AccentColor = "#3b3fd9",
+        AccentSoftColor = "#ececfd",
+        Footer = "Mensagem automática sobre a sua conta ou pedido.",
+    };
+
+    [Fact]
+    public void The_default_brand_is_the_neutral_ordercore_look()
+    {
+        var email = Templates.Render(EmailTemplateNames.PasswordReset, Values());
+
+        email.HtmlBody.Should().Contain(">OrderCore<span").And.Contain("#18181b").And.NotContain("#3b3fd9");
+        email.TextBody.Should().EndWith("--\nOrderCore\nEste é um e-mail automático, por favor não responda.\n");
+    }
+
+    [Fact]
+    public void The_configured_brand_shows_in_the_header_buttons_icon_and_footer_of_every_template()
+    {
+        var branded = new EmbeddedEmailTemplates(Marfim);
+
+        foreach (var name in branded.Names)
+        {
+            var email = branded.Render(name, AllValues());
+
+            email.HtmlBody.Should().Contain(">marfim<span style=\"color:#3b3fd9;\">.</span>")
+                .And.Contain("Mensagem automática sobre a sua conta ou pedido.")
+                .And.NotContain("OrderCore");
+            email.TextBody.Should().Contain("Marfim\nMensagem automática").And.NotContain("OrderCore");
+        }
+
+        branded.Render(EmailTemplateNames.EmailConfirmation, Values()).HtmlBody
+            .Should().Contain("background:#3b3fd9;color:#ffffff").And.Contain("background:#ececfd");
+    }
+
+    [Fact]
+    public void The_wordmark_falls_back_to_the_name()
+    {
+        var email = new EmbeddedEmailTemplates(new EmailBrandOptions { Name = "Casa Loja" })
+            .Render(EmailTemplateNames.PasswordReset, Values());
+
+        email.HtmlBody.Should().Contain(">Casa Loja<span");
+    }
+
+    [Fact]
+    public void The_tag_and_the_preheader_come_from_the_template_and_are_encoded()
+    {
+        var email = Templates.Render(EmailTemplateNames.OrderConfirmed, new Dictionary<string, string>(AllValues()) { ["orderNumber"] = "A&B" });
+
+        email.HtmlBody.Should().Contain(">PEDIDO</td>").And.Contain("Pagamento aprovado.");
+        email.Subject.Should().Be("Pedido A&B confirmado");
+        email.HtmlBody.Should().Contain("<title>Pedido A&amp;B confirmado</title>");
+        email.TextBody.Should().NotContain("Tag:").And.NotContain("Preheader:");
+    }
+
+    [Fact]
+    public void The_layout_is_responsive_and_loads_nothing_from_the_internet()
+    {
+        var email = Templates.Render(EmailTemplateNames.EmailConfirmation, Values());
+
+        email.HtmlBody.Should().Contain("name=\"viewport\"").And.Contain("@media only screen and (max-width: 480px)");
+        email.HtmlBody.Should().NotContain("<link").And.NotContain("<script").And.NotContain("src=\"http").And.NotContain("@import");
     }
 
     [Fact]

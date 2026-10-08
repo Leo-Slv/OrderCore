@@ -1,4 +1,6 @@
 Subject: Pedido {{orderNumber}} cancelado
+Tag: PEDIDO
+Preheader: Seu pedido foi cancelado.
 
 {{greeting}}
 

@@ -3,18 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
 <title>{{subject}}</title>
+<style>
+@media only screen and (max-width: 480px) {
+  .outer { padding: 0 !important; }
+  .card { border-radius: 0 !important; }
+  .px { padding-left: 20px !important; padding-right: 20px !important; }
+  .title { font-size: 26px !important; }
+  .btn { display: block !important; text-align: center !important; }
+}
+</style>
 </head>
-<body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:24px 0;">
+<body style="margin:0;padding:0;background:#ecebe6;font-family:Outfit,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#18181b;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{{preheader}}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="outer" style="background:#ecebe6;padding:40px 0;">
 <tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:8px;padding:32px;">
-<tr><td style="font-size:20px;font-weight:bold;padding-bottom:24px;">OrderCore</td></tr>
-<tr><td style="font-size:15px;line-height:1.6;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="card" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;">
+<tr><td class="px" style="padding:28px 40px;border-bottom:1px solid #e6e4de;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+<td style="font-size:22px;font-weight:500;letter-spacing:-0.02em;color:#18181b;">{{brandWordmark}}<span style="color:{{brandColor}};">{{brandWordmarkAccent}}</span></td>
+<td align="right" style="font-family:'Courier New',Courier,monospace;font-size:11px;letter-spacing:0.12em;color:#6b6b72;">{{tag}}</td>
+</tr></table>
+</td></tr>
+<tr><td class="px" style="padding:40px 40px 8px;font-size:16px;line-height:1.6;color:#44444a;">
 {{content}}
 </td></tr>
-<tr><td style="font-size:12px;color:#71717a;padding-top:32px;border-top:1px solid #e4e4e7;">
-Este é um e-mail automático, por favor não responda.
+<tr><td class="px" style="padding:24px 40px;background:#18181b;color:#a1a1a8;font-size:12px;line-height:1.7;">
+<span style="display:block;color:#f4f3ef;font-size:14px;padding-bottom:6px;">{{brandName}}</span>
+{{brandFooter}}
 </td></tr>
 </table>
 </td></tr>

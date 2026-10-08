@@ -1,4 +1,6 @@
 Subject: Confirme seu e-mail
+Tag: CONTA
+Preheader: Falta só um clique para ativar sua conta.
 
 {{greeting}}
 

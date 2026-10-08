@@ -1,4 +1,6 @@
 Subject: Pagamento do pedido {{orderNumber}} não aprovado
+Tag: PAGAMENTO
+Preheader: Não conseguimos aprovar o pagamento do seu pedido.
 
 {{greeting}}
 

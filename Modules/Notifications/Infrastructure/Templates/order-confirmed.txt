@@ -1,4 +1,6 @@
 Subject: Pedido {{orderNumber}} confirmado
+Tag: PEDIDO
+Preheader: Pagamento aprovado. Já estamos separando suas peças.
 
 {{greeting}}
 

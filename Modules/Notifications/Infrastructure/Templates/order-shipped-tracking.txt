@@ -1,4 +1,6 @@
 Subject: Pedido {{orderNumber}} enviado
+Tag: PEDIDO
+Preheader: Sua encomenda saiu para entrega.
 
 {{greeting}}
 

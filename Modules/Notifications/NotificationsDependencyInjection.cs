@@ -36,7 +36,10 @@ public static class NotificationsDependencyInjection
         services.AddScoped<IEmailMessageRepository, EfEmailMessageRepository>();
 
         services.AddSingleton<NotificationsMetrics>();
-        services.AddSingleton<IEmailTemplates, EmbeddedEmailTemplates>();
+        // The store's look in e-mail comes from configuration (Docs/specs/notifications/email-branding.md).
+        services.AddOptions<EmailBrandOptions>().Bind(configuration.GetSection(EmailBrandOptions.SectionName)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<EmailBrandOptions>, EmailBrandOptionsValidator>();
+        services.AddSingleton<IEmailTemplates>(provider => new EmbeddedEmailTemplates(provider.GetRequiredService<IOptions<EmailBrandOptions>>().Value));
 
         // E-mail that could never go out stops the API at startup.
         services.AddOptions<NotificationsOptions>().Bind(configuration.GetSection(NotificationsOptions.SectionName)).ValidateOnStart();
