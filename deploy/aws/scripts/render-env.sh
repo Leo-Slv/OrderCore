@@ -8,7 +8,9 @@
 #   mailpit-auth.caddy  "<user> <bcrypt hash>" for Caddy's basic_auth
 #   /opt/ordercore/backup.env  the backup bucket, for the backup timer
 #
-# Parameters (docs: Docs/operations/aws-demo.md). Required: jwt-signing-key,
+# Parameters come from SSM, or from the file named by PARAMS_FILE (name=value
+# lines) on a server outside AWS. Docs: Docs/operations/aws-demo.md and
+# Docs/operations/free-vm-demo.md. Required: jwt-signing-key,
 # postgres-password, rabbitmq-password, admin-email, admin-password,
 # mailpit-user, mailpit-password-hash, backup-bucket. Optional: storefront-url,
 # stripe-secret-key + stripe-publishable-key + stripe-webhook-secret,
@@ -22,10 +24,19 @@ PREFIX="${SSM_PREFIX:-/ordercore/demo}"
 BACKUP_ENV="${BACKUP_ENV:-/opt/ordercore/backup.env}"
 
 declare -A P=()
-while IFS=$'\t' read -r name value; do
-  P["${name#"$PREFIX"/}"]="$value"
-done < <(aws ssm get-parameters-by-path --path "$PREFIX" --with-decryption --recursive \
-  --query 'Parameters[].[Name,Value]' --output text)
+if [[ -n "${PARAMS_FILE:-}" ]]; then
+  # A server outside AWS keeps the same parameters, as name=value lines, in a
+  # root-only file (Docs/operations/free-vm-demo.md).
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    P["${line%%=*}"]="${line#*=}"
+  done <"$PARAMS_FILE"
+else
+  while IFS=$'\t' read -r name value; do
+    P["${name#"$PREFIX"/}"]="$value"
+  done < <(aws ssm get-parameters-by-path --path "$PREFIX" --with-decryption --recursive \
+    --query 'Parameters[].[Name,Value]' --output text)
+fi
 
 missing=()
 # need <variable> <parameter>: copies a required parameter into a variable (no
@@ -47,8 +58,12 @@ fi
 if [[ -n "${PUBLIC_IP:-}" ]]; then
   ip="$PUBLIC_IP"
 else
-  token="$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')"
-  ip="$(curl -fsS -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/public-ipv4)"
+  if [[ -n "${PARAMS_FILE:-}" ]]; then
+    ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')"
+  else
+    token="$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')"
+    ip="$(curl -fsS -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/public-ipv4)"
+  fi
 fi
 dashed="${ip//./-}"
 api_host="api.${dashed}.sslip.io"

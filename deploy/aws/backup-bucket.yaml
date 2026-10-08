@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Only what a server OUTSIDE AWS needs from AWS (Docs/operations/free-vm-demo.md):
+  the private bucket for the daily PostgreSQL backups and an IAM user that can
+  only read and write that bucket. The server itself runs elsewhere, so there is
+  no EC2, no Elastic IP and nothing billed by the hour: S3 storage of a small
+  database costs cents per month. Create the user's access key by hand
+  (runbook), so no secret passes through CloudFormation.
+
+Resources:
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-backups-after-30-days
+            Status: Enabled
+            Prefix: postgres/
+            ExpirationInDays: 30
+
+  BackupUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: ordercore-demo-backup
+      Policies:
+        - PolicyName: backup-bucket-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub ${BackupBucket.Arn}/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt BackupBucket.Arn
+
+Outputs:
+  BackupBucketName:
+    Value: !Ref BackupBucket
+  BackupUserName:
+    Value: !Ref BackupUser

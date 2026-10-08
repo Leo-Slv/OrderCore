@@ -6,6 +6,11 @@
 #
 #   AWS_REGION=us-east-1 ./create-parameters.sh
 #
+# On a server outside AWS (Docs/operations/free-vm-demo.md) the same parameters
+# go to a root-only file instead of SSM: run it ON the server with
+#   PARAMS_FILE=/opt/ordercore/params.env ./create-parameters.sh
+# (there it also asks for the backup bucket and the server's public address).
+#
 # - Passwords and keys that can be generated are generated, once: an existing
 #   parameter is left alone (use ROTATE=name1,name2 to replace specific ones).
 # - Anything optional is asked for; press Enter to skip it. An environment
@@ -19,11 +24,34 @@ REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 ROTATE=",${ROTATE:-},"
 export AWS_DEFAULT_REGION="$REGION"
 
-exists() { aws ssm get-parameter --name "$PREFIX/$1" >/dev/null 2>&1; }
+PARAMS_FILE="${PARAMS_FILE:-}"
+if [[ -n "$PARAMS_FILE" ]]; then
+  umask 077
+  touch "$PARAMS_FILE"
+  chmod 600 "$PARAMS_FILE"
+fi
+
+exists() {
+  if [[ -n "$PARAMS_FILE" ]]; then
+    grep -q "^$1=" "$PARAMS_FILE"
+  else
+    aws ssm get-parameter --name "$PREFIX/$1" >/dev/null 2>&1
+  fi
+}
 should_write() { ! exists "$1" || [[ "$ROTATE" == *",$1,"* ]]; }
 put() { # put <name> <type> <value>
-  aws ssm put-parameter --name "$PREFIX/$1" --type "$2" --value "$3" --overwrite >/dev/null
-  echo "  wrote $PREFIX/$1"
+  if [[ -n "$PARAMS_FILE" ]]; then
+    local tmp
+    tmp="$(mktemp "$PARAMS_FILE.XXXXXX")"
+    { grep -v "^$1=" "$PARAMS_FILE" || true; } >"$tmp"
+    printf '%s=%s\n' "$1" "$3" >>"$tmp"
+    mv "$tmp" "$PARAMS_FILE"
+    chmod 600 "$PARAMS_FILE"
+    echo "  wrote $1"
+  else
+    aws ssm put-parameter --name "$PREFIX/$1" --type "$2" --value "$3" --overwrite >/dev/null
+    echo "  wrote $PREFIX/$1"
+  fi
 }
 random_hex() { openssl rand -hex "$1"; }
 random_password() { # letters and digits, at least one of each
@@ -75,6 +103,20 @@ if should_write mailpit-password-hash; then
   echo "  >> e-mail inbox password (shown once): $inbox_password"
 fi
 
+if [[ -n "$PARAMS_FILE" ]]; then
+  echo
+  echo "This server:"
+  if should_write backup-bucket; then
+    ask BACKUP_BUCKET "S3 bucket for the backups"
+    if [[ -n "${BACKUP_BUCKET:-}" ]]; then put backup-bucket String "$BACKUP_BUCKET"; fi
+  fi
+  if should_write public-ip; then
+    detected="$(curl -fsS https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]' || true)"
+    PUBLIC_IP="${PUBLIC_IP:-$detected}"
+    if [[ -n "$PUBLIC_IP" ]]; then put public-ip String "$PUBLIC_IP"; fi
+  fi
+fi
+
 echo
 echo "Optional settings:"
 ask STOREFRONT_URL "Storefront URL, e.g. https://marfim.vercel.app (CORS and e-mail links)"
@@ -104,5 +146,10 @@ if [[ -n "${RESEND_API_KEY:-}" ]]; then put resend-api-key SecureString "$RESEND
 if [[ -n "${MAIL_FROM:-}" ]]; then put mail-from String "$MAIL_FROM"; fi
 
 echo
-echo "Done. Parameters under $PREFIX:"
-aws ssm get-parameters-by-path --path "$PREFIX" --query 'Parameters[].Name' --output text | tr '\t' '\n' | sed 's/^/  /'
+if [[ -n "$PARAMS_FILE" ]]; then
+  echo "Done. Parameters in $PARAMS_FILE:"
+  cut -d= -f1 "$PARAMS_FILE" | sed 's/^/  /'
+else
+  echo "Done. Parameters under $PREFIX:"
+  aws ssm get-parameters-by-path --path "$PREFIX" --query 'Parameters[].Name' --output text | tr '\t' '\n' | sed 's/^/  /'
+fi

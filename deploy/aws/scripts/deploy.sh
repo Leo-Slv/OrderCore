@@ -19,6 +19,11 @@ REPO="${ORDERCORE_REPO:-Leo-Slv/OrderCore}"
 RELEASE="$ROOT/releases/$SHA"
 KEEP_RELEASES=3
 
+# A server outside AWS keeps its parameters in a file instead of SSM.
+if [[ -z "${PARAMS_FILE:-}" && -f "$ROOT/params.env" ]]; then
+  export PARAMS_FILE="$ROOT/params.env"
+fi
+
 log() { printf '\n==> %s\n' "$*"; }
 
 log "Fetching deploy/aws at ${SHA}"
