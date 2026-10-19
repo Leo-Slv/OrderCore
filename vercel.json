@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["iad1"],
+  "daemons": {
+    "worker": {
+      "root": ".",
+      "entrypoint": "Dockerfile",
+      "command": ["dotnet", "OrderCore.Api.dll", "--Hosting:Role=Worker"],
+      "instances": { "iad1": 1 },
+      "resources": { "requests": { "memory": "1Gi" } },
+      "terminationGracePeriodSeconds": 30
+    }
+  }
+}

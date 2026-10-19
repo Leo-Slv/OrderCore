@@ -1,0 +1,30 @@
+# The API for Vercel's container Functions (Docs/operations/vercel-hosting.md):
+# the same build as ./Dockerfile, but for linux/amd64 only (what Vercel runs)
+# and with the HTTP side only (Hosting:Role=Web). The background services
+# (outbox relay, consumers, e-mail dispatcher, jobs) run in a Vercel Daemon built from
+# ./Dockerfile with Hosting:Role=Worker (see vercel.json).
+# Keep the build stage in step with ./Dockerfile.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+COPY Directory.Build.props .
+COPY OrderCore.Api.csproj .
+RUN dotnet restore OrderCore.Api.csproj
+
+COPY . .
+RUN dotnet publish OrderCore.Api.csproj -c Release -o /app --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app .
+
+# Vercel sends traffic to $PORT (80 unless the project sets it): set PORT=8080
+# in the project's environment variables so it matches, and so the non-root
+# user below doesn't need a privileged port.
+ENV ASPNETCORE_URLS=http://+:8080
+ENV Hosting__Role=Web
+EXPOSE 8080
+
+USER $APP_UID
+
+ENTRYPOINT ["dotnet", "OrderCore.Api.dll"]
