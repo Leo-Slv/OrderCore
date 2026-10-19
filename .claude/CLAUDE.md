@@ -471,6 +471,12 @@ document and Scalar are Development-only unless `OpenApi:Expose` is true. A
 new setting a deployment needs goes in `deployment.md`'s table **and** in
 `render-env.sh` (and `create-parameters.sh` if it is a secret).
 
+A copy of the API has a role (`Hosting:Role`: `All` by default, `Web` = HTTP only,
+`Worker` = background services only). Register every new hosted service with
+`AddBackgroundWorker<T>(configuration)`, never `AddHostedService`, so a Web copy
+(Vercel's container Function, `Dockerfile.vercel`) stays free of them; the Worker
+runs as a Vercel Daemon (`vercel.json`). See `Docs/operations/vercel-hosting.md`.
+
 The API ships as a container image built and published by CI; the
 deploy runbook is `Docs/operations/deployment.md`
 (`Docs/specs/operations/production-readiness.md`):

@@ -520,6 +520,9 @@ parâmetros, custo e operação em
 [`Docs/operations/aws-demo.md`](Docs/operations/aws-demo.md). Para não pagar a
 máquina, a mesma pilha roda numa VM gratuita fora da AWS (a AWS fica só com um
 bucket S3 de backups): [`Docs/operations/free-vm-demo.md`](Docs/operations/free-vm-demo.md).
+Na Vercel (contêiner em Function para o HTTP e um Daemon para os serviços de segundo
+plano, com PostgreSQL e RabbitMQ externos):
+[`Docs/operations/vercel-hosting.md`](Docs/operations/vercel-hosting.md).
 O que vale para qualquer hospedagem:
 
 - **CI** (GitHub Actions): build, `dotnet format` e os três projetos de
