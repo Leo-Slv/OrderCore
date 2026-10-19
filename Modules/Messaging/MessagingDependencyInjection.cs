@@ -40,7 +40,7 @@ public static class MessagingDependencyInjection
                 options => options.IsComplete,
                 "RabbitMq:Host, RabbitMq:Username and RabbitMq:Password must be set (the password from the environment or user-secrets).")
             .ValidateOnStart();
-        services.AddOptions<MessagingOptions>();
+        services.AddOptions<MessagingOptions>().Configure(options => options.ApplyConfiguration(configuration));
 
         services.IntegrationEventRegistry();
         services.AddSingleton<RabbitMqConnection>();

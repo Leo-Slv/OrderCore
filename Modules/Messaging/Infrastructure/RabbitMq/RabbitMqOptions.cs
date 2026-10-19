@@ -34,9 +34,13 @@ public sealed class RabbitMqOptions
 }
 
 /// <summary>
-/// How messages are retried and relayed. Not bound from configuration: the
+/// How messages are retried and relayed. Not bound from configuration as a whole: the
 /// retry schedule is a decision (five attempts — immediately, then after
-/// 10 s, 1 min, 5 min and 30 min), and only the test host shortens it.
+/// 10 s, 1 min, 5 min and 30 min), and only the test host shortens it. The one
+/// setting a deployment may change is <see cref="RelayPollInterval"/>
+/// (<c>Messaging:RelayPollInterval</c>, e.g. <c>00:00:10</c>): the relay wakes the
+/// database that often, which matters where compute is metered (Vercel's
+/// Daemon CPU quota, a serverless database that sleeps when idle).
 /// </summary>
 public sealed class MessagingOptions
 {
@@ -46,7 +50,30 @@ public sealed class MessagingOptions
 
     public int MaxAttempts => RetryDelays.Count + 1;
 
+    public const string RelayPollIntervalSetting = "Messaging:RelayPollInterval";
+
+    /// <summary>How often the relay looks for unsent outbox rows; an event waits at most this long for the broker.</summary>
     public TimeSpan RelayPollInterval { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>Applies the settings a deployment may change (see the type's remarks); an invalid value stops the API.</summary>
+    public void ApplyConfiguration(IConfiguration configuration)
+    {
+        var value = configuration[RelayPollIntervalSetting];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        if (!TimeSpan.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var interval)
+            || interval < TimeSpan.FromMilliseconds(100)
+            || interval > TimeSpan.FromMinutes(10))
+        {
+            throw new InvalidOperationException(
+                $"{RelayPollIntervalSetting} must be a duration between 00:00:00.100 and 00:10:00 (it is '{value}').");
+        }
+
+        RelayPollInterval = interval;
+    }
 
     public int RelayBatchSize { get; set; } = 100;
 
