@@ -103,8 +103,8 @@ preset **Container**), production branch `master`. Environment variables
 | `Notifications__Brand__Name` / `__Wordmark` / `__WordmarkAccent` / `__AccentColor` / `__AccentSoftColor` / `__Footer` | `Marfim` / `marfim` / `.` / `#3b3fd9` / `#ececfd` / the footer text |
 | `Payments__Stripe__SecretKey`, `__PublishableKey`, `__WebhookSecret` | Stripe **test** keys (step 6) |
 | `OpenApi__Expose` | `true` to show Scalar/OpenAPI publicly |
-| `Messaging__RelayPollInterval` | optional, `00:00:10` | how often the worker looks for unsent events (default `00:00:01`); raise it to save the Daemon CPU quota and database wake-ups, at the cost of up to that much delay per event |
-| `Notifications__Dispatcher__Interval` | optional, `00:00:30` | how often queued e-mails are sent (default `00:00:05`) |
+| `Messaging__RelayPollInterval` | optional, `00:00:10`: how often the worker looks for unsent events (default `00:00:01`); raise it to save the Daemon CPU quota and database wake-ups, at the cost of up to that much delay per event |
+| `Notifications__Dispatcher__Interval` | optional, `00:00:30`: how often queued e-mails are sent (default `00:00:05`) |
 
 Deploy. The build creates the web Function and the `worker` Daemon (it is
 listed under the project's Daemons; check its logs for "Connected to
