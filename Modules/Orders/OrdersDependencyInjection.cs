@@ -14,6 +14,7 @@ using OrderCore.Api.Modules.Orders.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Orders.Presentation.Realtime;
 using OrderCore.Api.Modules.Payments.Contracts.IntegrationEvents;
 using OrderCore.Api.Shared.Application.Abstractions;
+using OrderCore.Api.Shared.Infrastructure.Hosting;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Modules.Orders.Presentation;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
@@ -129,7 +130,7 @@ public static class OrdersDependencyInjection
 
         // Orders left waiting without any payment started stop holding stock (Orders:UnpaidOrderExpiry).
         services.AddOptions<UnpaidOrderExpiryOptions>().Bind(configuration.GetSection(UnpaidOrderExpiryOptions.SectionName));
-        services.AddHostedService<UnpaidOrderExpiryBackgroundService>();
+        services.AddBackgroundWorker<UnpaidOrderExpiryBackgroundService>(configuration);
 
         services.AddScoped<CancelOrderUseCase>();
         services.AddScoped<CancelOrderOnExpiredAuthorizationUseCase>();

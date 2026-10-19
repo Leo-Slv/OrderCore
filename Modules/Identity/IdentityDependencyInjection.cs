@@ -9,6 +9,7 @@ using OrderCore.Api.Modules.Identity.Infrastructure.Hosting;
 using OrderCore.Api.Modules.Identity.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Identity.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Modules.Identity.Infrastructure.Security;
+using OrderCore.Api.Shared.Infrastructure.Hosting;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Identity.Presentation;
 
@@ -47,7 +48,7 @@ public static class IdentityDependencyInjection
         services.AddSingleton<IdentityMetrics>();
 
         services.AddOptions<IdentitySeedOptions>().Bind(configuration.GetSection(IdentitySeedOptions.SectionName));
-        services.AddHostedService<AdminSeedHostedService>();
+        services.AddBackgroundWorker<AdminSeedHostedService>(configuration);
 
         services.AddScoped<IUserAccountRepository, EfUserAccountRepository>();
         services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();

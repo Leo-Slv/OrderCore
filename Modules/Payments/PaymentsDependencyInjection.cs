@@ -13,6 +13,7 @@ using OrderCore.Api.Modules.Payments.Infrastructure.Providers;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Fake;
 using OrderCore.Api.Modules.Payments.Infrastructure.Providers.Stripe;
 using OrderCore.Api.Modules.Payments.Infrastructure.Webhooks;
+using OrderCore.Api.Shared.Infrastructure.Hosting;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Payments.Presentation;
@@ -92,12 +93,12 @@ public static class PaymentsDependencyInjection
         // The payment window: payments left waiting for the buyer are given up on.
         services.AddOptions<PaymentWindowOptions>().Bind(configuration.GetSection(PaymentWindowOptions.SectionName));
         services.AddScoped<ExpirePaymentWindowUseCase>();
-        services.AddHostedService<PaymentWindowBackgroundService>();
+        services.AddBackgroundWorker<PaymentWindowBackgroundService>(configuration);
 
         // Reconciliation: what the provider says, for payments that may have missed a webhook.
         services.AddOptions<ReconciliationOptions>().Bind(configuration.GetSection(ReconciliationOptions.SectionName));
         services.AddScoped<ReconcilePaymentUseCase>();
-        services.AddHostedService<ReconciliationBackgroundService>();
+        services.AddBackgroundWorker<ReconciliationBackgroundService>(configuration);
 
         return services;
     }

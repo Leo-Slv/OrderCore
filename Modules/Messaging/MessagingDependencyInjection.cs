@@ -9,6 +9,7 @@ using OrderCore.Api.Modules.Messaging.Infrastructure.RabbitMq;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Retention;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Relay;
 using OrderCore.Api.Modules.Messaging.Infrastructure.Telemetry;
+using OrderCore.Api.Shared.Infrastructure.Hosting;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Shared.Presentation.Observability;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
@@ -57,7 +58,7 @@ public static class MessagingDependencyInjection
         // past their time are removed daily (Messaging:Retention).
         services.AddOptions<RetentionOptions>().Bind(configuration.GetSection(RetentionOptions.SectionName));
         services.AddSingleton<RetentionCleaner>();
-        services.AddHostedService<RetentionBackgroundService>();
+        services.AddBackgroundWorker<RetentionBackgroundService>(configuration);
 
         services.AddHealthChecks()
             .AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: [HealthEndpoints.Ready], timeout: TimeSpan.FromSeconds(5))
@@ -66,9 +67,9 @@ public static class MessagingDependencyInjection
         // Order matters: hosted services start in registration order, so the
         // broker is reachable and the topology declared before the relay
         // publishes or the consumers subscribe.
-        services.AddHostedService<RabbitMqStartupService>();
-        services.AddHostedService<OutboxRelayBackgroundService>();
-        services.AddHostedService<ConsumerHostBackgroundService>();
+        services.AddBackgroundWorker<RabbitMqStartupService>(configuration);
+        services.AddBackgroundWorker<OutboxRelayBackgroundService>(configuration);
+        services.AddBackgroundWorker<ConsumerHostBackgroundService>(configuration);
 
         return services;
     }

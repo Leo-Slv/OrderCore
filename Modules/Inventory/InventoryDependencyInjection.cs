@@ -10,6 +10,7 @@ using OrderCore.Api.Modules.Inventory.Infrastructure.Jobs;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence;
 using OrderCore.Api.Modules.Inventory.Infrastructure.Persistence.Repositories;
 using OrderCore.Api.Shared.Application.Abstractions;
+using OrderCore.Api.Shared.Infrastructure.Hosting;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
 
@@ -61,7 +62,7 @@ public static class InventoryDependencyInjection
 
         // The safety net: reservations held past their lifetime are expired (Inventory:ReservationExpiry).
         services.AddOptions<ReservationExpiryOptions>().Bind(configuration.GetSection(ReservationExpiryOptions.SectionName));
-        services.AddHostedService<ReservationExpiryBackgroundService>();
+        services.AddBackgroundWorker<ReservationExpiryBackgroundService>(configuration);
         services.AddScoped<AdjustStockUseCase>();
         services.AddScoped<GetStockByProductIdUseCase>();
         services.AddScoped<GetStockAvailabilityUseCase>();

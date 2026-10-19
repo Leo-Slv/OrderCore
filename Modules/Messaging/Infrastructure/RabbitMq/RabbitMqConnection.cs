@@ -60,6 +60,7 @@ public sealed class RabbitMqConnection : IAsyncDisposable
                 ClientProvidedName = "ordercore-api",
                 AutomaticRecoveryEnabled = true,
                 NetworkRecoveryInterval = _messaging.ConnectionRecoveryInterval,
+                Ssl = new SslOption { Enabled = _options.Tls, ServerName = _options.Host },
             };
 
             _connection = await factory.CreateConnectionAsync(cancellationToken);

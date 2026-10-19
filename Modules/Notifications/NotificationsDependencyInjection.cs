@@ -15,6 +15,7 @@ using OrderCore.Api.Modules.Notifications.Infrastructure.Senders.Resend;
 using OrderCore.Api.Modules.Notifications.Infrastructure.Senders.Smtp;
 using OrderCore.Api.Modules.Notifications.Infrastructure.Templates;
 using OrderCore.Api.Modules.Orders.Contracts.IntegrationEvents;
+using OrderCore.Api.Shared.Infrastructure.Hosting;
 using OrderCore.Api.Shared.Infrastructure.Messaging;
 using OrderCore.Api.Shared.Infrastructure.Persistence;
 
@@ -72,7 +73,7 @@ public static class NotificationsDependencyInjection
         services.AddScoped<QueueEmailUseCase>();
         services.AddScoped<SendEmailUseCase>();
         services.AddScoped<PurgeFinishedEmailsUseCase>();
-        services.AddHostedService<EmailDispatcherBackgroundService>();
+        services.AddBackgroundWorker<EmailDispatcherBackgroundService>(configuration);
 
         // The order e-mails, driven by Orders' integration events (spec item 6).
         services.AddScoped<ICustomerContacts, CustomerContactsAdapter>();

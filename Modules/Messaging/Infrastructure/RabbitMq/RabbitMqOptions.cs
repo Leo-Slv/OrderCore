@@ -15,6 +15,13 @@ public sealed class RabbitMqOptions
 
     public string VirtualHost { get; set; } = "/";
 
+    /// <summary>
+    /// Connect over TLS (AMQPS, usually port 5671), verifying the broker's certificate for
+    /// <see cref="Host"/>. Required for a managed broker reached over the internet
+    /// (Docs/operations/vercel-hosting.md); off for the one in docker compose.
+    /// </summary>
+    public bool Tls { get; set; }
+
     public string Username { get; set; } = string.Empty;
 
     public string Password { get; set; } = string.Empty;
