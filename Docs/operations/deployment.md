@@ -85,6 +85,7 @@ a way that would misbehave.
 | `Identity__Links__ResetPassword` / `__ConfirmEmail` | no | required, absolute http(s) with `{token}`, not localhost | the storefront pages the account e-mails link to, e.g. `https://shop.example/redefinir-senha?token={token}` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | no | — | where traces, metrics and logs go |
 | `RateLimits__<Policy>__PermitLimit` / `__Window` | no | — | only to change the defaults (`SignIn`, `SignUp`, `Refresh`, `ForgotPassword`, `ResetPassword`, `ConfirmEmail`, `EmailConfirmation`, `Checkout`, `StripeWebhook`) |
+| `Messaging__RelayPollInterval` | no | `00:00:00.100`–`00:10:00` | how often the outbox relay polls (default `00:00:01`); an event waits at most this long before reaching the broker. Raise it where compute is metered (Vercel Daemon quota, a database that sleeps when idle) |
 | `Identity__Lockout__MaxFailedAttempts` / `__Duration` | no | — | only to change 5 / 15 minutes |
 
 ## Observability in production
